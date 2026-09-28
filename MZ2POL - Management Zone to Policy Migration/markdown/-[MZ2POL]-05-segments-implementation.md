@@ -1,6 +1,6 @@
 # MZ2POL-05: Migrating Management Zone Filtering to Segments
 
-> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 6 of 10 | **Created:** December 2025 | **Last Updated:** 09/24/2026
+> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 6 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -163,7 +163,7 @@ Dynatrace documents a set of fully supported upgrade scenarios, organized by **h
 | 4.3 | **Systematic host-group naming** (`<CMDBID>-<app>-<component>-<stage>`) | Parse the name with DPL in a variable definition | No |
 | 4.4 | **Kubernetes** cluster or namespace | Filter on the K8s enrichment fields | No — enriched automatically |
 | 4.5 | **Host tags / properties** set at OneAgent install | Filter on the tag, allowing for the `[Environment]` prefix | No |
-| 4.6 | Anything else (rules that do not fit above) | Introduce a **`Segment` tag** whose value is the MZ name | Yes — this is the general fallback |
+| 4.6 | Anything else (rules that do not fit above) | Introduce a **`Segment` tag** whose value is the MZ name | Yes — the guide gives this for zones built on names or metadata without auto-tags; this notebook uses it as the general fallback |
 | 4.7 | **Extension** data | Filter on the extension enrichment attributes | No |
 | 4.8 | **Cloud-native / application-only injection** | Set `DT_TAGS` and `OTEL_RESOURCE_ATTRIBUTES` on the process | Yes — environment variables |
 
@@ -265,14 +265,14 @@ smartscapeNodes "HOST"
 
 **The MZ pattern:** any zone whose definition does not reduce to one of the patterns above — hand-maintained entity lists, complex nested rules, SELECTOR-based rules.
 
-**The move, and the guide's general recommendation:** introduce a **new tag with the key `Segment`, whose value is the name of the Management Zone**. Apply it to the entities the zone covered, then define a segment that filters on that tag.
+**The move:** introduce a **new tag with a key such as `Segment`, whose value is the name of the Management Zone**. Apply it to the entities the zone covered, then define a segment that filters on that tag. The guide gives this move for its non-auto-tagging scenario — zones defined by process name, host name, service name, or metadata; using it for every zone that fits no other scenario is this notebook's extension of it.
 
 This is deliberately low-cleverness. It reproduces the zone's membership without trying to re-derive its logic, which is exactly what you want for zones whose rules have accumulated exceptions nobody can explain. The tag becomes the explicit, greppable statement of membership that the MZ rule was only implying.
 
 Two consequences worth accepting up front:
 
 - Membership is now **maintained where the tag is set**, not by a rule that re-evaluates. Entities added later need the tag.
-- It is a good migration destination and a mediocre long-term model. Where a real dimension exists (host group, namespace, environment), prefer 4.2–4.5 and treat 4.6 as the fallback it is.
+- In community practice it works well as a migration destination and ages less well as a long-term model, because membership is hand-maintained rather than derived from the estate. Where a real dimension exists (host group, namespace, environment), prefer 4.2–4.5 and treat 4.6 as the fallback it is.
 
 ### 4.7 Extensions
 
@@ -288,7 +288,7 @@ Two consequences worth accepting up front:
 
 > **They are not interchangeable.** `DT_TAGS` and `OTEL_RESOURCE_ATTRIBUTES` look similar but differ semantically — most visibly, `OTEL_RESOURCE_ATTRIBUTES` uses a **colon** where `DT_TAGS` uses a **space** as separator. Setting one and assuming the other is covered is a reliable way to produce a segment that half-works.
 
-> <sub>**Sources:** [Best practice examples: from Management Zones to Segments (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/foundations/upgrade-guide-segments), [Segment data by Kubernetes clusters (DT docs)](https://docs.dynatrace.com/docs/manage/segments/use-cases/segments-use-cases-kubernetes-clusters). **Derived:** the §4.6 "good migration destination, mediocre long-term model" judgment combines the guide's fallback recommendation with the dimension-based scenarios it prefers elsewhere.</sub>
+> <sub>**Sources:** [Best practice examples: from Management Zones to Segments (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/foundations/upgrade-guide-segments) — for non-auto-tagging zones, a new tag *"with the value set to the name of the management zone"*, [Segment data by Kubernetes clusters (DT docs)](https://docs.dynatrace.com/docs/manage/segments/use-cases/segments-use-cases-kubernetes-clusters).</sub>
 
 ### 4.9 Shortcut: reuse `dt.security_context` as a segment dimension
 

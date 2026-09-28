@@ -1,6 +1,6 @@
 # WEBRUM-07: Session Replay
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 7 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 7 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -197,24 +197,27 @@ The queries above filter for `hasSessionReplay == true`. A `false` — or a null
 
 | Cause | What actually happened | Where to check |
 |-------|------------------------|----------------|
-| **Outside the sampling rate** | By far the commonest cause. At a 2% sample rate, 98% of sessions correctly have no replay | Session Replay sampling rate for the application (§3) |
+| **Outside the sampling rate** | In community practice, the most frequent cause. The effective recording rate is the RUM cost and traffic control **multiplied by** the Session Replay one — at 50% × 20%, 90% of sessions correctly have no replay | Both cost and traffic control settings for the application (§3) |
 | **Replay disabled for the application** | Session Replay is configured per application, not globally — a tenant with replay enabled can still have applications without it | Settings → Session Replay, per application |
-| **Unsupported browser** | Replay depends on DOM-mutation capture the browser must support; older and niche browsers are excluded | `browserFamily` / `browserMajorVersion` on the session |
-| **A page blocked capture** | Page- or element-level privacy rules (`data-dtrum-block`, CSS selector block rules) suppress recording — sometimes on exactly the pages you care about (§2) | Session Replay data-privacy configuration |
-| **Quota exhausted** | Replay storage counts against a quota; once consumed, subsequent eligible sessions are not recorded until the period resets | Session Replay quota / consumption |
+| **Unsupported browser** | Session Replay publishes its own list of browser versions supported for recording, separate from RUM's; sessions from browsers outside it are not recorded | `browserFamily` / `browserMajorVersion` on the session |
+| **A page blocked capture** | URL exclusion rules stop recording on matching pages, and page- or element-level privacy rules (`data-dtrum-block`, CSS selector block rules) suppress capture — sometimes on exactly the pages you care about (§2) | Session Replay URL exclusion and data-privacy configuration |
+| **Quota exhausted** | In community practice, where a consumption limit caps replay volume, eligible sessions stop being recorded once it is reached — confirm how your licensing applies before assuming this | Session Replay consumption |
 
 **Forthcoming — SaaS 1.344 (released 07/27/2026, staged tenant rollout from 07/29/2026): Session Replay reports the reason itself.** Users & Sessions gains specific information about why session recordings become unavailable, which collapses the elimination exercise below into a single read in the UI. Verify 1.344 has reached your tenant before relying on it; until then — and for any tenant still on an earlier sprint — the manual order below is the working path.
 
-**Eliminate in this order.** The sequence is deliberate: cheapest and most likely first, so you rarely reach the bottom.
+**Eliminate in this order.** In community practice the sequence that pays off is cheapest and most likely first, so you rarely reach the bottom.
 
-1. **Sampling rate.** Compute actual replay coverage (the third query in this section) and compare it against the configured rate. If coverage ≈ the configured rate, **nothing is broken** — you are looking at sampling, and the fix is to raise the rate, not to debug.
+1. **Sampling rate.** Compute actual replay coverage (the third query in this section) and compare it against the effective rate — RUM cost and traffic control × Session Replay cost and traffic control. If coverage ≈ that effective rate, **nothing is broken** — you are looking at sampling, and the fix is to raise the rate, not to debug.
 2. **Application enablement.** If coverage is ~0% for one application while others are healthy, replay is off for that application. The coverage query already groups `by:{application}`, so this shows up without extra work.
 3. **Browser.** Compare `browserFamily` and `browserMajorVersion` between sessions that do and do not have replay. A cause concentrated in one browser family is a support gap, not a configuration error — and not something you can configure away.
-4. **Quota.** Check replay consumption last. A quota that ran out mid-period has a distinctive signature: replay present in earlier sessions, absent in later ones, configuration unchanged throughout.
+4. **Quota.** Check replay consumption last, and only after confirming a limit applies to you. A quota that ran out mid-period has a distinctive signature: replay present in earlier sessions, absent in later ones, configuration unchanged throughout.
 
 That order also sorts by what you can act on — 1 and 2 are configuration you control, 3 is a platform constraint, 4 is a budget decision.
 
-> <sub>**Sources:** [Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — Session Replay unavailability details in Users & Sessions; [Session Replay (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay). **Derived:** the four-step elimination order combines the documented ineligibility causes with their relative likelihood and remediability — verify the coverage figures against your own configured sampling rate.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — Session Replay unavailability details in Users & Sessions</sub>
+> - <sub>[Configure Session Replay Classic for web applications (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/configure-session-replay-web) — *"Actual percentage of sessions recorded with SR = cost and traffic control for RUM × cost and traffic control for Session Replay"*; *"If Session Replay is enabled and no URL exclusion rules are defined, all pages are recorded with Session Replay by default."*</sub>
+> - <sub>[Technical restrictions for Session Replay Classic for web applications (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-restrictions-web)</sub>
 
 <a id="correlating-data"></a>
 
@@ -340,6 +343,7 @@ In this notebook, we covered:
 - [Session Replay (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay)
 - [Session Replay with strong privacy requirements (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay-latest/configure-session-replay-web/session-replay-strong-privacy-req-web)
 - [Configure Session Replay for web applications (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/configure-session-replay-web)
+- [Technical restrictions for Session Replay Classic for web applications (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-restrictions-web)
 
 ---
 

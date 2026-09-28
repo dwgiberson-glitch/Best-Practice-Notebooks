@@ -76,7 +76,7 @@ All four calls below are v1 and need the `ServiceProviderAPI` permission. MCH-01
 | `GET /api/v1.0/onpremise/cluster/configuration/status` | *"the current configuration status for cluster nodes"* | `state`, with per-step states for `DOMAIN_UPDATE`, `OPERATION_STATE`, `AGENT_TRAFFIC`, `WEB_UI` |
 | `GET /api/v1.0/cluster/maintenance` | *"details about the current cluster maintenance state"* | `reason` — the only documented value is `IP_MIGRATION` |
 
-Three uses for these calls:
+Three uses for these calls — this series' checks built on documented fields, not documented alert rules:
 
 1. **Node down.** Alert when any node's `operationState` is not `RUNNING`, *and* when the number of nodes returned is lower than your cluster size.
 2. **Version drift.** Every node should report the same `buildVersion`. A node left on an older build after an update is a node to look at.
@@ -86,7 +86,6 @@ Three uses for these calls:
 > - <sub>[Cluster Management Console (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/basics/cluster-management-console), [Remove a cluster node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/remove-a-cluster-node)</sub>
 > - <sub>[Get cluster information about known cluster nodes (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-info-known-servers), [Get cluster nodes configuration (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-nodes-configuration)</sub>
 > - <sub>[Get cluster nodes configuration current status (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-nodes-configuration-current-status), [Get cluster maintenance (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-maintenance)</sub>
-> - <sub>**Derived:** the node-count and `buildVersion` checks are this series' use of documented fields, not documented alert rules</sub>
 
 <a id="process-checks"></a>
 ## 3. Process Checks on a Node
@@ -116,11 +115,11 @@ A healthy node ends `status` with *"All services are OK"*, and ends `check` with
 | `dynatrace-security-gateway.service` | Dynatrace Active Gate |
 | `dynatrace-nginx.service` | Dynatrace NGINX |
 
-The `check` example also lists the local port each process should hold: Nodekeeper `8018`, Cassandra `9042`, Elasticsearch `9200`/`9300`, Server `8021`, ActiveGate `8443`, NGINX `8022`. A process that is running but not listening points to a port conflict or a firewall rule, not a crash.
+The `check` example also lists the local port each process should hold: Nodekeeper `8018`, Cassandra `9042`, Elasticsearch `9200`/`9300`, Server `8021`, ActiveGate `8443`, NGINX `8022`. In community practice, a process that is running but not listening points to a port conflict or a firewall rule rather than a crash — confirm in the node's logs.
 
 > **Read the example output with care.** The node-script page was last updated in May 2022. Its sample output shows log paths under `/var/opt/managed/`, while current installs use `/var/opt/dynatrace-managed/`. Trust the commands, not the sample paths.
 
-> <sub>**Sources:** [Start/stop/restart a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-node), [Customize Managed Cluster installation (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/customize-managed-cluster-install) — default data root `/var/opt/dynatrace-managed`. **Derived:** "running but not listening" combines the `check` port list with the process list it reports alongside.</sub>
+> <sub>**Sources:** [Start/stop/restart a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-node), [Customize Managed Cluster installation (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/customize-managed-cluster-install) — default data root `/var/opt/dynatrace-managed`.</sub>
 
 <a id="start-order"></a>
 ## 4. Service Dependencies and Start Order
@@ -201,14 +200,14 @@ The reason is the copy count from MCH-01: *"Dynatrace Managed continues to opera
 
 ### 5.3 Draining a node without stopping it
 
-To stop a node processing monitoring data without removing it, use the first step of the removal flow: *"Select Disable OneAgent traffic to stop monitoring data processing on the node. If you want to temporarily exclude the node from a cluster, stop here and enable the node later."* While agent traffic is off, the node's `agent` flag in `GET /onpremise/cluster/configuration` should read `false`. The same flags can be set through `POST /api/v1.0/onpremise/cluster/configuration`, which *"configures cluster nodes responsibilities"*.
+To stop a node processing monitoring data without removing it, use the first step of the removal flow: *"Select Disable OneAgent traffic to stop monitoring data processing on the node. If you want to temporarily exclude the node from a cluster, stop here and enable the node later."* Disabling OneAgent traffic sets the node to *"idle mode"*, and the docs give two ways to do it: *"To configure OneAgent or web UI traffic on a node, use the CMC or Cluster REST API."* The API route is `POST /api/v1.0/onpremise/cluster/configuration`, which *"configures cluster nodes responsibilities"* through each node's `agent` and `webUI` flags. While agent traffic is off, the node's `agent` flag in `GET /onpremise/cluster/configuration` should therefore read `false`.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Start/stop/restart a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-node), [Start/stop/restart a cluster (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-cluster)</sub>
 > - <sub>[Apply OS patches to a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/apply-operating-system-patches-to-a-node), [Update a cluster (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/update-cluster), [Remove a cluster node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/remove-a-cluster-node)</sub>
 > - <sub>[Reconfigure a node's IP address (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/ip-reconfiguration), [Add a cluster node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/add-cluster-node), [Single-cluster high availability (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/high-availability/single-cluster-high-availability)</sub>
-> - <sub>[Post cluster nodes responsibilities (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/post-cluster-nodes-responsibilities)</sub>
-> - <sub>**Derived:** that disabling traffic shows as `agent: false` is inferred from the configuration fields; the docs don't state it</sub>
+> - <sub>[Post cluster nodes responsibilities (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/post-cluster-nodes-responsibilities), [Configure Cluster capabilities (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-capabilities)</sub>
+> - <sub>**Derived:** `agent: false` while traffic is off combines the capabilities page's two routes to one setting (CMC *Disable OneAgent traffic*, or the `agent` flag on `POST`) with the same `agent` field in the `GET` response</sub>
 
 <a id="node-events"></a>
 ## 6. Node and Process Events — What Emails You
@@ -243,7 +242,7 @@ The event-notifications page gives each event an **Email notification** column (
 
 The sizing rules come first: *"CPU and RAM must be exclusively available for Dynatrace."* *"Hosts must have at least 32 GB RAM."* With Log Monitoring, *"All Managed Cluster nodes must have at least 64 GB total RAM."* A node sharing its host with other workloads breaks the first rule before any event fires.
 
-The Server reports heap pressure through four events, from mildest to worst: a *soft* cleanup, a *hard* cleanup, entering *emergency mode*, and ending it (*"Heap memory: Server %d ended memory emergency mode."*). None of them email you (§6). What emergency mode actually does to processing is not documented. Treat any hard cleanup or emergency-mode event as a capacity signal, and take it to MCH-06.
+The Server reports heap pressure through four events, from mildest to worst: a *soft* cleanup, a *hard* cleanup, entering *emergency mode*, and ending it (*"Heap memory: Server %d ended memory emergency mode."*). None of them email you (§6). What emergency mode actually does to processing is not documented. In community practice, any hard cleanup or emergency-mode event is treated as a capacity signal — take it to MCH-06.
 
 To compare heap across nodes, use `GET /api/v1.0/onpremise/cluster`: each node's `jvmInfo` carries its JVM settings, and the docs' example includes `maxHeap`. Memory also caps throughput. *"Dynatrace Managed environments can process a limited number of service calls per minute (depending on the node CPU amount and memory availability)"*. Past that limit, adaptive load reduction starts dropping traces (MCH-01 §7).
 
@@ -251,12 +250,12 @@ To compare heap across nodes, use `GET /api/v1.0/onpremise/cluster`: each node's
 
 Multi-node clusters have two clock rules. All nodes must *"Synchronize with NTP"* and *"Be in the same time zone"*. Drift is reported as *"Server time of server %d is out of sync. Time difference %d milliseconds. Please enable NTP on all cluster nodes."* That event is not emailed either. Put NTP monitoring on the hosts themselves rather than relying on the cluster to report it.
 
-> <sub>**Sources:** [Hardware requirements (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/managed-hardware-requirements), [Configure Cluster event notifications (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-event-notifications), [Get cluster information about known cluster nodes (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-info-known-servers), [Adaptive traffic management for Managed (DT docs)](https://docs.dynatrace.com/managed/ingest-from/dynatrace-oneagent/adaptive-traffic-management/adaptive-traffic-management-managed). **Derived:** "treat hard cleanup / emergency mode as a capacity signal" is this series' reading of the event severities; the docs don't prescribe a response.</sub>
+> <sub>**Sources:** [Hardware requirements (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/managed-hardware-requirements), [Configure Cluster event notifications (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-event-notifications), [Get cluster information about known cluster nodes (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-info-known-servers), [Adaptive traffic management for Managed (DT docs)](https://docs.dynatrace.com/managed/ingest-from/dynatrace-oneagent/adaptive-traffic-management/adaptive-traffic-management-managed).</sub>
 
 <a id="inter-node-network"></a>
 ## 8. Inter-Node Network
 
-A node that can't reach its peers looks unhealthy from every angle: Cassandra loses connections, Elasticsearch loses shards, and the node may drop out of the cluster. That happens even though every process on it is running. The docs are direct about it: *"For a typical Managed deployment, all ports should be open between cluster nodes."*
+In community practice, a node that can't reach its peers looks unhealthy from every angle — Cassandra connection-lost events (§6), missing Elasticsearch shards, possibly the node dropping out of the cluster — even though every process on it is running. The docs are direct about the requirement: *"For a typical Managed deployment, all ports should be open between cluster nodes."*
 
 | Port | Used by |
 |------|---------|
@@ -274,12 +273,12 @@ A node that can't reach its peers looks unhealthy from every angle: Cassandra lo
 
 Two related rules: all nodes must *"Have a network latency between nodes of 10 ms or less"*, and the node firewall itself is a Dynatrace service (`dynatrace-firewall.service`, started first in §4). If `dynatrace.sh check` reports that its rules aren't active, fix that before anything else.
 
-> <sub>**Sources:** [Cluster node ports (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/cluster-node-ports), [Hardware requirements (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/managed-hardware-requirements), [Start/stop/restart a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-node). **Derived:** the "looks unhealthy from every angle" symptom chain combines the port list with the Cassandra and Elasticsearch connection events in §6.</sub>
+> <sub>**Sources:** [Cluster node ports (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/cluster-node-ports), [Hardware requirements (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/installation/managed-hardware-requirements), [Start/stop/restart a node (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/start-stop-restart-node).</sub>
 
 <a id="triage"></a>
 ## 9. When a Node Looks Unhealthy
 
-The docs have no Managed troubleshooting page, so the order below is this series' own. It checks the cheapest and most common causes first:
+No Managed Cluster troubleshooting page turned up in a 09/28/2026 read of the `/managed/managed-cluster/` tree, so the order below is this series' own. It checks the cheapest and most common causes first:
 
 1. **Is the host up?** A *"Host is down."* event, or no response at all, is a host or network problem, not a Dynatrace one.
 2. **Which service is down?** `dynatrace.sh status` names the unit. Look up that component's layer: Cassandra in MCH-03, Elasticsearch in MCH-04.
@@ -293,24 +292,24 @@ The docs have no Managed troubleshooting page, so the order below is this series
 
 **Log locations the docs actually give:** `/var/opt/dynatrace-managed/log/elasticsearch/*` and `/var/opt/dynatrace-managed/log/cassandra/*`, plus `/var/log/dynatrace/install.log` for installer operations. The docs name further logs (`nodekeeper.0.0.log`, `server.log`) without their directories. The diagnostic archive collects them for you.
 
-> <sub>**Sources:** [Diagnostic archives for Managed installations (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/diagnostic-archives-for-managed-installations), [Multi-data center failover (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/high-availability/failover), [Reconfigure a node's IP address (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/ip-reconfiguration), [Configure Cluster event notifications (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-event-notifications). **Derived:** the triage order is this series' sequencing of documented checks.</sub>
+> <sub>**Sources:** [Diagnostic archives for Managed installations (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/diagnostic-archives-for-managed-installations), [Multi-data center failover (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/high-availability/failover), [Reconfigure a node's IP address (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/operation/ip-reconfiguration), [Configure Cluster event notifications (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-event-notifications).</sub>
 
 <a id="doc-gaps"></a>
 ## 10. What the Documentation Does Not Say
 
-Checked against the Managed documentation on 09/28/2026 and **not found**:
+Searched for in the Managed documentation on 09/28/2026 and **not found**:
 
 | Gap | Working assumption in this notebook |
 |-----|-------------------------------------|
 | The possible values of `operationState` | Treat anything other than `RUNNING` as unhealthy |
 | A procedure for restarting **one** node in a 3+ node cluster | Follow the OS-patch guidance: one node at a time, and confirm the other nodes are healthy first |
 | What "memory emergency mode" does to processing | Treat it as a capacity alarm (MCH-06) |
-| A Managed troubleshooting page, or log paths for the Server and Nodekeeper | Use the diagnostic archive |
-| A dedicated "disable node" API | Use the `agent` / `webUI` flags on the configuration endpoint (§5.3) |
+| A Managed troubleshooting page, or the directories of `server.log` and the Nodekeeper logs (the one Server-side path found is `<datastore_dir>/log/server/audit.rest.proxy.log`, on the Mission Control data-exchange page) | Use the diagnostic archive |
+| A dedicated "disable node" API | The documented route is the `agent` / `webUI` flags on the configuration endpoint (§5.3) |
 
 Two documentation quirks to be aware of. The `get-cluster-nodes-configuration-current-status` page's own `curl` example calls `/configuration`, while its Request URL is `/configuration/status` (use the latter). The node-script page's sample output predates the current install paths (§3).
 
-> <sub>**Sources:** [Get cluster nodes configuration current status (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-nodes-configuration-current-status), [Get cluster information about known cluster nodes (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-info-known-servers). **Derived:** the absence claims come from a read of the `/managed/managed-cluster/` and `/managed/dynatrace-api/cluster-api/cluster-api-v1/` page trees on 09/28/2026.</sub>
+> <sub>**Sources:** [Get cluster nodes configuration current status (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-nodes-configuration-current-status), [Get cluster information about known cluster nodes (DT docs)](https://docs.dynatrace.com/managed/dynatrace-api/cluster-api/cluster-api-v1/cluster-v1/get-cluster-info-known-servers), [Mission Control data exchange (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/basics/mission-control-data-exchange), [Configure Cluster capabilities (DT docs)](https://docs.dynatrace.com/managed/managed-cluster/configuration/configure-cluster-capabilities). **Observed 09/28/2026:** none of the five gaps is filled anywhere in the 140 pages under `/managed/managed-cluster/` and `/managed/dynatrace-api/cluster-api/` (crawled and searched for `operationState` values, restart procedures, `emergency`, log paths and troubleshooting pages).</sub>
 
 <a id="recommendation"></a>
 ## 11. Recommended Approach

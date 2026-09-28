@@ -61,7 +61,9 @@ Dynatrace captures real user experience through a **JavaScript agent** that is a
 | **Manual injection** | Developer adds the RUM script tag manually | CDN-hosted content, SPAs with no server-side agent |
 | **Agentless RUM** | JavaScript tag added without full OneAgent | Environments where OneAgent cannot be deployed |
 
-> **Note:** Automatic injection is the recommended approach as it requires zero code changes and keeps the JavaScript agent version in sync with OneAgent.
+> **Note:** Where the web server runs OneAgent, automatic injection is the default path — OneAgent in full-stack monitoring mode *"by default automatically injects the RUM JavaScript"* into the pages it serves, with no code change. In community practice it is the preferred method for that reason; manual injection and agentless RUM are for serving tiers where OneAgent cannot run.
+>
+> <sub>**Sources:** [Configure automatic injection in RUM Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/initial-setup/rum-injection).</sub>
 
 <a id="rum-vs-synthetic"></a>
 
@@ -139,11 +141,11 @@ Two 1.344 changes connect this RUM data to the backend side of the platform:
 
 The Semantic Dictionary exposes the linkage itself as **`frontend.link`** — *"a frontend-backend tracing link that connects a span to a frontend user event and/or user session"*, explicitly distinct from a span link, which references other spans. Two cautions before building on it: the field is `frontend.link` (dotted), and its declared stability is **`experimental`** — not yet a foundation for a production dashboard or alert.
 
-**Until 1.344 reaches your tenant**, the working correlation path is unchanged — and it keeps working afterwards: the `x-dtc` header the RUM agent propagates on XHR/fetch requests links a user action to the resulting server-side trace (WEBRUM-02 covers that instrumentation), supplemented by session-level joins on the application and session identifiers.
+**Until 1.344 reaches your tenant**, the working correlation path is unchanged — and it keeps working afterwards. For **same-origin** web requests, linking a user action to its distributed trace works out of the box: the browser sends the RUM cookies, which OneAgent on a supported first tier evaluates. **Cross-origin** XHR actions are not linked automatically; the fix is either cookies on cross-origin calls or the optional `x-dtc` header, which the RUM JavaScript adds only once you enable it, because the receiving endpoints must first be configured to accept it (WEBRUM-02 covers the SPA instrumentation side). Session-level joins on the application and session identifiers supplement both.
 
 > **The topology side belongs to the tracing series.** SPANS-04 is the better home for the service-dependency-graph and trace-exploration mechanics; this note exists so a reader arriving from RUM knows the linkage exists and what it is called.
 
-> <sub>**Sources:** [Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344). **Derived:** the `frontend.link` name, type and `experimental` stability are read from `dt.semantic_dictionary.fields` on a live tenant (07/30/2026); the "until 1.344 lands" fallback combines that with the `x-dtc` propagation documented in WEBRUM-02.</sub>
+> <sub>**Sources:** [Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344), [Link cross-origin XHR user actions and their distributed traces (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/initial-setup/link-cross-origin-xhrs) — *"Its addition needs to be explicitly enabled because the endpoints that handle the cross-origin requests need to be configured to accept the header."* **Dictionary:** `frontend.link` (`experimental`, type `record`), read 09/28/2026.</sub>
 
 ### Session Types
 

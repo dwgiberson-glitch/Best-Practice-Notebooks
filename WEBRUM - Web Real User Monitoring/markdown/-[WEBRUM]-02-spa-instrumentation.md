@@ -61,9 +61,9 @@ Dynatrace handles these by:
 
 For SPAs, choose the injection method that matches your deployment architecture:
 
-### Automatic Injection (Recommended)
+### Automatic Injection (the default where OneAgent runs)
 
-If your SPA is served by a web server with OneAgent installed, injection happens automatically. OneAgent modifies the HTML response to include the RUM JavaScript snippet in the `<head>` section.
+If your SPA is served by a web server with OneAgent installed in full-stack mode, injection happens automatically. OneAgent modifies the HTML response to include the RUM JavaScript snippet in the `<head>` section.
 
 ```html
 <!-- Automatically injected by OneAgent -->
@@ -189,7 +189,7 @@ Vue applications use Vue Router with `history.pushState` or hash mode:
 
 **Configuration tips:**
 - For Nuxt.js, inject the RUM tag in `nuxt.config.js` head configuration
-- Enable **Fetch API monitoring** (disabled by default in some configurations)
+- Turn on **Capture fetch() requests** under **Capturing > Async web requests and SPAs > Generic support** — check it rather than assume it is on (see section 6)
 
 > **Note:** Regardless of framework, the key setting is enabling **SPA route changes** in your web application configuration. Without it, Dynatrace only captures the initial page load.
 
@@ -257,9 +257,11 @@ SPAs rely heavily on asynchronous API calls. Dynatrace monitors both `XMLHttpReq
 
 ### Enabling Fetch API Monitoring
 
-By default, Dynatrace monitors `XMLHttpRequest`. For modern SPAs using `fetch()`, ensure the setting is enabled:
+Out of the box, RUM Classic captures page loads; XHR actions are something you activate. Under **Generic support**, `fetch()` and `XmlHttpRequest` are **separate toggles**, so a SPA whose calls go through `fetch()` needs its own switch turned on:
 
-**Settings > Web and mobile monitoring > Async web requests and SPAs > Fetch requests**
+Application settings → **Capturing > Async web requests and SPAs** → **Generic support** → **Capture fetch() requests** (and **Capture XmlHttpRequest (XHR)** for XHR-based calls)
+
+> <sub>**Sources:** [Configure Real User Monitoring Classic to capture XHR actions (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/initial-setup/configure-dynatrace-real-user-monitoring-to-capture-xhr-actions) — *"When you activate XHR-action support, you add visibility into each kind of user interaction, not just the regular page loads that are captured by default."*</sub>
 
 ```dql
 // Unit trap (08/12/2026): New RUM timing fields such as lcp.start_time and ttfb.waiting_duration
@@ -441,7 +443,7 @@ When hybrid monitoring is enabled, the Mobile OneAgent SDK sets a **`dtAdk` cook
 | Correlation Mechanism | Description |
 |---|---|
 | `dtAdk` cookie | Set by Mobile SDK on the WebView; links web beacon to mobile session |
-| `x-dtc` header | Propagated on XHR/fetch requests for distributed tracing |
+| `x-dtc` header | Optional, explicitly enabled — links **cross-origin** XHR actions to distributed traces where RUM cookies cannot reach; same-origin requests correlate via the RUM cookies |
 | `applicationId` | Routes beacons to the correct Dynatrace application |
 
 > **Important:** Only add your own domains to `domains` / `DTXMonitoredDomains`. Never instrument third-party WebViews (e.g., OAuth login pages, payment providers) — this can break functionality and violate privacy policies.
@@ -541,6 +543,7 @@ In this notebook, we covered:
 - [User actions in RUM Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/rum-concepts/user-actions)
 - [Android mobile frontends (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum/mobile-frontends/android)
 - [Web applications in RUM Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications)
+- [Link cross-origin XHR user actions and their distributed traces (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/initial-setup/link-cross-origin-xhrs)
 - [Customize RUM with the JavaScript API (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/customize-rum)
 - [Customize RUM with the JavaScript API (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/customize-rum)
 - [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*

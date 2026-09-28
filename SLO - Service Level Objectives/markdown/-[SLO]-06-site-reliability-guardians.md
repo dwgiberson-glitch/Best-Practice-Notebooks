@@ -1,6 +1,6 @@
 # SLO-06: Site Reliability Guardians
 
-> **Series:** SLO — Service Level Objectives | **Notebook:** 6 of 6 | **Created:** August 2026 | **Last Updated:** 08/31/2026
+> **Series:** SLO — Service Level Objectives | **Notebook:** 6 of 6 | **Created:** August 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -206,9 +206,9 @@ Monaco projects use a three-file convention rather than a single settings object
 | `workflow.json` | The automation template that triggers validation — an event trigger with a filter condition, and a task invoking the guardian-validate action |
 | `config.yaml` | Shared parameters both files reference, so one edit updates both the guardian and the workflow that validates it |
 
-### The dtctl gap
+### dtctl: no dedicated resource, but reachable as settings
 
-As of the `dtctl` version this repo standardizes on (0.38 — see the root `CLAUDE.md`), `dtctl get --help` lists no dedicated `guardians` resource. Terraform and Monaco are the working config-as-code path today; there is no `dtctl get guardians` / `dtctl apply` shortcut to reach for instead.
+As of `dtctl` 0.40.0 (checked 09/28/2026), `dtctl get --help` lists no dedicated `guardians` resource. Guardians are Settings 2.0 objects, though — the Site Reliability Guardian as code page's Monaco example deploys them to the `app:dynatrace.site.reliability.guardian:guardians` schema — so `dtctl get settings --schema app:dynatrace.site.reliability.guardian:guardians` lists them (verified against a validation tenant the same day), and a settings object read that way can be round-tripped through `dtctl apply`. Terraform and Monaco remain the documented config-as-code paths; the settings route is a convenience for inspection and one-off edits.
 
 <a id="cicd"></a>
 ## 6. CI/CD Pipeline Integration
@@ -243,7 +243,7 @@ In this notebook you learned:
 2. **Objectives and thresholds** — `DQL` vs `REFERENCE_SLO` objective types, static / adaptive / no-threshold modes, and the five-state Pass / Warning / Fail / Error / Info result model (most severe wins)
 3. **Creating a guardian** — template vs blank, the 50-objective limit, guardian-level variables
 4. **Triggering validation** — on-demand Validate vs the automated Workflow action
-5. **Guardians as code** — the `dynatrace_site_reliability_guardian` Terraform resource, the Monaco three-file convention, and the current `dtctl` gap
+5. **Guardians as code** — the `dynatrace_site_reliability_guardian` Terraform resource, the Monaco three-file convention, and reaching guardians through `dtctl` settings
 6. **CI/CD integration** — the deploy → event → trigger → gate shape, and where AUTOM-07's working samples plug in
 7. **Guardian vs SLO** — complementary, not competing; a guardian objective can reference an SLO directly
 
@@ -258,7 +258,7 @@ In this notebook you learned:
 | SLO-05 | SLOs as Code | Terraform/Monaco/API provisioning for the modern SLO app |
 | SLO-06 | Site Reliability Guardians | Point-in-time deployment validation gates, complementary to ongoing SLOs |
 
-> <sub>**Sources:** [Site Reliability Guardian (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian), [Create a Site Reliability Guardian (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/create-srg), [Add Site Reliability Guardian objective (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/reference), [Site Reliability Guardian as code (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/config-as-code-srg), [dynatrace_site_reliability_guardian resource (Dynatrace provider docs)](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/site_reliability_guardian). Terraform schema and the objective/threshold model fetched at source 08/31/2026; the two DQL objective queries in §2 were executed against the validation tenant the same day. **Derived:** the dtctl-gap note in §5 combines this repo's pinned `dtctl` version (root `CLAUDE.md`) with a direct `dtctl get --help` check — neither source states the gap on its own.</sub>
+> <sub>**Sources:** [Site Reliability Guardian (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian), [Create a Site Reliability Guardian (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/create-srg), [Add Site Reliability Guardian objective (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/reference), [Site Reliability Guardian as code (DT docs)](https://docs.dynatrace.com/docs/deliver/site-reliability-guardian/config-as-code-srg), [dynatrace_site_reliability_guardian resource (Dynatrace provider docs)](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/site_reliability_guardian). Terraform schema and the objective/threshold model fetched at source 08/31/2026; the two DQL objective queries in §2 were executed against the validation tenant the same day. The `dtctl` note in §5 is a dated check (`dtctl` 0.40.0, `dtctl get --help`, `dtctl apply --help` (its examples include updating a settings object) and `dtctl get settings --schema app:dynatrace.site.reliability.guardian:guardians`, 09/28/2026); the schema ID is the one the Site Reliability Guardian as code page's Monaco example uses.</sub>
 
 ---
 

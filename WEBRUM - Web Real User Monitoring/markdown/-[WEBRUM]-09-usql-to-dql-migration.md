@@ -61,12 +61,12 @@ For environments where SVG doesn't render
 
 USQL ran against a purpose-built session store. Gen3 moved RUM into Grail, and it did so in two stages:
 
-- **Classic RUM on Grail** lifted the existing session model into Grail largely intact. The USQL column names came along — `duration`, `userActionCount`, `totalErrorCount`, `userType` are the same identifiers in both. What changed is the query grammar.
+- **Classic RUM on Grail** lifted the existing session model into Grail largely intact. In practice the USQL column names came along — `duration`, `userActionCount`, `totalErrorCount`, `userType` read as the same identifiers in both, which is how the classic queries in this series use them — so what changes is mainly the query grammar. That mapping is inferred rather than documented; confirm it with section 2's query before relying on it.
 - **New RUM** is a redesign around the Dynatrace Semantic Dictionary. Fields are renamed to the platform's snake_case dotted conventions, and `user.events` is no longer one flat table of typed actions — it is a set of event-type models distinguished by `characteristics.has_*` flags.
 
 The rest of the WEBRUM series is written against the classic vocabulary. If section 2 tells you your tenant serves New RUM, use the third column of the field tables below and expect the other notebooks to need the same translation.
 
-> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure), [Custom queries, segmentation, and aggregation of session data (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/session-segmentation/custom-queries-segmentation-and-aggregation-of-session-data). **Derived:** the "grammar only" characterization of the classic path combines the documented USQL field list with the field names in use across the WEBRUM series.</sub>
+> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure), [Custom queries, segmentation, and aggregation of session data (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/session-segmentation/custom-queries-segmentation-and-aggregation-of-session-data).</sub>
 
 <a id="determining-which-model-your-tenant-serves"></a>
 ## 2. Determining Which Model Your Tenant Serves
@@ -160,7 +160,7 @@ Under New RUM the event-type models each expose their own fields — `rum_except
 <a id="field-mapping--sessions"></a>
 ## 5. Field Mapping — Sessions
 
-`usersession` → `user.sessions`. The classic column is where the USQL name carries over unchanged.
+`usersession` → `user.sessions`. The classic column is **inferred, not documented**: it assumes the USQL name carries over unchanged, as the classic queries elsewhere in this series use them. Verify it against your own tenant per section 2 before relying on it.
 
 | USQL (`usersession`) | Classic RUM on Grail | New RUM |
 |---|---|---|
@@ -192,7 +192,7 @@ Under New RUM the event-type models each expose their own fields — `rum_except
 
 **New RUM adds** counters USQL had no equivalent for: `navigation_count`, `page_summary_count`, `request_count`, `user_interaction_count`, `view_summary_count`, and a broken-out error family (`error.exception_count`, `error.http_4xx_count`, `error.http_5xx_count`, `error.csp_violation_count`, `error.anr_count`).
 
-> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure) for the USQL column; live query of `dt.semantic_dictionary.models` (model `rum.user_session`, Dynatrace tenant, 07/23/2026) for the New RUM column. **Derived:** the classic-Grail column is inferred from the USQL names plus field usage across the WEBRUM series — verify against your own tenant per section 2.</sub>
+> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure) for the USQL column; live query of `dt.semantic_dictionary.models` (model `rum.user_session`, Dynatrace tenant, 07/23/2026) for the New RUM column.</sub>
 
 > **`device.type` is being removed from the user-session model (Semantic Dictionary 1.348, released 08/25/2026).** A migrated USQL `device` query that lands on `device.type` stops resolving once 1.348 reaches your tenant.
 >
