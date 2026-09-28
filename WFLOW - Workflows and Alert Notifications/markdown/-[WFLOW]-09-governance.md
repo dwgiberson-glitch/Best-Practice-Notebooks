@@ -665,21 +665,27 @@ Use a scheduled workflow to monitor other workflows:
 ```javascript
 import { queryExecutionClient } from '@dynatrace-sdk/client-query';
 
+async function runQuery(query) {
+  // queryExecute returns a requestToken instead of the result when the query outlasts
+  // requestTimeoutMilliseconds - poll until it reaches a final state (see WFLOW-08 §2).
+  const started = await queryExecutionClient.queryExecute({ body: { query, requestTimeoutMilliseconds: 30000 } });
+  let r = started;
+  while (r && (r.state === 'NOT_STARTED' || r.state === 'RUNNING')) {
+    r = await queryExecutionClient.queryPoll({ requestToken: started.requestToken, requestTimeoutMilliseconds: 30000 });
+  }
+  if (!r || r.state !== 'SUCCEEDED') throw new Error(`DQL query did not succeed: ${r?.state ?? 'no response'}`);
+  return r.result.records;
+}
+
 export default async function () {
   // Query for failures in the last hour
-  const result = await queryExecutionClient.queryExecute({
-    body: {
-      query: `
-        fetch dt.system.events, from:-1h
-        | filter event.kind == "WORKFLOW_EVENT" and event.type == "WORKFLOW_EXECUTION"
-        | filter dt.automation_engine.state.is_final == true
-        | summarize failures = countIf(dt.automation_engine.state == "ERROR"), by:{dt.automation_engine.workflow.title}
-        | filter failures >= 3
-      `
-    }
-  });
-  
-  const failingWorkflows = result.result.records || [];
+  const failingWorkflows = await runQuery(`
+    fetch dt.system.events, from:-1h
+    | filter event.kind == "WORKFLOW_EVENT" and event.type == "WORKFLOW_EXECUTION"
+    | filter dt.automation_engine.state.is_final == true
+    | summarize failures = countIf(dt.automation_engine.state == "ERROR"), by:{dt.automation_engine.workflow.title}
+    | filter failures >= 3
+  `);
   
   if (failingWorkflows.length > 0) {
     return {

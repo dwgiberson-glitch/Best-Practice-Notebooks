@@ -1,6 +1,6 @@
 # WFLOW-07: Problem-Triggered Remediation
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 7 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 7 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Auto-Remediation with Workflows
 Move beyond notifications to automated problem resolution. This notebook covers remediation patterns, safety guardrails, runbook automation, and common remediation scenarios.
@@ -83,23 +83,33 @@ For environments where SVG doesn't render
 ```javascript
 import { queryExecutionClient } from '@dynatrace-sdk/client-query';
 
+async function runQuery(query) {
+  // queryExecute returns a requestToken instead of the result when the query outlasts
+  // requestTimeoutMilliseconds - poll until it reaches a final state (see WFLOW-08 §2).
+  const started = await queryExecutionClient.queryExecute({ body: { query, requestTimeoutMilliseconds: 30000 } });
+  let r = started;
+  while (r && (r.state === 'NOT_STARTED' || r.state === 'RUNNING')) {
+    r = await queryExecutionClient.queryPoll({ requestToken: started.requestToken, requestTimeoutMilliseconds: 30000 });
+  }
+  if (!r || r.state !== 'SUCCEEDED') throw new Error(`DQL query did not succeed: ${r?.state ?? 'no response'}`);
+  return r.result.records;
+}
+
 export default async function () {
   // Check recent remediation attempts. Workflow executions are recorded in dt.system.events;
   // there is no automation.workflow.execution event type (a query on it always returns 0,
   // so this guardrail would never trip).
-  const result = await queryExecutionClient.queryExecute({
-    body: {
-      query: `
-        fetch dt.system.events, from:-1h
-        | filter event.kind == "WORKFLOW_EVENT" and event.type == "WORKFLOW_EXECUTION"
-        | filter dt.automation_engine.state.is_final == true
-        | filter contains(dt.automation_engine.workflow.title, "remediation")
-        | summarize attempts = count()
-      `
-    }
-  });
-  
-  const attempts = result.result.records[0]?.attempts || 0;
+  // runQuery() throws if the query does not complete, so a slow query stops the
+  // remediation instead of reading as "0 attempts" and sailing past the limit.
+  const records = await runQuery(`
+    fetch dt.system.events, from:-1h
+    | filter event.kind == "WORKFLOW_EVENT" and event.type == "WORKFLOW_EXECUTION"
+    | filter dt.automation_engine.state.is_final == true
+    | filter contains(dt.automation_engine.workflow.title, "remediation")
+    | summarize attempts = count()
+  `);
+
+  const attempts = Number(records[0]?.attempts ?? 0);
   const maxAttempts = 3;
   
   if (attempts >= maxAttempts) {

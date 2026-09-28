@@ -1,6 +1,6 @@
 # WFLOW-06: Custom Notification Templates
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 6 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 6 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Rich Message Formatting
 Create professional, informative notifications with dynamic content, formatting, and data enrichment. This notebook covers Jinja templating, Slack Block Kit, Teams Adaptive Cards, and data enrichment patterns.
@@ -263,6 +263,18 @@ Add recent error logs to notification:
 import { execution } from '@dynatrace-sdk/automation-utils';
 import { queryExecutionClient } from '@dynatrace-sdk/client-query';
 
+async function runQuery(query) {
+  // queryExecute returns a requestToken instead of the result when the query outlasts
+  // requestTimeoutMilliseconds - poll until it reaches a final state (see WFLOW-08 §2).
+  const started = await queryExecutionClient.queryExecute({ body: { query, requestTimeoutMilliseconds: 30000 } });
+  let r = started;
+  while (r && (r.state === 'NOT_STARTED' || r.state === 'RUNNING')) {
+    r = await queryExecutionClient.queryPoll({ requestToken: started.requestToken, requestTimeoutMilliseconds: 30000 });
+  }
+  if (!r || r.state !== 'SUCCEEDED') throw new Error(`DQL query did not succeed: ${r?.state ?? 'no response'}`);
+  return r.result.records;
+}
+
 export default async function () {
   const event = (await execution()).params.event;   // trigger payload
   // Get recent error logs for the affected service
@@ -272,23 +284,18 @@ export default async function () {
     return { event, recent_errors: [] };
   }
   
-  const result = await queryExecutionClient.queryExecute({
-    body: {
-      query: `
-        fetch logs, from: now() - 30m
-        | filter dt.entity.service == "${rootCause}"
-        | filter loglevel == "ERROR"
-        | fields timestamp, content
-        | sort timestamp desc
-        | limit 5
-      `,
-      requestTimeoutMilliseconds: 30000
-    }
-  });
-  
+  const recentErrors = await runQuery(`
+    fetch logs, from: now() - 30m
+    | filter dt.entity.service == "${rootCause}"
+    | filter loglevel == "ERROR"
+    | fields timestamp, content
+    | sort timestamp desc
+    | limit 5
+  `);
+
   return {
     event,
-    recent_errors: result.result.records || []
+    recent_errors: recentErrors
   };
 }
 ```

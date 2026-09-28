@@ -94,27 +94,45 @@ input:
 
 ### Execute DQL Query
 
+`queryExecute()` does not always return the result. It returns it only if the query finishes within `requestTimeoutMilliseconds`; otherwise the response carries a `requestToken` instead, and reading `result.result.records` throws. Wrap every query in a helper that polls until the query reaches a final state — the rest of this notebook uses this `runQuery()`:
+
 ```javascript
 import { queryExecutionClient } from '@dynatrace-sdk/client-query';
 
-export default async function () {
-  const result = await queryExecutionClient.queryExecute({
-    body: {
-      query: `
-        fetch logs, from: now() - 1h
-        | filter loglevel == "ERROR"
-        | summarize error_count = count()
-      `,
-      requestTimeoutMilliseconds: 30000
-    }
+// queryExecute() returns the result only if the query finishes within
+// requestTimeoutMilliseconds. Otherwise it returns a requestToken and a state
+// of NOT_STARTED or RUNNING, and the result has to be fetched with queryPoll().
+async function runQuery(query) {
+  const started = await queryExecutionClient.queryExecute({
+    body: { query, requestTimeoutMilliseconds: 30000 }
   });
-  
-  const records = result.result.records || [];
-  const errorCount = records[0]?.error_count || 0;
-  
-  return { error_count: errorCount };
+  let response = started;
+  while (response && (response.state === 'NOT_STARTED' || response.state === 'RUNNING')) {
+    response = await queryExecutionClient.queryPoll({
+      requestToken: started.requestToken,   // poll responses carry no token of their own
+      requestTimeoutMilliseconds: 30000
+    });
+  }
+  if (!response || response.state !== 'SUCCEEDED') {
+    throw new Error(`DQL query did not succeed: ${response?.state ?? 'no response'}`);
+  }
+  return response.result.records;
+}
+
+export default async function () {
+  const records = await runQuery(`
+    fetch logs, from: now() - 1h
+    | filter loglevel == "ERROR"
+    | summarize error_count = count()
+  `);
+
+  return { error_count: records[0]?.error_count ?? 0 };
 }
 ```
+
+The polling loop is bounded by the runtime's own per-action ceiling (§10): a query that cannot finish inside it fails the task either way, so the fix for a slow query is a narrower query, not a longer loop.
+
+> <sub>**Sources:** [client-query SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/) — `queryExecute` `requestTimeoutMilliseconds`: *"If the query finishes within the specified timeout, the query result is returned. Otherwise, the requestToken is returned, allowing polling for the result."*; `queryPoll`: *"Retrieves query status and final result from Grail."*; state values *"NOT_STARTED"*, *"RUNNING"*, *"SUCCEEDED"*, *"RESULT_GONE"*, *"CANCELLED"*, *"FAILED"* (re-read 09/28/2026).</sub>
 
 ### Get Entity Details
 
@@ -456,20 +474,16 @@ The two patterns compose. A JS task can `try/catch` its own recoverable errors a
 ```javascript
 import { queryExecutionClient } from '@dynatrace-sdk/client-query';
 
+// runQuery() as defined in §2
+
 export default async function () {
-  const result = await queryExecutionClient.queryExecute({
-    body: {
-      query: `
-        fetch logs, from: now() - 1h
-        | filter loglevel == "ERROR"
-        | fields timestamp, content, dt.entity.service
-        | limit 100
-      `
-    }
-  });
-  
-  const records = result.result.records || [];
-  
+  const records = await runQuery(`
+    fetch logs, from: now() - 1h
+    | filter loglevel == "ERROR"
+    | fields timestamp, content, dt.entity.service
+    | limit 100
+  `);
+
   // Group by service
   const byService = records.reduce((acc, log) => {
     const service = log['dt.entity.service'] || 'unknown';
@@ -548,15 +562,15 @@ export default async function () {
       | filter loglevel == "ERROR"
       | summarize errors = count()
     `;
+  } else {
+    return { entity_type: entityId.split('-')[0], errors: null, skipped: 'no query for this entity type' };
   }
-  
-  const result = await queryExecutionClient.queryExecute({
-    body: { query }
-  });
-  
-  return { 
+
+  const records = await runQuery(query);   // runQuery() as defined in §2
+
+  return {
     entity_type: entityId.split('-')[0],
-    errors: result.result.records[0]?.errors || 0
+    errors: records[0]?.errors ?? 0
   };
 }
 ```
@@ -844,25 +858,18 @@ export default async function () {
 ### Limit Query Scope
 
 ```javascript
-// Bad: Fetching too much data
-const result = await queryExecutionClient.queryExecute({
-  body: {
-    query: `fetch logs, from: now() - 7d | filter loglevel == "ERROR"`
-  }
-});
+// runQuery() as defined in §2
 
-// Good: Limited time range and fields
-const result = await queryExecutionClient.queryExecute({
-  body: {
-    query: `
-      fetch logs, from: now() - 1h
-      | filter loglevel == "ERROR"
-      | fields timestamp, content
-      | limit 100
-    `,
-    requestTimeoutMilliseconds: 30000
-  }
-});
+// Bad: seven days of every ERROR log, every field
+const everything = await runQuery(`fetch logs, from: now() - 7d | filter loglevel == "ERROR"`);
+
+// Good: limited time range and fields
+const recent = await runQuery(`
+  fetch logs, from: now() - 1h
+  | filter loglevel == "ERROR"
+  | fields timestamp, content
+  | limit 100
+`);
 ```
 
 ### Use Timeouts
@@ -922,16 +929,26 @@ tasks:
       script: |
         import { queryExecutionClient } from '@dynatrace-sdk/client-query';
         export default async function() {
-          const result = await queryExecutionClient.queryExecute({
+          const started = await queryExecutionClient.queryExecute({
             body: {
-              query: `fetch logs, from: now() - 1h | filter loglevel == "ERROR" | summarize count()`,
-              // How long queryExecute waits for the result before returning without one,
-              // in milliseconds. Distinct from both the task timeout above
-              // and the 120s runtime budget.
+              query: `fetch logs, from: now() - 1h | filter loglevel == "ERROR" | summarize errors = count()`,
+              // How long queryExecute waits for the result before returning a
+              // requestToken instead, in milliseconds. Distinct from both the
+              // task timeout above and the 120s runtime budget.
               requestTimeoutMilliseconds: 30000
             }
           });
-          return { count: result.result.records[0]?.['count()'] || 0 };
+          let response = started;
+          while (response && (response.state === 'NOT_STARTED' || response.state === 'RUNNING')) {
+            response = await queryExecutionClient.queryPoll({
+              requestToken: started.requestToken,
+              requestTimeoutMilliseconds: 30000
+            });
+          }
+          if (!response || response.state !== 'SUCCEEDED') {
+            throw new Error(`DQL query did not succeed: ${response?.state ?? 'no response'}`);
+          }
+          return { errors: response.result.records[0]?.errors ?? 0 };
         }
 ```
 
@@ -963,12 +980,12 @@ When a DQL or JavaScript task hits a timeout, the right move depends on **which*
 |---------|----------|------------|
 | Task fails at ~120s with a runtime/engine error | Dynatrace runtime timeout (per-action) | Narrow the query window (`from: now() - 15m` instead of `now() - 24h`), pre-aggregate into a metric or bizevent, or split into multiple smaller tasks. Raising the task `timeout` will not help. |
 | Task fails at exactly the configured task `timeout` value | Task timeout | Raise `timeout`, or break the task into smaller tasks. Verify the work genuinely needs the budget — most legitimately-long tasks are waiting on a human or external system, not computing. |
-| `queryExecute()` returns well before 120s with no `result` — only the query state and a request token | `requestTimeoutMilliseconds` too low | Raise it on the SDK call, or poll with `queryPoll` using the returned token. Start at 30000 (30s); raise to 60000 only if the query genuinely needs longer (and consider whether the query should be pre-aggregated instead). |
+| `queryExecute()` returns well before 120s with no `result` — only the query state and a request token | The query outlasted `requestTimeoutMilliseconds` | Poll with `queryPoll` using the returned token — the §2 `runQuery()` helper does this. Raising `requestTimeoutMilliseconds` only moves the point where polling starts; code that reads `result.result.records` without checking `state` breaks either way. |
 | Approval/wait task fires at its `timeout` value | Wait-action's own timeout | This is usually the correct behavior — the human did not respond. Decide whether to escalate, auto-approve, or fail. |
 
 > **Rule of thumb.** Raise timeouts only after narrowing scope. A task that needs 10 minutes of DQL is almost always a task that needs a pre-aggregation upstream — fix that first.
 
-> <sub>**Sources:** [Build workflows — Adapt timeout (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Run JavaScript action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Grail DQL query API — client-query (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/) — *"If the query succeeded, the result will be included. Otherwise the response will contain a request token to reference the query in future polling requests."* **Derived:** the three-timeout interaction model in *On `run-javascript`* and the decision table combine the cited per-field documentation; no single source presents them together.</sub>
+> <sub>**Sources:** [Build workflows — Adapt timeout (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Run JavaScript action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Grail DQL query API — client-query (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/) — *"If the query succeeded, the result will be included. Otherwise the response will contain a request token to reference the query in future polling requests."*; `queryPoll`: *"Retrieves query status and final result from Grail."* **Derived:** the three-timeout interaction model in *On `run-javascript`* and the decision table combine the cited per-field documentation; no single source presents them together.</sub>
 
 ### Monitor JavaScript Task Performance
 

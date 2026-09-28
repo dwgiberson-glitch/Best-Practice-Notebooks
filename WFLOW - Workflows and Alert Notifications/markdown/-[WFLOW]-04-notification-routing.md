@@ -1,6 +1,6 @@
 # WFLOW-04: Advanced Notification Routing
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 4 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 4 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Intelligent Alert Routing
 Not all alerts should go to everyone. This notebook covers conditional routing based on severity, team ownership, time of day, and escalation patterns.
@@ -397,8 +397,13 @@ tasks:
         export default async function () {
           const ev = (await execution()).params.event;   // snapshot from trigger time
           // Re-query: the trigger payload is 15 minutes old by now
-          const q = await queryExecutionClient.queryExecute({ body: { query:
+          const started = await queryExecutionClient.queryExecute({ body: { requestTimeoutMilliseconds: 30000, query:
             `fetch dt.davis.problems, from:-2h | filter display_id == "${ev['display_id']}" | sort timestamp desc | limit 1 | fields event.status` } });
+          let q = started;   // no result yet if the query outlasted the timeout - poll (see WFLOW-08 §2)
+          while (q && (q.state === 'NOT_STARTED' || q.state === 'RUNNING')) {
+            q = await queryExecutionClient.queryPoll({ requestToken: started.requestToken, requestTimeoutMilliseconds: 30000 });
+          }
+          if (!q || q.state !== 'SUCCEEDED') throw new Error(`DQL query did not succeed: ${q?.state ?? 'no response'}`);
           return { escalate: q.result.records[0]?.['event.status'] === 'ACTIVE' };
         }
 

@@ -1,6 +1,6 @@
 # WFLOW-01: Workflow Fundamentals
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 1 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 1 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Introduction to Dynatrace Workflows
 Dynatrace Workflows is the automation engine that enables event-driven automation, scheduled tasks, and integration orchestration. This notebook introduces core concepts, components, and your first workflow.
@@ -190,7 +190,7 @@ Two distinct timeouts apply to every workflow task — confusing them is one of 
 |-------|---------|---------|-------|
 | **Task timeout** | 60 minutes | 7 days | Wall-clock budget for the whole task, including retries and loops. Configured per task via the `timeout` field (in seconds). |
 | **Dynatrace runtime timeout** | 120 seconds | — | Per-action execution budget inside the AutomationEngine runtime (applies to DQL queries and individual JavaScript/HTTP calls). Hits the action, not the task — the task itself keeps going. |
-| **DQL `requestTimeoutMilliseconds`** | (SDK default) | — | The JavaScript SDK's `queryExecute()` parameter — caps the HTTP call from your JS action to the DQL engine. In milliseconds. |
+| **DQL `requestTimeoutMilliseconds`** | No default documented | — | The JavaScript SDK's `queryExecute()` parameter — how long the call waits for the result before returning a `requestToken` instead, in milliseconds. It does not stop the query; poll with `queryPoll()` to collect the result (WFLOW-08 §2). |
 
 > **Why this matters.** Raising the task `timeout` does not help a DQL query that's hitting the 120-second runtime budget — you need to narrow the query window, pre-aggregate, or split the work. Conversely, an approval task waiting for a human pager-out doesn't need a runtime budget — it needs a long task timeout (`timeout: 1800` for 30 minutes, `timeout: 86400` for 24 hours).
 

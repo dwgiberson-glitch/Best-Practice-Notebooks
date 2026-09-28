@@ -1,6 +1,6 @@
 # WFLOW-99: Best Practice Summary
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -157,7 +157,7 @@ This notebook consolidates every actionable best practice from the WFLOW series 
 | 2 | Wrap all external calls in try-catch | Return `{success: false, error: error.message}` on failure instead of throwing | Critical | WFLOW-08 |
 | 3 | Implement retry with exponential backoff | Max 3 retries, delay = `1000 * attempt` ms, retry only on 5xx errors | Recommended | WFLOW-08 |
 | 4 | Set request timeouts on external HTTP | `AbortController` with 10-second timeout on outbound `fetch()` calls. Distinct from task `timeout` (whole-task budget) and 120s runtime budget (per-action). See WFLOW-08 §8. | Critical | WFLOW-08 |
-| 5 | Set DQL query timeouts | `requestTimeoutMilliseconds: 30000` on all `queryExecute()` calls. This caps the SDK→engine HTTP call only; the engine's own 120s runtime budget still applies. See WFLOW-08 §8. | Critical | WFLOW-08 |
+| 5 | Poll DQL queries to completion | `queryExecute()` returns the result only if the query finishes within `requestTimeoutMilliseconds`; otherwise it returns a `requestToken`. Poll with `queryPoll()` until the state is final, and fail on anything but `SUCCEEDED` — never read `result.result.records` unchecked. The 120s runtime budget still applies. See WFLOW-08 §2 and §10. | Critical | WFLOW-08 |
 | 6 | Limit DQL query scope | `from: now() - 1h`, select only needed `fields`, `limit 100` | Critical | WFLOW-08 |
 | 7 | Use `Promise.all()` for parallel entity lookups | Execute all independent API calls concurrently | Recommended | WFLOW-08 |
 | 8 | Always use HTTPS for external calls | Never use `http://` in HTTP request URLs | Critical | WFLOW-09 |

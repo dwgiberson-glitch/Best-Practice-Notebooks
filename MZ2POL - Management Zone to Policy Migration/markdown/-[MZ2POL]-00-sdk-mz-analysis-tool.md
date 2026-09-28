@@ -1,6 +1,6 @@
 # MZ2POL-00: SDK Management Zone Analysis Tool
 
-> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 1 of 10 | **Created:** December 2025 | **Last Updated:** 07/24/2026
+> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 1 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 > **Purpose:** Query Management Zone configurations via the Dynatrace SDK, analyze entity assignments, and assess security context coverage to support migration planning.
 
@@ -408,14 +408,24 @@ async function getMZCount(): Promise<number> {
 }
 
 async function runDQL(query: string): Promise<any[]> {
-  const resp = await queryExecutionClient.queryExecute({
+  // queryExecute returns a requestToken instead of the result when the query outlasts
+  // requestTimeoutMilliseconds. Poll to a final state, and fail loudly rather than
+  // returning [] - an empty result here would read as "0% coverage".
+  const started = await queryExecutionClient.queryExecute({
     body: {
       query,
       requestTimeoutMilliseconds: 60000,
       maxResultRecords: 10
     }
   });
-  return resp.result?.records || [];
+  let resp: any = started;
+  while (resp && (resp.state === "NOT_STARTED" || resp.state === "RUNNING")) {
+    resp = await queryExecutionClient.queryPoll({ requestToken: started.requestToken!, requestTimeoutMilliseconds: 30000 });
+  }
+  if (!resp || resp.state !== "SUCCEEDED") {
+    throw new Error(`DQL query did not succeed: ${resp?.state ?? "no response"}`);
+  }
+  return resp.result.records;
 }
 
 export default async function() {
