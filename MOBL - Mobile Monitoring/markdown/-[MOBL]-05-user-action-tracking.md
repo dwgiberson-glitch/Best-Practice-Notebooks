@@ -1,6 +1,6 @@
 # MOBL-05: User Action Tracking
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 5 of 12 | **Created:** February 2026 | **Last Updated:** 09/09/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 5 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -26,7 +26,7 @@ User actions are the foundation of mobile Real User Monitoring (RUM) in Dynatrac
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
 | **Mobile App** | At least one mobile app with the Dynatrace Mobile SDK configured |
-| **Permissions** | `storage:events:read`, `storage:bizevents:read` |
+| **Permissions** | `storage:user.events:read`, `storage:user.sessions:read` |
 | **Data** | User action data actively flowing from mobile devices |
 | **Prior Notebooks** | Completed MOBL-01 through MOBL-04 recommended |
 
@@ -42,22 +42,22 @@ Every user action includes the following key properties:
 | Property | Description | Example |
 |----------|-------------|---------|
 | **Name** | Human-readable label describing the interaction | `"Tap on Login"`, `"Add to Cart"` |
-| **Type** | Category of interaction | `Tap`, `Swipe`, `AppStart`, `Custom` |
+| **Type** | Category of interaction (`interaction.type` in Grail) | a tap, a swipe, an app start, a custom action |
 | **Duration** | Time from action start to completion (including child events) | `450ms` |
 | **Network Requests** | HTTP calls triggered during the action | API calls, image loads |
 | **Errors** | Any crashes or HTTP errors during the action | 500 responses, exceptions |
 
-### Action Types
+### How Actions Appear in Grail
 
-Dynatrace classifies mobile user actions into the following types:
+In Grail, mobile interactions are `user.events` records typed by `characteristics.*` flags rather than by a single action-type field:
 
-| Type | Description | Detection |
-|------|-------------|-----------|
-| **Tap** | User taps a button, link, or interactive element | Auto-detected for native UI components |
-| **Swipe** | User swipes on a scrollable or gesture-responsive area | Auto-detected on supported views |
-| **AppStart** | The app launches (cold start, warm start, or hot start) | Always auto-detected |
-| **Custom** | Developer-defined action wrapping business logic | Manual instrumentation required |
-| **RageTap** | Rapid repeated taps indicating user frustration | Auto-detected when enabled |
+| Interaction | Grail representation | Detection |
+|-------------|----------------------|-----------|
+| **User action** (tap or other interaction plus the requests it triggers) | `characteristics.has_user_action`; control in `ui_element.detected_name`, kind in `interaction.type` | Auto-detected for supported UI components |
+| **User interaction** (standalone tap, click, swipe) | `characteristics.has_user_interaction` | Auto-detected |
+| **App start** (cold, warm, hot) | `characteristics.has_app_start` | Always auto-detected |
+| **Custom action** | `characteristics.has_user_action` with `characteristics.is_api_reported` | Manual instrumentation (`enterAction`) |
+| **Rage tap** | no dedicated field in the semantic dictionary (read 09/28/2026) | Detected by OneAgent (Section 4) |
 
 > **Note:** The exact set of auto-detected action types varies by platform and UI framework. See the next section for a detailed compatibility matrix.
 
@@ -70,27 +70,27 @@ Dynatrace classifies mobile user actions into the following types:
 >
 > Mobile agent versions land with **app releases, not tenant updates** (MOBL-01), so this arrives across your user base at the pace of store adoption.
 
-Dynatrace auto-instrumentation capabilities differ between platforms and UI frameworks. Modern declarative frameworks (SwiftUI, Jetpack Compose) require more manual instrumentation than their imperative counterparts (UIKit, Android Views).
+Dynatrace auto-instrumentation covers both imperative (UIKit, Android Views) and declarative (SwiftUI, Jetpack Compose) UI frameworks, through different mechanisms: runtime or bytecode instrumentation for UIKit and Views, the Android Gradle plugin for Compose (on by default from plugin 8.271), and the build-time SwiftUI instrumentor (`DTSwiftInstrumentor`) for SwiftUI.
 
 ### Platform Compatibility Matrix
 
 | Action | iOS (UIKit) | iOS (SwiftUI) | Android (Views) | Android (Compose) |
 |--------|-------------|---------------|-----------------|-------------------|
-| Button tap | Auto | Manual | Auto | Manual |
-| List item tap | Auto | Manual | Auto | Manual |
-| Navigation | Auto | Partial | Auto | Manual |
+| Button tap | Auto | Auto (DTSwiftInstrumentor) | Auto | Auto (plugin 8.271+) |
+| List item tap | Auto | Auto (DTSwiftInstrumentor, 8.265+) | Auto | Auto (plugin 8.271+, `clickable` modifiers) |
+| Navigation | Auto | Auto (DTSwiftInstrumentor, `NavigationLink` 8.265+) | Auto | Auto (plugin 8.271+) |
 | App start | Auto | Auto | Auto | Auto |
 | App background/foreground | Auto | Auto | Auto | Auto |
 
 **Key takeaways:**
 
 - **UIKit and Android Views** provide the most complete auto-detection out of the box. Button taps, list selections, and navigation transitions are captured automatically.
-- **SwiftUI and Jetpack Compose** require explicit instrumentation for most tap and navigation events because the SDK cannot hook into declarative view hierarchies the same way it hooks into imperative widget trees.
+- **SwiftUI and Jetpack Compose** are auto-instrumented too, but by a build step: the SwiftUI instrumentor for SwiftUI (MOBL-02 §5) and the Android Gradle plugin for Compose (MOBL-03 §5). If that step is missing from the build, their interactions go uncaptured.
 - **App start and lifecycle events** (background/foreground) are always auto-detected regardless of UI framework.
 
-> **Tip:** If your app uses SwiftUI or Jetpack Compose, plan for custom action instrumentation early in development. See Section 5 for code examples.
+> **Tip:** If your app uses SwiftUI, add `DTSwiftInstrumentor` to the build (and CI) early; for Compose, confirm the plugin is 8.271 or later. Reserve custom actions (Section 5) for business-level flows.
 
-> <sub>**Sources:** [What's new in OneAgent for Mobile 8.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent-mobile/sprint-347) — the app-start user action and cold-start capping quoted above.</sub>
+> <sub>**Sources:** [What's new in OneAgent for Mobile 8.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent-mobile/sprint-347) — the app-start user action and cold-start capping quoted above; [Instrument Android apps (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app) — *"Jetpack Compose auto-instrumentation is enabled by default starting with Dynatrace Android Gradle plugin version 8.271."*; [Instrument SwiftUI controls (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/instrumentation/instrument-swiftui-controls).</sub>
 
 <a id="action-lifecycle"></a>
 ## 3. Action Lifecycle
@@ -132,23 +132,23 @@ The action duration is measured from **Action Start** to **Action End**. It incl
 
 ### How Dynatrace Detects Rage Taps
 
-Dynatrace automatically detects rage taps by analyzing tap frequency and proximity:
+OneAgent detects rage taps automatically (Android Gradle plugin 8.231+). On Android it can monitor only touch events handled by an `Activity`; components with their own touch processing, such as `Dialog` and `DreamService`, are not covered. Detection is on by default; switch it off per configuration with the `behavioralEvents` block:
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| **Tap count threshold** | Minimum number of taps in rapid succession | 3 taps |
-| **Time window** | Maximum time between first and last tap | 1 second |
-| **Proximity radius** | Maximum distance between tap locations | Small area (platform-dependent) |
+```kotlin
+configure<com.dynatrace.tools.android.dsl.DynatraceExtension> {
+    configurations {
+        create("sampleConfig") {
+            behavioralEvents {
+                detectRageTaps(false)
+            }
+        }
+    }
+}
+```
 
-When these criteria are met, Dynatrace creates a `RageTap` user action with details about the target element and the number of taps detected.
+> **Correction (09/28/2026).** Earlier revisions gave detection defaults (3 taps, 1 second, a proximity radius), a tunable sensitivity setting and a `RageTap` user-action type. None of those is documented, and the semantic dictionary (read 09/28/2026) has no rage-tap field on `user.events`. §6.3 therefore uses a clearly labelled query-side heuristic.
 
-### Configuration Options
-
-Rage tap detection is enabled by default but can be tuned:
-
-- **Enable/Disable** — Toggle rage tap detection per application in Dynatrace settings.
-- **Sensitivity** — Adjust the tap count threshold and time window to control detection sensitivity.
-- **Exclusions** — Exclude specific UI elements that legitimately require rapid tapping (e.g., game controls, increment/decrement buttons).
+> <sub>**Sources:** [Configure monitoring capabilities (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-plugin/monitoring-capabilities) — *"OneAgent detects such behavior as a rage tap."*</sub>
 
 ### Why Rage Taps Matter
 
@@ -165,6 +165,8 @@ Rage taps are a leading indicator of poor user experience. Common root causes in
 ## 5. Custom User Actions
 
 Custom user actions let you measure business-critical interactions that are not automatically captured by the SDK. Use them to wrap multi-step processes like checkout flows, search operations, or any logic where you want precise timing and child event association.
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios), [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android), [dynatrace_flutter_plugin (pub.dev)](https://pub.dev/packages/dynatrace_flutter_plugin).</sub>
 
 ### iOS (Swift)
 
@@ -188,9 +190,9 @@ action.leaveAction()
 
 ```dart
 // Flutter (Dart)
-var action = await dtAgent.enterAction("Add to Cart");
+DynatraceRootAction action = Dynatrace().enterAction('Add to Cart');
 // ... perform the action logic (API calls, UI updates) ...
-await action.leaveAction();
+action.leaveAction();
 ```
 
 ### Best Practices for Custom Actions
@@ -201,64 +203,65 @@ await action.leaveAction();
 | **Use descriptive names** | `"Add to Cart"` is better than `"button_click_42"` |
 | **Avoid nesting too deeply** | Keep action hierarchies shallow (parent + 1 level of child actions max) |
 | **Wrap error handling** | Ensure `leaveAction()` is called in both success and error paths |
-| **Report values** | Use `reportValue()` / `reportEvent()` to attach business context to the action |
+| **Report values** | Use `action.reportValue()` / `action.reportEvent()` on the open action to attach business context -- reported values must be part of a user action |
 
 <a id="querying-actions"></a>
 ## 6. Querying Actions with DQL
 
-User action data is available in Dynatrace Grail as business events (`bizevents`). The following DQL queries demonstrate common analysis patterns for mobile user actions.
+Mobile user-action data is stored in the Grail **`user.events`** store, one record per event, with `characteristics.has_user_action` marking user actions and `dt.rum.application.type == "mobile"` separating mobile from web frontends. Session-level data (one record per session) is in **`user.sessions`**. The useful action fields are `frontend.name` (the app), `ui_element.detected_name` (the control), `interaction.type`, and `duration` (a duration value, so compare it with `duration > 2s`, not a number).
 
-### 6.1 Recent Tap Actions
+> **Correction (09/28/2026).** Earlier revisions queried mobile actions from `bizevents` with `event.provider == "www.dynatrace.com/mobile"` and `useraction.*` fields. That data model does not exist: every such query ran without error and returned zero rows. All queries in this notebook now read `user.events`. `sendBizEvent()` payloads (MOBL-12 §2) are the one mobile data type that does land in `bizevents`.
 
-Retrieve the most recent tap actions across all monitored mobile applications to see what users are doing right now.
+### 6.1 Recent User Actions
+
+Retrieve the most recent user actions across all monitored mobile applications to see what users are doing right now.
 
 ```dql
-// Recent tap actions across all mobile apps
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter useraction.type == "Tap"
-| fields timestamp, useraction.name, useraction.application, useraction.duration
-| sort timestamp desc
+// Recent user actions across all mobile apps
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| fields start_time, frontend.name, ui_element.detected_name, interaction.type, duration
+| sort start_time desc
 | limit 50
 ```
 
-### 6.2 Action Volume by Type
+### 6.2 Action Volume by Interaction Type
 
-Understand the distribution of action types to see which interaction patterns dominate your mobile app usage.
+Understand the distribution of interaction types to see which interaction patterns dominate your mobile app usage.
 
 ```dql
-// Action volume by type across all apps
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(useraction.type)
-| summarize action_count = count(), by:{useraction.type}
+// Action volume by interaction type across all apps
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| summarize action_count = count(), by:{interaction.type}
 | sort action_count desc
 ```
 
-### 6.3 Rage Tap Events
+### 6.3 Repeated Taps on One Element
 
-Identify rage tap events over the past 24 hours. These are high-priority signals of user frustration that warrant investigation.
+Find sessions in which a user tapped the same element five or more times in 24 hours. This is a query-side frustration heuristic built on `characteristics.has_user_interaction`, not the agent's own rage-tap detection. Tune the threshold to your app.
 
 ```dql
-// Rage tap events (user frustration indicator)
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter useraction.type == "RageTap" or contains(toString(useraction.name), "rage")
-| fields timestamp, useraction.name, useraction.application, os.type
-| sort timestamp desc
+// Repeated taps on the same element within one session (frustration heuristic)
+// This is a query-side heuristic, NOT Dynatrace's rage-tap detection: the semantic
+// dictionary (read 09/28/2026) has no rage-tap field on user.events.
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_interaction
+| summarize taps = count(), by:{dt.rum.session.id, frontend.name, ui_element.detected_name}
+| filter taps >= 5
+| sort taps desc
 | limit 50
 ```
 
 ### 6.4 Action Trends Over Time
 
-Visualize user action trends on an hourly basis, split by action type. This query produces a time-series chart suitable for dashboards.
+Visualize user action trends on an hourly basis, split by interaction type. This query produces a time-series chart suitable for dashboards.
 
 ```dql
 // User action trends over time (hourly)
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(useraction.type)
-| makeTimeseries action_count = count(), by:{useraction.type}, interval:1h
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| makeTimeseries action_count = count(), by:{interaction.type}, interval:1h
 ```
 
 ### 6.5 Top Apps by Action Volume
@@ -267,10 +270,9 @@ Rank your mobile applications by the total number of user actions to identify th
 
 ```dql
 // Top apps by action volume
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(useraction.type)
-| summarize action_count = count(), by:{useraction.application}
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| summarize action_count = count(), by:{frontend.name}
 | sort action_count desc
 | limit 10
 ```
@@ -318,21 +320,21 @@ If auto-detected action names are not descriptive enough, you can configure **us
 In this notebook, you learned:
 
 - **What user actions are** — discrete interaction events with name, type, duration, and child events
-- **Auto-detection capabilities** — UIKit and Android Views provide the best coverage; SwiftUI and Compose need manual instrumentation
+- **Auto-detection capabilities** — UIKit, Android Views, SwiftUI (`DTSwiftInstrumentor`) and Jetpack Compose (plugin 8.271+) are all auto-instrumented
 - **Action lifecycle** — from start through child event association to beacon transmission
 - **Rage tap detection** — an automatic frustration signal based on rapid repeated taps
 - **Custom action instrumentation** — platform-specific code for iOS, Android, and Flutter
-- **DQL queries** — how to retrieve and analyze user action data from Grail
+- **DQL queries** — how to retrieve and analyze user action data from Grail `user.events`
 - **Naming best practices** — descriptive, stable names without dynamic values or user IDs
 
 ---
 
 ## Next Steps
 
-Continue to **MOBL-06** in the Mobile Monitoring series to explore:
-- Session replay for mobile applications
-- Correlating user actions with session-level context
-- Advanced user behavior analytics
+Continue to **MOBL-06: Crash Reporting & ANR Detection** in the Mobile Monitoring series to explore:
+- How crashes and ANRs are captured and reported
+- Querying crash events from `user.events`
+- Symbolication and crash-rate trends
 
 ---
 

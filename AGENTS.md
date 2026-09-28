@@ -2,8 +2,8 @@
 
 Guidance for AI agents consuming this repository. Humans: see [README.md](README.md).
 
-This is a **content-only** repository: 32 series of Dynatrace best-practice
-notebooks (320 documents, ~880k words). There is no build system, no tests,
+This is a **content-only** repository: 33 series of Dynatrace best-practice
+notebooks (328 documents, ~880k words). There is no build system, no tests,
 and no application code.
 
 ## How to navigate (important — do not crawl)
@@ -34,7 +34,9 @@ Every series has the same layout. Only one format is for you:
 | `pdfs/`, `markdown/images/` | Print/visual duplicates | Ignore |
 
 Every series uses these exact lowercase directory names — `markdown/`,
-`notebooks/`, `pdfs/`. Series directory *names* do vary: they contain spaces, so
+`notebooks/`, `pdfs/`. One exception: `MCH - Managed Cluster Health` has no
+`notebooks/` directory, because it contains no executable queries (Dynatrace
+Managed has no Grail) and so has nothing to import. Series directory *names* do vary: they contain spaces, so
 quote them in shell commands, and `APPSEC — Application Security` uses an em
 dash where every other series uses a hyphen.
 
@@ -85,6 +87,12 @@ Paths are the literal directory names (they contain spaces — quote them in she
 | ALERT | `ALERT - Alerting Strategy and Design` | End-to-end alerting design; orchestrates AIOPS + SLO + WFLOW |
 | SLO | `SLO - Service Level Objectives` | SLIs, error budgets, burn-rate alerting, SLOs as code, Site Reliability Guardians |
 
+**Dynatrace Managed Operations**
+
+| Prefix | Directory | Scope |
+|---|---|---|
+| MCH | `MCH - Managed Cluster Health` | Keeping a self-hosted Managed cluster healthy: nodes, Cassandra, Elasticsearch, capacity, Mission Control connectivity, backup and upgrades |
+
 **Security**
 
 | Prefix | Directory | Scope |
@@ -107,6 +115,7 @@ Paths are the literal directory names (they contain spaces — quote them in she
 Disambiguation for the overlapping clusters:
 - **OpenPipeline**: logs → OPLOGS; other signal types → OPIPE; migrating from classic pipelines → OPMIG.
 - **New Relic**: "how do we migrate" (process) → NR2DT; "how do I translate this NRQL/dashboard/alert" (reference) → NRLC.
+- **Dynatrace Managed**: running and keeping a cluster healthy → MCH; moving off Managed to SaaS → M2S.
 - **Alerting**: strategy/design → ALERT; anomaly detectors and AI → AIOPS; notification plumbing → WFLOW; reliability targets → SLO.
 
 ## Conventions and rules

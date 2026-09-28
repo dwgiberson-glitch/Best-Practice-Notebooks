@@ -40,7 +40,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Execute migration in 4 waves | Wave 1 (weeks 1-2): critical/security. Wave 2 (3-4): high-volume. Wave 3 (5-6): standard prod. Wave 4 (7+): dev/test | Critical |
 | Keep same API endpoint | `/api/v2/logs/ingest` works identically for Classic and OpenPipeline — no code changes | Recommended |
 | Maintain `logs.ingest` token scope | Add `metrics.ingest` only if using metric extraction | Critical |
-| Backup pipeline config before every change | `GET /api/v2/openpipeline/logs/pipelines/{id}` — store timestamped JSON backups | Critical |
+| Backup pipeline config before every change | Settings API: `GET /api/v2/settings/objects?schemaIds=builtin:openpipeline.logs.pipelines` (and `builtin:openpipeline.logs.routing`) — store timestamped JSON backups | Critical |
 
 <a id="pipeline-configuration"></a>
 ## 2. Pipeline Configuration
@@ -83,7 +83,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Bucket naming | `<environment>_<purpose>_logs` — max 100 chars, alphanumeric + underscore | Recommended |
 | Drop DEBUG/TRACE before storage | Drop processor: `loglevel == "DEBUG" OR loglevel == "TRACE"` — 30-70% volume reduction | Critical |
 | Drop health check logs | `matchesValue(content, "*/health*") OR matchesValue(content, "*/ready*") OR matchesValue(content, "*/metrics*")` — 5-20% additional reduction (`contains()` is not enabled in matchers) | Recommended |
-| Extract metrics, then don't store the raw logs | Assign the raw logs **No storage assignment** — a Drop record processor runs before Metric extraction and would leave nothing to extract. 1M requests/day as logs = ~$140/mo; as metrics = ~$1/mo (99.3% savings) | Recommended |
+| Extract metrics, then don't store the raw logs | Assign the raw logs **No storage assignment** — a Drop record processor runs before Metric extraction and would leave nothing to extract. 1M requests/day as logs = ~$140/mo; as metrics = ~$1/mo at placeholder rates (99.3% savings) | Recommended |
 | Staging/dev short retention | Staging: 14 days (60% savings). Dev: 7 days (80% savings) | Recommended |
 | Review bucket strategy quarterly | Usage trends, retention validation, unused buckets, compliance audit | Recommended |
 

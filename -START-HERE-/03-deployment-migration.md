@@ -1,7 +1,7 @@
 # Doorway 3 — Deployment Migration
 
 > **Purpose:** Reading order for existing Dynatrace customers changing deployment model — Managed → SaaS or SaaS → SaaS. Focused on migration mechanics; selective Foundation refresh where Gen3 differs from prior generations.
-> **Last Updated:** 07/23/2026
+> **Last Updated:** 09/25/2026
 
 ![Deployment Migration Sub-Paths](images/03-deployment-subpaths.svg)
 
@@ -39,7 +39,9 @@ If you are net-new to Dynatrace, see [Doorway 1 — Net New](01-net-new.md). If 
 
 ## Sub-Path A — Managed → SaaS (M2S)
 
-The [M2S](../M2S%20-%20Managed%20to%20SaaS%20Migration/) series provides a 9-step procedural runbook. Read each step in order:
+The [M2S](../M2S%20-%20Managed%20to%20SaaS%20Migration/) series provides a 9-step procedural runbook. Read each step in order.
+
+**Before step 1:** confirm the source cluster is healthy — a node down, a full disk, or a failing backup during a migration is much harder to untangle than before one. [MCH](../MCH%20-%20Managed%20Cluster%20Health/) — notebook 01 gives the five-layer health check.
 
 | Step | Reading | Time | Notes |
 |---|---|---|---|

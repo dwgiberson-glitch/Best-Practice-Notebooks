@@ -1,55 +1,116 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 930 500" font-family="Inter, system-ui, sans-serif">
   <rect width="930" height="500" fill="#0F172A"/>
-  <text x="465" y="32" text-anchor="middle" fill="#F8FAFC" font-size="20" font-weight="700">All 28 Series by Category</text>
-  <text x="465" y="52" text-anchor="middle" fill="#94A3B8" font-size="11">Foundation, Migration, Domain, Ingestion, Operationalize, Maturity, Reference</text>
-  <rect x="20" y="70" width="200" height="120" fill="#FFB800" opacity="0.08" stroke="#FFB800" stroke-width="1.5" rx="6"/>
-  <text x="120" y="92" text-anchor="middle" fill="#FCD34D" font-size="12" font-weight="700">Foundation</text>
-  <text x="120" y="115" text-anchor="middle" fill="#F8FAFC" font-size="11">ONBRD</text>
-  <text x="120" y="135" text-anchor="middle" fill="#F8FAFC" font-size="11">ORGNZ</text>
-  <text x="120" y="155" text-anchor="middle" fill="#F8FAFC" font-size="11">IAM</text>
-  <text x="120" y="180" text-anchor="middle" fill="#94A3B8" font-size="9">Universal — 35 notebooks</text>
-  <rect x="230" y="70" width="200" height="200" fill="#A78BFA" opacity="0.08" stroke="#A78BFA" stroke-width="1.5" rx="6"/>
-  <text x="330" y="92" text-anchor="middle" fill="#DDD6FE" font-size="12" font-weight="700">Migration</text>
-  <text x="330" y="115" text-anchor="middle" fill="#F8FAFC" font-size="11">NRLC + NR2DT</text>
-  <text x="330" y="135" text-anchor="middle" fill="#F8FAFC" font-size="11">S2D</text>
-  <text x="330" y="155" text-anchor="middle" fill="#F8FAFC" font-size="11">SL2DT</text>
-  <text x="330" y="175" text-anchor="middle" fill="#F8FAFC" font-size="11">M2S</text>
-  <text x="330" y="195" text-anchor="middle" fill="#F8FAFC" font-size="11">S2S</text>
-  <text x="330" y="215" text-anchor="middle" fill="#F8FAFC" font-size="11">OPMIG</text>
-  <text x="330" y="235" text-anchor="middle" fill="#F8FAFC" font-size="11">MZ2POL</text>
-  <text x="330" y="260" text-anchor="middle" fill="#94A3B8" font-size="9">Tool + deployment — 71 notebooks</text>
-  <rect x="440" y="70" width="200" height="200" fill="#1496FF" opacity="0.08" stroke="#1496FF" stroke-width="1.5" rx="6"/>
-  <text x="540" y="92" text-anchor="middle" fill="#BFDBFE" font-size="12" font-weight="700">Domain</text>
-  <text x="540" y="115" text-anchor="middle" fill="#F8FAFC" font-size="11">K8S</text>
-  <text x="540" y="135" text-anchor="middle" fill="#F8FAFC" font-size="11">CLOUD</text>
-  <text x="540" y="155" text-anchor="middle" fill="#F8FAFC" font-size="11">SPANS</text>
-  <text x="540" y="175" text-anchor="middle" fill="#F8FAFC" font-size="11">WEBRUM</text>
-  <text x="540" y="195" text-anchor="middle" fill="#F8FAFC" font-size="11">MOBL</text>
-  <text x="540" y="215" text-anchor="middle" fill="#F8FAFC" font-size="11">DBMON</text>
-  <text x="540" y="235" text-anchor="middle" fill="#F8FAFC" font-size="11">BIZEV  ·  SYNTH</text>
-  <text x="540" y="260" text-anchor="middle" fill="#94A3B8" font-size="9">8 series — 84 notebooks</text>
-  <rect x="650" y="70" width="200" height="120" fill="#22D3EE" opacity="0.08" stroke="#22D3EE" stroke-width="1.5" rx="6"/>
-  <text x="750" y="92" text-anchor="middle" fill="#A5F3FC" font-size="12" font-weight="700">Ingestion</text>
-  <text x="750" y="115" text-anchor="middle" fill="#F8FAFC" font-size="11">OTEL</text>
-  <text x="750" y="135" text-anchor="middle" fill="#F8FAFC" font-size="11">OPLOGS</text>
-  <text x="750" y="155" text-anchor="middle" fill="#F8FAFC" font-size="11">OPIPE</text>
-  <text x="750" y="180" text-anchor="middle" fill="#94A3B8" font-size="9">Cross-cutting — 25 notebooks</text>
-  <rect x="20" y="290" width="200" height="160" fill="#73BE28" opacity="0.08" stroke="#73BE28" stroke-width="1.5" rx="6"/>
-  <text x="120" y="312" text-anchor="middle" fill="#86EFAC" font-size="12" font-weight="700">Operationalize</text>
-  <text x="120" y="335" text-anchor="middle" fill="#F8FAFC" font-size="11">DASH (1st)</text>
-  <text x="120" y="355" text-anchor="middle" fill="#F8FAFC" font-size="11">WFLOW (2nd)</text>
-  <text x="120" y="375" text-anchor="middle" fill="#F8FAFC" font-size="11">AUTOM (3rd)</text>
-  <text x="120" y="395" text-anchor="middle" fill="#F8FAFC" font-size="11">AIOPS (4th)</text>
-  <text x="120" y="420" text-anchor="middle" fill="#94A3B8" font-size="9">Sequenced — 37 notebooks</text>
-  <rect x="230" y="290" width="200" height="120" fill="#A78BFA" opacity="0.08" stroke="#A78BFA" stroke-width="1.5" rx="6"/>
-  <text x="330" y="312" text-anchor="middle" fill="#DDD6FE" font-size="12" font-weight="700">Maturity</text>
-  <text x="330" y="335" text-anchor="middle" fill="#F8FAFC" font-size="11">ADOPT</text>
-  <text x="330" y="380" text-anchor="middle" fill="#94A3B8" font-size="9">Loop — 6 notebooks</text>
-  <rect x="440" y="290" width="200" height="120" fill="#64748B" opacity="0.12" stroke="#64748B" stroke-width="1.5" rx="6"/>
-  <text x="540" y="312" text-anchor="middle" fill="#F8FAFC" font-size="12" font-weight="700">Reference</text>
-  <text x="540" y="335" text-anchor="middle" fill="#F8FAFC" font-size="11">FAQ</text>
-  <text x="540" y="380" text-anchor="middle" fill="#94A3B8" font-size="9">Standalone single-page</text>
-  <text x="540" y="395" text-anchor="middle" fill="#94A3B8" font-size="9">growing collection</text>
-  <text x="465" y="450" text-anchor="middle" fill="#FCD34D" font-size="13" font-weight="700">28 series · 262 notebooks</text>
-  <text x="465" y="478" text-anchor="middle" fill="#64748B" font-size="11">Pick by entry point and need — most customers read 6–12 series cumulatively over a year</text>
+  <text x="465" y="36" text-anchor="middle" fill="#F8FAFC" font-size="22" font-weight="700">All 33 Series by Category</text>
+  <text x="465" y="58" text-anchor="middle" fill="#94A3B8" font-size="13">Notebook count per series — pick by entry point and need, not front to back</text>
+
+  <!-- Foundation -->
+  <rect x="20" y="78" width="200" height="222" fill="#FFB800" opacity="0.08" stroke="#FFB800" stroke-width="1.5" rx="8"/>
+  <text x="120" y="102" text-anchor="middle" fill="#FCD34D" font-size="15" font-weight="700">Foundation</text>
+  <text x="120" y="118" text-anchor="middle" fill="#94A3B8" font-size="10">Universal</text>
+  <text x="36" y="136" fill="#F8FAFC" font-size="12">ONBRD</text>
+  <text x="204" y="136" text-anchor="end" fill="#94A3B8" font-size="12">12</text>
+  <text x="36" y="153" fill="#F8FAFC" font-size="12">ORGNZ</text>
+  <text x="204" y="153" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <text x="36" y="170" fill="#F8FAFC" font-size="12">IAM</text>
+  <text x="204" y="170" text-anchor="end" fill="#94A3B8" font-size="12">15</text>
+  <text x="36" y="187" fill="#F8FAFC" font-size="12">APPSEC</text>
+  <text x="204" y="187" text-anchor="end" fill="#94A3B8" font-size="12">10</text>
+  <line x1="36" y1="276" x2="204" y2="276" stroke="#334155" stroke-width="1"/>
+  <text x="120" y="291" text-anchor="middle" fill="#FCD34D" font-size="11" font-weight="700">4 series · 48 notebooks</text>
+  <!-- Migration -->
+  <rect x="230" y="78" width="240" height="222" fill="#A78BFA" opacity="0.08" stroke="#A78BFA" stroke-width="1.5" rx="8"/>
+  <text x="350" y="102" text-anchor="middle" fill="#DDD6FE" font-size="15" font-weight="700">Migration</text>
+  <text x="350" y="118" text-anchor="middle" fill="#94A3B8" font-size="10">Tool + deployment</text>
+  <text x="246" y="136" fill="#F8FAFC" font-size="12">NRLC</text>
+  <text x="454" y="136" text-anchor="end" fill="#94A3B8" font-size="12">9</text>
+  <text x="246" y="153" fill="#F8FAFC" font-size="12">NR2DT</text>
+  <text x="454" y="153" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <text x="246" y="170" fill="#F8FAFC" font-size="12">S2D</text>
+  <text x="454" y="170" text-anchor="end" fill="#94A3B8" font-size="12">10</text>
+  <text x="246" y="187" fill="#F8FAFC" font-size="12">SL2DT</text>
+  <text x="454" y="187" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <text x="246" y="204" fill="#F8FAFC" font-size="12">OPMIG</text>
+  <text x="454" y="204" text-anchor="end" fill="#94A3B8" font-size="12">10</text>
+  <text x="246" y="221" fill="#F8FAFC" font-size="12">MZ2POL</text>
+  <text x="454" y="221" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <text x="246" y="238" fill="#F8FAFC" font-size="12">M2S</text>
+  <text x="454" y="238" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <text x="246" y="255" fill="#F8FAFC" font-size="12">S2S</text>
+  <text x="454" y="255" text-anchor="end" fill="#94A3B8" font-size="12">11</text>
+  <line x1="246" y1="276" x2="454" y2="276" stroke="#334155" stroke-width="1"/>
+  <text x="350" y="291" text-anchor="middle" fill="#DDD6FE" font-size="11" font-weight="700">8 series · 84 notebooks</text>
+  <!-- Domain -->
+  <rect x="480" y="78" width="240" height="222" fill="#1496FF" opacity="0.08" stroke="#1496FF" stroke-width="1.5" rx="8"/>
+  <text x="600" y="102" text-anchor="middle" fill="#BFDBFE" font-size="15" font-weight="700">Domain</text>
+  <text x="600" y="118" text-anchor="middle" fill="#94A3B8" font-size="10">What you monitor</text>
+  <text x="496" y="136" fill="#F8FAFC" font-size="12">K8S</text>
+  <text x="704" y="136" text-anchor="end" fill="#94A3B8" font-size="12">15</text>
+  <text x="496" y="153" fill="#F8FAFC" font-size="12">CLOUD</text>
+  <text x="704" y="153" text-anchor="end" fill="#94A3B8" font-size="12">9</text>
+  <text x="496" y="170" fill="#F8FAFC" font-size="12">SPANS</text>
+  <text x="704" y="170" text-anchor="end" fill="#94A3B8" font-size="12">9</text>
+  <text x="496" y="187" fill="#F8FAFC" font-size="12">WEBRUM</text>
+  <text x="704" y="187" text-anchor="end" fill="#94A3B8" font-size="12">10</text>
+  <text x="496" y="204" fill="#F8FAFC" font-size="12">MOBL</text>
+  <text x="704" y="204" text-anchor="end" fill="#94A3B8" font-size="12">13</text>
+  <text x="496" y="221" fill="#F8FAFC" font-size="12">DBMON</text>
+  <text x="704" y="221" text-anchor="end" fill="#94A3B8" font-size="12">7</text>
+  <text x="496" y="238" fill="#F8FAFC" font-size="12">BIZEV</text>
+  <text x="704" y="238" text-anchor="end" fill="#94A3B8" font-size="12">8</text>
+  <text x="496" y="255" fill="#F8FAFC" font-size="12">SYNTH</text>
+  <text x="704" y="255" text-anchor="end" fill="#94A3B8" font-size="12">7</text>
+  <line x1="496" y1="276" x2="704" y2="276" stroke="#334155" stroke-width="1"/>
+  <text x="600" y="291" text-anchor="middle" fill="#BFDBFE" font-size="11" font-weight="700">8 series · 78 notebooks</text>
+  <!-- Ingestion -->
+  <rect x="730" y="78" width="180" height="222" fill="#22D3EE" opacity="0.08" stroke="#22D3EE" stroke-width="1.5" rx="8"/>
+  <text x="820" y="102" text-anchor="middle" fill="#A5F3FC" font-size="15" font-weight="700">Ingestion</text>
+  <text x="820" y="118" text-anchor="middle" fill="#94A3B8" font-size="10">Cross-cutting</text>
+  <text x="746" y="136" fill="#F8FAFC" font-size="12">OTEL</text>
+  <text x="894" y="136" text-anchor="end" fill="#94A3B8" font-size="12">9</text>
+  <text x="746" y="153" fill="#F8FAFC" font-size="12">OPLOGS</text>
+  <text x="894" y="153" text-anchor="end" fill="#94A3B8" font-size="12">9</text>
+  <text x="746" y="170" fill="#F8FAFC" font-size="12">OPIPE</text>
+  <text x="894" y="170" text-anchor="end" fill="#94A3B8" font-size="12">7</text>
+  <line x1="746" y1="276" x2="894" y2="276" stroke="#334155" stroke-width="1"/>
+  <text x="820" y="291" text-anchor="middle" fill="#A5F3FC" font-size="11" font-weight="700">3 series · 25 notebooks</text>
+  <!-- Operationalize -->
+  <rect x="20" y="312" width="450" height="146" fill="#73BE28" opacity="0.08" stroke="#73BE28" stroke-width="1.5" rx="8"/>
+  <text x="245" y="336" text-anchor="middle" fill="#86EFAC" font-size="15" font-weight="700">Operationalize</text>
+  <text x="245" y="352" text-anchor="middle" fill="#94A3B8" font-size="10">Day-2 operations</text>
+  <text x="36" y="370" fill="#F8FAFC" font-size="12">ALERT</text>
+  <text x="229" y="370" text-anchor="end" fill="#94A3B8" font-size="12">5</text>
+  <text x="36" y="387" fill="#F8FAFC" font-size="12">DASH</text>
+  <text x="229" y="387" text-anchor="end" fill="#94A3B8" font-size="12">8</text>
+  <text x="36" y="404" fill="#F8FAFC" font-size="12">WFLOW</text>
+  <text x="229" y="404" text-anchor="end" fill="#94A3B8" font-size="12">12</text>
+  <text x="36" y="421" fill="#F8FAFC" font-size="12">AUTOM</text>
+  <text x="229" y="421" text-anchor="end" fill="#94A3B8" font-size="12">14</text>
+  <text x="261" y="370" fill="#F8FAFC" font-size="12">AIOPS</text>
+  <text x="454" y="370" text-anchor="end" fill="#94A3B8" font-size="12">8</text>
+  <text x="261" y="387" fill="#F8FAFC" font-size="12">SLO</text>
+  <text x="454" y="387" text-anchor="end" fill="#94A3B8" font-size="12">6</text>
+  <text x="261" y="404" fill="#F8FAFC" font-size="12">FINOPS</text>
+  <text x="454" y="404" text-anchor="end" fill="#94A3B8" font-size="12">3</text>
+  <line x1="36" y1="434" x2="454" y2="434" stroke="#334155" stroke-width="1"/>
+  <text x="245" y="449" text-anchor="middle" fill="#86EFAC" font-size="11" font-weight="700">7 series · 56 notebooks</text>
+  <!-- Self-Hosted Ops -->
+  <rect x="480" y="312" width="200" height="146" fill="#64748B" opacity="0.08" stroke="#64748B" stroke-width="1.5" rx="8"/>
+  <text x="580" y="336" text-anchor="middle" fill="#CBD5E1" font-size="15" font-weight="700">Self-Hosted Ops</text>
+  <text x="580" y="352" text-anchor="middle" fill="#94A3B8" font-size="10">Dynatrace Managed</text>
+  <text x="496" y="370" fill="#F8FAFC" font-size="12">MCH</text>
+  <text x="664" y="370" text-anchor="end" fill="#94A3B8" font-size="12">8</text>
+  <line x1="496" y1="434" x2="664" y2="434" stroke="#334155" stroke-width="1"/>
+  <text x="580" y="449" text-anchor="middle" fill="#CBD5E1" font-size="11" font-weight="700">1 series · 8 notebooks</text>
+  <!-- Maturity & Reference -->
+  <rect x="690" y="312" width="220" height="146" fill="#94A3B8" opacity="0.08" stroke="#94A3B8" stroke-width="1.5" rx="8"/>
+  <text x="800" y="336" text-anchor="middle" fill="#F8FAFC" font-size="15" font-weight="700">Maturity & Reference</text>
+  <text x="800" y="352" text-anchor="middle" fill="#94A3B8" font-size="10">Loop + standalone</text>
+  <text x="706" y="370" fill="#F8FAFC" font-size="12">ADOPT</text>
+  <text x="894" y="370" text-anchor="end" fill="#94A3B8" font-size="12">7</text>
+  <text x="706" y="387" fill="#F8FAFC" font-size="12">FAQ</text>
+  <text x="894" y="387" text-anchor="end" fill="#94A3B8" font-size="12">25</text>
+  <line x1="706" y1="434" x2="894" y2="434" stroke="#334155" stroke-width="1"/>
+  <text x="800" y="449" text-anchor="middle" fill="#F8FAFC" font-size="11" font-weight="700">2 series · 32 notebooks</text>
+  <line x1="40" y1="470" x2="890" y2="470" stroke="#334155" stroke-width="1"/>
+  <text x="465" y="492" text-anchor="middle" fill="#FCD34D" font-size="13" font-weight="700">33 series · 331 notebooks</text>
 </svg>

@@ -1,6 +1,6 @@
 # WFLOW-08: JavaScript & HTTP Actions
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 8 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 8 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Custom Code and API Integration
 When built-in actions aren't enough, use JavaScript and HTTP requests for custom integrations. This notebook covers the JavaScript SDK, HTTP request patterns, and common integration scenarios.
@@ -1040,13 +1040,17 @@ A frequent ask: read host→application mappings from a CMDB and apply them as h
 The shape is two `run-javascript` tasks:
 
 1. **`query_hosts_and_enrich`** — enriches `dt.entity.host` through a CMDB lookup chain (`lookup [load "/lookups/…"]`), dedups by host id, and diffs against existing tags → returns `hosts[]`.
-2. **`apply_tags_to_hosts`** — loops (`withItems`) over `hosts[]` and POSTs a `set hostTag` operation to the **OneAgent Remote Configuration Management API** (`${ENVIRONMENT_URL}/api/v2/oneagents/remoteConfigurationManagement`) using a Gen2 (classic) `oneAgents.write` API token read from the Credential Vault. Guardrails: `DRY_RUN`, `MAX_HOSTS`, skip-existing, 409-retry. (Config is supplied via workflow inputs; the platform-token path, `fleet-management:oneagents:write`, isn't GA yet.)
+2. **`apply_tags_to_hosts`** — loops (`withItems`) over `hosts[]` and POSTs a `set hostTag` operation to the **OneAgent Remote Configuration Management API** (`${ENVIRONMENT_URL}/api/v2/oneagents/remoteConfigurationManagement`) using a Gen2 (classic) `oneAgents.write` API token read from the Credential Vault. Guardrails: `DRY_RUN`, `MAX_HOSTS`, skip-existing, 409-retry. (Config is supplied via workflow inputs. The API reference now also lists a platform-token / OAuth scope, `fleet-management:oneagents:write`; the LAB keeps the live-validated classic token until that path is re-tested.)
 
 One `set hostTag` operation writes both `primary_tags.*` (the prefix is mandatory) and `dt.*` primary fields (`dt.security_context`, `dt.cost.costcenter`) — see **FAQ-02 (Tagging: Sources, Standards & Strategy)** for the tagging-source model.
 
+> **Check first whether you need this workflow at all.** If the tag value can be derived from context the host already reports — host group, host name, an existing host tag — the Latest Dynatrace path is **Ingest enrichment configuration** (FAQ-02 § 3.3): a central rule, OneAgent 1.343+, with *"No changes on the hosts are required"* and *"No agent restart is needed."* This workflow is for the case a rule cannot express: a per-host value that lives only in an external CMDB.
+>
+> It also carries a restart cost the rule does not. The API reference states that *"By default OneAgents will be restarted when network zone, host group, host tags or host properties are reconfigured - the restart is required to apply the changes."* Plan live runs as restart events, or accept that tags apply only at each host's next restart.
+
 > **Hands-on build:** the complete step-by-step walkthrough — build it in the Workflows editor, both scripts, customization, the loop/condition wiring, the safety model, and an import-ready YAML skeleton — is in the **WFLOW-95 LAB: CMDB-Driven Host Tag Enrichment**.
 
-> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job), [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data). **Derived:** the two-task shape combines this notebook's §2–§7 mechanics — full hands-on build in the WFLOW-95 LAB.</sub>
+> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — *"Required scope: fleet-management:oneagents:write"* (platform token / OAuth), read 09/28/2026, [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data), [OneAgent tag setup — Ingest enrichment configuration (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent#ingest-enrichment-configuration) — *"No agent restart is needed."* **Derived:** the two-task shape combines this notebook's §2–§7 mechanics — full hands-on build in the WFLOW-95 LAB.</sub>
 
 ## Next Steps
 

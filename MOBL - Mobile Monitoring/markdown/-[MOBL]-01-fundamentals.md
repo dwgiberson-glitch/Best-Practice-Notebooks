@@ -1,6 +1,6 @@
 # MOBL-01: Mobile Monitoring Fundamentals
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 1 of 12 | **Created:** February 2026 | **Last Updated:** 08/28/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 1 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -54,7 +54,7 @@ Released 08/03/2026 with rollout from 08/11/2026. No Flutter, React Native, or C
 | Requirement | Details |
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `rum.read`, `entities.read` |
+| **Permissions** | `storage:smartscape:read` (app inventory; classic table: `storage:entities:read`), `storage:user.events:read`, `storage:user.sessions:read` |
 | **Mobile App** | At least one configured mobile application |
 
 <a id="what-is-mobile-rum"></a>
@@ -116,12 +116,13 @@ Dynatrace provides native SDKs for all major mobile platforms and cross-platform
 
 | Platform | SDK | Language | Auto-Instrumentation |
 |----------|-----|----------|---------------------|
-| iOS | Dynatrace iOS Agent | Swift, Objective-C | UIKit (full), SwiftUI (partial) |
-| Android | Dynatrace Android Agent | Kotlin, Java | Activities, Fragments |
+| iOS | Dynatrace iOS Agent | Swift, Objective-C | UIKit (runtime), SwiftUI (build-time `DTSwiftInstrumentor`) |
+| Android | Dynatrace Android Agent | Kotlin, Java | Activities, Fragments, Jetpack Compose (plugin 8.271+) |
 | Flutter | dynatrace_flutter_plugin | Dart | Navigation, HTTP |
 | React Native | @dynatrace/react-native-plugin | JavaScript/TypeScript | Navigation, Fetch/XHR |
 | Cordova | dynatrace-cordova-plugin | JavaScript | WebView-based |
-| Xamarin | Dynatrace Xamarin Agent | C# | Platform views |
+| .NET MAUI | Dynatrace.OneAgent.MAUI | C# | Platform views |
+| Xamarin | Dynatrace.OneAgent.Xamarin -- **end of support May 2025**; migrate to .NET MAUI | C# | Platform views |
 
 ### SDK Integration Methods
 
@@ -131,7 +132,7 @@ Dynatrace provides native SDKs for all major mobile platforms and cross-platform
 | **Manual instrumentation** | Developer explicitly starts/ends actions and reports values | Custom user actions, business events |
 | **Hybrid** | Auto-instrumentation + manual calls for custom events | Best of both worlds |
 
-> **Note:** Auto-instrumentation coverage varies by platform. iOS UIKit has the broadest auto-instrumentation. SwiftUI and Jetpack Compose require more manual instrumentation for view-level tracking.
+> **Note:** Auto-instrumentation coverage varies by platform and mechanism. UIKit and Android Views are instrumented at runtime/bytecode level; SwiftUI needs the build-time SwiftUI instrumentor (MOBL-02 §5); Jetpack Compose is auto-instrumented by default from Android Gradle plugin 8.271 (MOBL-03 §5).
 
 <a id="mobile-entity-types"></a>
 
@@ -142,12 +143,14 @@ Dynatrace models mobile monitoring data using specific entity types and data obj
 | Entity Type | DQL Identifier | Description |
 |-------------|---------------|-------------|
 | Mobile Application | Classic: `dt.entity.mobile_application` — Smartscape: `smartscapeNodes "FRONTEND"` filtered on `frontend.type == "mobile"` | The configured mobile app (iOS, Android, or hybrid) |
-| User Action | N/A (bizevents) | Tap, swipe, screen load, or custom action |
-| Session | N/A (bizevents) | User session container linking all actions in a visit |
-| Network Request | N/A (bizevents) | HTTP request initiated by the mobile app |
-| Crash | N/A (events) | Native crash, ANR, or unhandled exception |
+| User Action | `user.events` with `characteristics.has_user_action` | Tap, swipe, screen load, or custom action |
+| Session | `user.sessions` (one record per session) | User session container linking all actions in a visit |
+| Network Request | `user.events` with `characteristics.has_request` | HTTP request initiated by the mobile app |
+| Crash | `user.events` with `characteristics.has_crash` (ANR: `characteristics.has_anr`) | Native crash, ANR, or unhandled exception |
 
-> **Note:** Mobile user actions, sessions, and network requests are stored as business events (bizevents) in Grail, not as traditional entities. Crashes appear as events. The mobile application entity represents the configured app itself.
+> **Note:** Mobile user actions, requests, crashes and ANRs are stored as events in the Grail `user.events` store, and sessions in `user.sessions` -- not as traditional entities, and **not** as business events. `dt.rum.application.type == "mobile"` separates mobile from web frontends in both. The mobile application entity represents the configured app itself.
+
+> **Correction (09/28/2026).** Earlier revisions of this table said actions, sessions and requests are business events (`bizevents`). That data model does not exist; see MOBL-10 §1 for the mapping and the semantic-dictionary evidence.
 
 > **Correction (07/30/2026).** Earlier revisions of this notebook named the mobile application entity `dt.entity.device_application` in prose. **That entity type does not exist.** `verify_dql` reports `The entity type dt.entity.device_application wasn't found` — and then still reports the statement valid, so the query runs and returns zero rows, which is indistinguishable from "this environment has no mobile applications". The only `device_application` types that exist are `dt.entity.device_application_method` and `dt.entity.device_application_method_group` (RUM action-level types, not the app). The correct classic type is **`dt.entity.mobile_application`**, which every code cell in this notebook already used — the error was confined to the narrative. Treat a `wasn't found` warning from `verify_dql` as a blocking failure, not advice.
 
@@ -289,7 +292,7 @@ Follow these steps to set up mobile monitoring for your application:
 
 9. **Define custom actions (optional)** -- Use the SDK API to report custom user actions and business events that are specific to your app's workflow.
 
-10. **Create dashboards and alerts** -- Build dashboards for crash rate, app launch time, and network errors. For alerting, use **Davis anomaly detectors** rather than classic alerting profiles: `builtin:alerting.profile` is flagged blocked at upgrade, so a checklist that ends there leaves you building something with an expiry. See ALERT-01 for the target architecture and MOBL-11 §5 for the mobile-specific detectors.
+10. **Create dashboards and alerts** -- Build dashboards for crash rate, app launch time, and network errors. For alerting, use **Davis anomaly detectors** rather than classic alerting profiles: `builtin:alerting.profile` is flagged blocked at upgrade, so a checklist that ends there leaves you building something with an expiry. See ALERT-01 for the target architecture and MOBL-11 §5 for a mobile crash-rate detector.
 
 ### Verify Your Mobile App Configuration
 
@@ -319,8 +322,8 @@ In this notebook, you learned:
 
 - **What mobile RUM is** and the key metrics it captures (app launch time, crash rate, user actions per session, network error rate)
 - **Mobile monitoring architecture** -- how the SDK, beacon endpoint, cluster, and Grail work together
-- **Supported platforms** -- iOS, Android, Flutter, React Native, Cordova, and Xamarin SDKs
-- **Mobile entity types** -- the `FRONTEND` Smartscape node filtered on `frontend.type == "mobile"` (preferred), or classic `dt.entity.mobile_application` (still functional) -- **never** `dt.entity.device_application`, which does not exist -- plus bizevents for actions, sessions, and network requests
+- **Supported platforms** -- iOS, Android, Flutter, React Native, Cordova, and .NET MAUI (Xamarin is past end of support)
+- **Mobile entity types** -- the `FRONTEND` Smartscape node filtered on `frontend.type == "mobile"` (preferred), or classic `dt.entity.mobile_application` (still functional) -- **never** `dt.entity.device_application`, which does not exist -- plus `user.events` / `user.sessions` for actions, sessions, requests, and crashes
 - **Why mobile and web share one node type** -- Smartscape collapsed both classic application entities into `FRONTEND`, discriminated by `frontend.type`, with `id_classic` bridging back to classic ids
 - **Beacon data flow** -- batching, offline buffering, compression, and session correlation
 - **Mobile vs Web RUM differences** -- entity types, instrumentation methods, offline capability, and platform-specific considerations
@@ -330,11 +333,11 @@ In this notebook, you learned:
 
 ## Next Steps
 
-Continue to **MOBL-02: Mobile Session Analysis** to learn:
-- Querying mobile user sessions with DQL
-- Analyzing session duration, action count, and crash correlation
-- Filtering sessions by app version, OS, and device model
-- Building session funnels for conversion analysis
+Continue to **MOBL-02: iOS SDK Setup (Swift & SwiftUI)** to learn:
+- Creating a mobile app configuration and installing the iOS SDK (SPM or CocoaPods)
+- Configuring `Info.plist` for auto-start and crash reporting
+- UIKit auto-instrumentation and SwiftUI instrumentation with `DTSwiftInstrumentor`
+- Verifying data flow with DQL
 
 ---
 

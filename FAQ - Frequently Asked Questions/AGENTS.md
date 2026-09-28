@@ -14,7 +14,7 @@ Read only the file(s) matching the question. All paths are under `markdown/`.
 | When the question is about… | Read |
 |---|---|
 | Why host-group naming matters: ownership, access control, alert routing, automation scope, single-group risks | `-[FAQ]-01-host-group-naming-strategy.md` |
-| Tagging: the four tag sources, primary tags/fields vs auto-tags, per-cloud specifics, taxonomy standards, anti-patterns | `-[FAQ]-02-tagging-sources-standards-strategy.md` |
+| Tagging: the four tag sources, primary tags/fields vs auto-tags, changing tags remotely without touching hosts (Ingest enrichment configuration), per-cloud specifics, taxonomy standards, anti-patterns | `-[FAQ]-02-tagging-sources-standards-strategy.md` |
 | OneAgent vs OpenTelemetry: convert vs layer vs leave-alone vs greenfield, per-runtime coverage (Java/.NET/Node/Python/Go/PHP/Ruby), async context propagation | `-[FAQ]-03-oneagent-vs-otel-decision-framework.md` |
 | OneAgent update modes, tenant/host-group/host precedence, update vs maintenance windows, DynaKube `autoUpdate` deprecation, rollback | `-[FAQ]-04-managing-oneagent-updates-saas.md` |
 | ActiveGate updates: Fleet management target version and update windows (Latest Dynatrace) vs the per-AG toggle (Classic), auto vs manual, ActiveGates-before-OneAgents sequencing, HA-pair rolling updates, role-specific validation | `-[FAQ]-05-managing-activegate-updates-saas.md` |

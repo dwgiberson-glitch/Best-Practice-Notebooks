@@ -1,7 +1,7 @@
 # Overlap Map
 
 > **Purpose:** Catalog of where multiple series cover the same ground, with recommendations for which is canonical and the suggested reading order. Use this when you find yourself reading similar material across two or more series and want to dedupe.
-> **Last Updated:** 07/31/2026
+> **Last Updated:** 09/25/2026
 
 ---
 
@@ -147,7 +147,7 @@ For the doorway that sequences all of these together, see [Doorway 4 — Classic
 - Add new series to the relevant overlap tables (Operationalize, Domain, Cross-Category, etc.)
 - When a new series introduces overlaps with existing series, add rows to the appropriate table
 - Remove or update anti-patterns if they become outdated due to new series
-- Update series count references if the total count changes (currently 32 topic series as of July 15, 2026)
+- Update series count references if the total count changes (currently 33 topic series as of September 25, 2026)
 - Update Last Updated date to current date
 
 The overlap map is a deduplication guide; stale maps create confusion when readers encounter the same topic in unexpected places. Keep it current alongside new series releases.

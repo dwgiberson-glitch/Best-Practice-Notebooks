@@ -10,7 +10,7 @@ Dynatrace best-practice notebooks with matching PDF and Markdown exports. These 
 
 
 > **👉 New here?** Open [`-START-HERE-/`](-START-HERE-/README.md) — a navigational playbook that picks an entry path based on your situation (net-new, expand/consolidate, deployment migration, classic → Gen3 platform), then sequences the relevant topic series in order.
-> Already know what you need? Skip the playbook and **[browse all 32 topic series ↓](#all-series-az)**.
+> Already know what you need? Skip the playbook and **[browse all 33 topic series ↓](#all-series-az)**.
 
 > **🤖 Using this repo with an AI agent?** It's agent-ready: point your agent
 > (Claude Code, Codex, Cursor, Copilot…) at the repo root and it will find
@@ -26,11 +26,13 @@ Each topic follows the same structure:
 - README.md — Topic overview and usage guide
 - AGENTS.md — Routing table for AI agents (present in every series)
 
+MCH (Managed Cluster Health) is the one exception: it has no notebooks/ directory, because Dynatrace Managed has no Grail and the series contains no executable queries to import.
+
 Every series uses these exact lowercase directory names. Series directory names contain spaces, so quote them in shell commands.
 
 ## Categories
 
-Series are grouped into six categories for navigation. An alphabetical index follows below.
+Series are grouped into seven categories for navigation. An alphabetical index follows below.
 
 - **Foundations & Adoption** — getting started, maturity, access, data organization, cost management
   [ONBRD](#onbrd---dynatrace-onboarding) · [ADOPT](#adopt---observability-adoption--maturity) · [IAM](#iam---iam-administration) · [ORGNZ](#orgnz---organize-data-buckets-segments-security) · [FAQ](#faq---frequently-asked-questions) · [FINOPS](#finops---cost-management--finops)
@@ -40,6 +42,8 @@ Series are grouped into six categories for navigation. An alphabetical index fol
   [OPLOGS](#oplogs---openpipeline-logs) · [OPIPE](#opipe---openpipeline-beyond-logs) · [SPANS](#spans---distributed-tracing-and-spans) · [BIZEV](#bizev---business-events--funnel-analysis) · [DASH](#dash---dashboard-design--building)
 - **Automation & Workflows** — configuration-as-code, alerting, reliability, and operational workflows
   [AUTOM](#autom---dynatrace-automation) · [WFLOW](#wflow---workflows-and-alert-notifications) · [AIOPS](#aiops---dynatrace-intelligence) · [ALERT](#alert---alerting-strategy-and-design) · [SLO](#slo---service-level-objectives)
+- **Dynatrace Managed Operations** — keeping a self-hosted Managed cluster healthy
+  [MCH](#mch---managed-cluster-health)
 - **Security** — runtime vulnerability analytics, application protection, and security posture management
   [APPSEC](#appsec---application-security)
 - **Migrations** — moving to Dynatrace or between Dynatrace environments
@@ -234,19 +238,30 @@ Guide for migrating from Dynatrace Managed to Dynatrace SaaS.
 - [M2S-95: [LAB] Terraform for Managed-to-SaaS Migration](M2S%20-%20Managed%20to%20SaaS%20Migration/markdown/-%5BM2S%5D-95-%5BLAB%5D-terraform-migration.md) — Appendix lab: migrating with the Terraform provider — bulk vs iterative export, Managed-source auth and scopes, entity-ID preservation via `oneagentctl`, wave-ordered apply
 - [M2S-99: Best Practice Summary](M2S%20-%20Managed%20to%20SaaS%20Migration/markdown/-%5BM2S%5D-99-best-practice-summary.md) — Definitive reference of all best practices from the M2S series
 
+### [MCH - Managed Cluster Health](MCH%20-%20Managed%20Cluster%20Health/README.md)
+Operating a self-hosted Dynatrace Managed cluster: node architecture, a five-layer health model, and where each health signal is surfaced. Markdown and PDF only.
+
+- [MCH-01: Managed Cluster Architecture and Health Model](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-01-managed-cluster-architecture-health-model.md) — What runs on a cluster node, what a node failure costs, the five-layer health model, and where each health signal is surfaced
+- [MCH-02: Server Nodes and Processes](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-02-server-nodes-and-processes.md) — Node inventory and operation state, on-node process checks, the gated service start order, safe restarts, which node events email you, memory, time, inter-node network, and triage
+- [MCH-03: Cassandra Metrics Store Health](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-03-cassandra-metrics-store.md) — The metrics repository: replication, size ceilings and their events, 5-year retention by resolution, nodetool health checks, adding and removing nodes, repair, what the daily backup restores, rack awareness, and Cassandra versions
+- [MCH-04: Elasticsearch Store Health](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-04-elasticsearch-store.md) — Outline: cluster health checks, disk space and adaptive retention, snapshots
+- [MCH-05: Cluster ActiveGates and Mission Control Connectivity](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-05-activegates-mission-control-connectivity.md) — Outline: agent traffic path, the Mission Control link, and what breaks when it is down
+- [MCH-06: Capacity and Scaling](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-06-capacity-and-scaling.md) — Outline: node sizing, failure headroom, load-reduction signals, adding nodes
+- [MCH-07: Backup, Upgrade, and Disaster Recovery](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-07-backup-upgrade-disaster-recovery.md) — Outline: backup scope, restore readiness, upgrades, version support, Premium High Availability
+- [MCH-99: Best Practice Summary and Health-Check Checklist](MCH%20-%20Managed%20Cluster%20Health/markdown/-%5BMCH%5D-99-best-practice-summary.md) — Outline: five-layer checklist, review cadence, anti-patterns
 ### [MOBL - Mobile Monitoring](MOBL%20-%20Mobile%20Monitoring/README.md)
 Dynatrace mobile Real User Monitoring (RUM) for iOS, Android, and cross-platform frameworks.
 - [MOBL-01: Mobile Monitoring Fundamentals](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-01-fundamentals.md) — Mobile RUM architecture, supported platforms, and beacon data flow
 - [MOBL-02: iOS SDK Setup](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-02-sdk-setup-ios.md) — Installing and configuring the Dynatrace SDK for Swift and SwiftUI
 - [MOBL-03: Android SDK Setup](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-03-sdk-setup-android.md) — Setting up Dynatrace RUM for Android with Gradle
-- [MOBL-04: Cross-Platform Frameworks](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-04-cross-platform-frameworks.md) — Instrumenting Flutter, React Native, Cordova, Xamarin, and .NET MAUI
+- [MOBL-04: Cross-Platform Frameworks](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-04-cross-platform-frameworks.md) — Instrumenting Flutter, React Native, Cordova, and .NET MAUI (Xamarin end of support)
 - [MOBL-05: User Action Tracking](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-05-user-action-tracking.md) — Capturing auto-detected and custom user interactions
 - [MOBL-06: Crash Reporting & ANR Detection](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-06-crash-reporting.md) — Automatic crash capture, symbolication, and grouping
 - [MOBL-07: Network Request Monitoring](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-07-network-request-monitoring.md) — HTTP(S) request visibility and timing breakdown
 - [MOBL-08: Session Replay for Mobile](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-08-session-replay.md) — Visual session recording with privacy masking
 - [MOBL-09: Session Properties & Data Privacy](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-09-session-properties-and-privacy.md) — Custom session enrichment and GDPR/CCPA compliance
-- [MOBL-10: DQL for Mobile Analytics](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-10-dql-for-mobile.md) — Query reference for mobile entities, crashes, and performance
-- [MOBL-11: Dashboards & Alerting](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-11-dashboards-and-alerting.md) — KPI dashboards with anomaly detection and metric event alerts
+- [MOBL-10: DQL for Mobile Analytics](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-10-dql-for-mobile.md) — Query reference for mobile RUM in user.events and user.sessions
+- [MOBL-11: Dashboards & Alerting](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-11-dashboards-and-alerting.md) — KPI dashboards, crash-rate detectors, and problem workflows
 - [MOBL-12: Advanced Instrumentation](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-12-advanced-instrumentation.md) — Custom events, nested actions, A/B testing, and multi-app strategies
 - [MOBL-99: Best Practice Summary](MOBL%20-%20Mobile%20Monitoring/markdown/-%5BMOBL%5D-99-best-practice-summary.md) — Consolidated best practices from the MOBL series
 

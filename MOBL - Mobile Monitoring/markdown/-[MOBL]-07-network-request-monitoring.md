@@ -1,6 +1,6 @@
 # MOBL-07: Network Request Monitoring
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 7 of 12 | **Created:** February 2026 | **Last Updated:** 08/04/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 7 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -32,10 +32,10 @@ This notebook explains how Dynatrace captures network requests across platforms,
 
 | Requirement | Details |
 |-------------|----------|
-| **Dynatrace Environment** | SaaS or Managed with Grail enabled |
+| **Dynatrace Environment** | SaaS with Grail |
 | **Mobile App Instrumented** | Dynatrace Mobile SDK deployed (iOS, Android, Flutter, or React Native) |
 | **Network Requests** | Mobile app actively making HTTP(S) requests being captured by the SDK |
-| **Permissions** | `bizevents.read`, `spans.read` |
+| **Permissions** | `storage:user.events:read`, `storage:spans:read` |
 | **Distributed Tracing** | Backend services instrumented with OneAgent or OpenTelemetry for correlation |
 
 <a id="automatic-http-capture"></a>
@@ -153,9 +153,9 @@ One of the most powerful features of Dynatrace mobile monitoring is the ability 
 | Step | Component | Action |
 |------|-----------|--------|
 | 1 | Mobile App | Initiates HTTP request |
-| 2 | Dynatrace SDK | Injects x-dtc header into request |
+| 2 | Dynatrace SDK | Adds the `x-dynatrace` header (RUM Classic) and, from 8.333, W3C `traceparent` / `tracestate` |
 | 3 | Network | Request travels to backend |
-| 4 | Backend Service | Receives request with x-dtc header |
+| 4 | Backend Service | Receives the request with the correlation headers |
 | 5 | OneAgent/OTel | Creates server-side span linked to mobile trace |
 | 6 | Dynatrace | Stitches mobile action and backend trace into unified distributed trace |
 For environments where SVG doesn't render
@@ -164,8 +164,8 @@ For environments where SVG doesn't render
 ### How It Works
 
 1. **Request Initiation** -- The mobile app makes an HTTP(S) request using a standard networking library.
-2. **Header Injection** -- The Dynatrace Mobile SDK automatically injects the `x-dtc` (Dynatrace correlation) header into the outgoing request. This header carries the trace context.
-3. **Backend Processing** -- The backend service (instrumented with OneAgent or OpenTelemetry) reads the `x-dtc` header and creates a server-side span that is linked to the mobile trace.
+2. **Header Injection** -- The Dynatrace Mobile SDK adds the `x-dynatrace` header to the outgoing request (RUM Classic), and from OneAgent for Mobile 8.333 also injects the W3C Trace Context headers `traceparent` and `tracestate`. Custom networking stacks must add the headers manually (for `x-dynatrace`, via `Dynatrace.getRequestTagHeader()` and a request tag -- see MOBL-12 §4).
+3. **Backend Processing** -- The backend service (instrumented with OneAgent or OpenTelemetry) reads the trace context and creates a server-side span that is linked to the mobile request.
 4. **Trace Stitching** -- Dynatrace automatically stitches the mobile user action and the backend service call into a unified distributed trace.
 
 ### What This Enables
@@ -177,13 +177,17 @@ For environments where SVG doesn't render
 | **Service dependency mapping** | Understand which backend services support which mobile features |
 | **Error correlation** | Link a mobile HTTP 500 error to the specific backend exception |
 
-> **Important:** For correlation to work, the backend service must be instrumented with Dynatrace OneAgent or a compatible OpenTelemetry setup that understands the `x-dtc` header format.
+> **Important:** For correlation to work, the backend service must be instrumented with Dynatrace OneAgent or OpenTelemetry. W3C trace context works with both.
+
+> **Correction (09/28/2026).** Earlier revisions named the mobile correlation header `x-dtc`. That is the web RUM JavaScript header; the mobile SDK uses `x-dynatrace` and, from 8.333, W3C trace context. OneAgent for Mobile 8.333 was released 02/23/2026 with rollout from 02/24/2026; mobile agent versions reach users with app releases, so older builds in the field still send only `x-dynatrace`.
+
+> <sub>**Sources:** [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android) — *"To track web requests, add the x-dynatrace HTTP header with a unique value to the web request."*, [What's new in OneAgent for Mobile 8.333 (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent-mobile/sprint-333) — *"OneAgent for Mobile now injects W3C Trace Context headers ( traceparent and tracestate ) into outbound requests"*, [Frontend-backend linking (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum/concepts/frontend-backend-linking).</sub>
 
 <a id="querying-network-requests"></a>
 
 ## 5. Querying Network Requests
 
-Network requests from mobile apps are stored as business events in Grail. The following queries demonstrate how to retrieve, aggregate, and analyze mobile network request data.
+Network requests from mobile apps are stored in the Grail `user.events` store (`characteristics.has_request`), with `url.full`, `http.request.method`, `http.response.status_code`, `duration` and `network.connection.type`. The following queries demonstrate how to retrieve, aggregate, and analyze mobile network request data.
 
 ### Recent Network Requests
 
@@ -191,11 +195,10 @@ Retrieve the most recent network requests from mobile applications, showing the 
 
 ```dql
 // Recent network requests from mobile apps
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(http.url)
-| fields timestamp, useraction.application, http.url, http.method, http.status_code, connection.type
-| sort timestamp desc
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and characteristics.has_request
+| fields start_time, frontend.name, url.full, http.request.method, http.response.status_code, duration, network.connection.type
+| sort start_time desc
 | limit 50
 ```
 
@@ -205,26 +208,26 @@ Understand which mobile applications are generating the most network traffic. Th
 
 ```dql
 // Network request volume by application
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(http.url)
-| summarize request_count = count(), by:{useraction.application}
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and characteristics.has_request
+| summarize request_count = count(), by:{frontend.name}
 | sort request_count desc
 | limit 20
 ```
 
-### Backend Response Times for Mobile Requests
+### Trace Coverage of Mobile Requests
 
-Query the backend spans that were correlated with mobile-originated requests. The `x-dtc` header presence indicates the request originated from a Dynatrace-instrumented mobile app.
+Measure how many mobile requests were linked to a backend distributed trace: a request event that carries `trace.id` was linked. A low rate points at backends that are not instrumented, or at app builds older than 8.333. To see the backend side, collect the `trace.id` values and query `fetch spans | filter in(trace.id, ...)`.
 
 ```dql
-// Backend response times for mobile-originated requests
-fetch spans, from:-1h
-| filter span.kind == "server"
-| filter isNotNull(http.request.header.x-dtc)
-| summarize avg_duration = avg(duration), request_count = count(), by:{service.name}
-| sort avg_duration desc
-| limit 20
+// Trace coverage of mobile-originated requests
+// A request that carries trace.id was linked to backend distributed tracing
+// (OneAgent for Mobile 8.333+ injects W3C traceparent / tracestate headers).
+fetch user.events, from:-2h
+| filter dt.rum.application.type == "mobile" and characteristics.has_request
+| summarize {total_requests = count(), traced_requests = countIf(isNotNull(trace.id))}, by:{frontend.name}
+| fieldsAdd trace_rate = 100.0 * traced_requests / total_requests
+| sort trace_rate asc
 ```
 
 <a id="slow-failed-requests"></a>
@@ -239,10 +242,9 @@ Track how network request volume changes throughout the day for each mobile appl
 
 ```dql
 // Network request volume timeseries by application
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(http.url)
-| makeTimeseries request_count = count(), by:{useraction.application}, interval:1h
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_request
+| makeTimeseries request_count = count(), by:{frontend.name}, interval:1h
 ```
 
 ### Request Volume by Status Code Group
@@ -251,10 +253,10 @@ Categorize network requests by HTTP status code group (2xx, 3xx, 4xx, 5xx) to vi
 
 ```dql
 // Network request volume over time by status code group
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(http.status_code)
-| fieldsAdd status_group = if(http.status_code < 300, then:"2xx Success", else:if(http.status_code < 400, then:"3xx Redirect", else:if(http.status_code < 500, then:"4xx Client Error", else:"5xx Server Error")))
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_request
+| filter isNotNull(http.response.status_code)
+| fieldsAdd status_group = if(http.response.status_code < 300, then:"2xx Success", else:if(http.response.status_code < 400, then:"3xx Redirect", else:if(http.response.status_code < 500, then:"4xx Client Error", else:"5xx Server Error")))
 | makeTimeseries request_count = count(), by:{status_group}, interval:1h
 ```
 
@@ -317,8 +319,8 @@ In this notebook, we covered:
 - **Automatic HTTP capture** across iOS, Android, Flutter, and React Native platforms
 - **Connection type detection** and how network conditions affect request performance
 - **Request timing breakdown** with the six phases of an HTTP request and diagnostic guidance
-- **Frontend-to-backend correlation** via the `x-dtc` header for end-to-end distributed tracing
-- **DQL queries** to retrieve, aggregate, and visualize mobile network request data
+- **Frontend-to-backend correlation** via the `x-dynatrace` header and, from OneAgent for Mobile 8.333, W3C trace context
+- **DQL queries** on `user.events` to retrieve, aggregate, and visualize mobile network request data
 - **Slow and failed request analysis** using status code grouping and time-series trends
 - **Performance optimization tips** covering payload reduction, round-trip minimization, CDN usage, and adaptive behavior
 
@@ -326,14 +328,14 @@ Network requests are the most tangible touchpoint between your mobile app and yo
 
 ## Next Steps
 
-Continue to **MOBL-08** to explore crash analysis and error tracking for mobile applications, including how to correlate crashes with network request failures and backend errors.
+Continue to **MOBL-08: Session Replay for Mobile** to see how Session Replay reconstructs what the user did before a failed request or a crash.
 
 ### Related Notebooks
 
 | Notebook | Topic |
 |----------|-------|
-| **MOBL-06** | User Session Analysis |
-| **MOBL-08** | Crash Analysis & Error Tracking |
+| **MOBL-06** | Crash Reporting & ANR Detection |
+| **MOBL-08** | Session Replay for Mobile |
 | **SPANS-01** | Distributed Tracing Fundamentals |
 
 ## References

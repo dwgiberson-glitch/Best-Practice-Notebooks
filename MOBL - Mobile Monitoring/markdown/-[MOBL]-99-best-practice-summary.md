@@ -1,6 +1,6 @@
 # MOBL-99: Best Practice Summary
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -27,9 +27,9 @@ This notebook consolidates every actionable best practice from the MOBL series (
 ## Prerequisites
 
 | Requirement | Details |
-|-------------|---------||
+|-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `rum.read`, `entities.read`, `bizevents.read`, `metrics.read` |
+| **Permissions** | `storage:user.events:read`, `storage:user.sessions:read`, `storage:smartscape:read`; `storage:bizevents:read` for custom business events |
 | **Mobile App** | At least one mobile application with Dynatrace SDK integrated |
 | **Prior Knowledge** | Familiarity with MOBL-01 through MOBL-12 recommended |
 
@@ -41,15 +41,15 @@ Best practices for installing and configuring the Dynatrace mobile SDK across iO
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Enable auto-start for production apps | iOS: `DTXAutoStart = true` in Info.plist; Android: `autoStart = true` in Gradle config | **Critical** | MOBL-02, MOBL-03 |
-| 2 | Enable crash reporting | iOS: `DTXCrashReportingEnabled = true`; Android: `crashReporting(true)` | **Critical** | MOBL-02, MOBL-03 |
+| 1 | Enable auto-start for production apps | iOS: `DTXAutoStart = true` in Info.plist; Android: `autoStart { applicationId(...); beaconUrl(...) }` inside a named configuration in the top-level Gradle build file | **Critical** | MOBL-02, MOBL-03 |
+| 2 | Keep crash reporting on | iOS: `DTXCrashReportingEnabled = true`; Android: on by default -- do not set `crashReporting(false)` | **Critical** | MOBL-02, MOBL-03 |
 | 3 | Use Swift Package Manager over CocoaPods for iOS | Add via Xcode: File > Add Package Dependencies | **Recommended** | MOBL-02 |
-| 4 | Pin Gradle plugin version to a specific release | `id("com.dynatrace.instrumentation") version "8.x.x"` -- never use `latest` | **Critical** | MOBL-03 |
+| 4 | Control the Gradle plugin version deliberately | Docs recommend `version "8.+"` in the top-level `plugins {}` block (minor updates automatic, majors by hand); pin an exact `8.x.y` if you need reproducible builds | **Critical** | MOBL-03 |
 | 5 | Use separate Application IDs for iOS and Android | Each platform gets its own Application ID and Beacon URL from Dynatrace | **Critical** | MOBL-04 |
-| 6 | Use separate Application IDs for prod vs staging | Configure build variant overrides in Gradle; use different Info.plist per scheme | **Recommended** | MOBL-03 |
+| 6 | Use separate Application IDs for prod vs staging | Android: variant-specific configurations matched with `variantFilter`; iOS: different Info.plist per scheme | **Recommended** | MOBL-03 |
 | 7 | Never commit Application IDs or Beacon URLs to public repos | Store in environment variables or `local.properties` excluded from version control | **Critical** | MOBL-03 |
-| 8 | Enable hybrid monitoring for WebView apps | iOS: `DTXHybridApplication = true`; Android: `hybridMonitoring(true)` | **Recommended** | MOBL-02, MOBL-03 |
-| 9 | For Flutter: use `dynatrace.config.yaml` at project root | Provide platform-specific `applicationId` and `beaconUrl` under `android:` and `ios:` keys | **Critical** | MOBL-04 |
+| 8 | Enable hybrid monitoring for WebView apps | iOS: `DTXHybridApplication = true`; Android: `hybridWebView { enabled(true) }` | **Recommended** | MOBL-02, MOBL-03 |
+| 9 | For Flutter: use the downloaded `dynatrace.config.yaml` at project root | Apply it with `dart run dynatrace_flutter_plugin`, and start with `Dynatrace().start(MyApp())` | **Critical** | MOBL-04 |
 | 10 | For React Native: re-run `npx instrumentDynatrace` after config changes | Changing `dynatrace.config.js` does not auto-apply; the instrument command must re-run | **Critical** | MOBL-04 |
 | 11 | Verify both platform configs exist for cross-platform apps | Query `smartscapeNodes "FRONTEND" \| filter frontend.type == "mobile"` and confirm both Android and iOS entries appear. Classic equivalent: `fetch dt.entity.mobile_application` -- **not** `dt.entity.device_application`, which does not exist and returns zero rows | **Critical** | MOBL-04 |
 
@@ -81,15 +81,15 @@ Best practices for tracking user interactions accurately and meaningfully.
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Add manual instrumentation for SwiftUI views | Apply `.dtAction(name:)` to top-level screen views and key interaction buttons | **Critical** | MOBL-02, MOBL-05 |
-| 2 | Add manual instrumentation for Jetpack Compose | Use `Dynatrace.enterAction("name")` and `action.leaveAction()` for all onClick handlers | **Critical** | MOBL-03, MOBL-05 |
+| 1 | Instrument SwiftUI with the SwiftUI instrumentor | `brew install DTSwiftInstrumentor`, then `DTSwiftInstrumentor install`; add it to CI builds | **Critical** | MOBL-02, MOBL-05 |
+| 2 | Rely on Jetpack Compose auto-instrumentation | On by default from Android Gradle plugin 8.271; add `enterAction` / `leaveAction` only for business-level flows | **Critical** | MOBL-03, MOBL-05 |
 | 3 | Always call `leaveAction()` in a finally block | Forgetting to close an action inflates duration metrics and orphans child events | **Critical** | MOBL-03, MOBL-05 |
 | 4 | Use descriptive, stable action names | `"Cart: Add Item"` not `"btn_click"` or `"button_42"` | **Critical** | MOBL-05 |
 | 5 | Never put dynamic values in action names | `"View Product Details"` not `"View Product #48291"` -- dynamic values cause cardinality explosion | **Critical** | MOBL-05 |
 | 6 | Never put user IDs or timestamps in action names | Creates infinite unique names, defeats grouping, and is a privacy risk | **Critical** | MOBL-05 |
 | 7 | Use feature-area prefixes in naming convention | `"Cart: Add Item"`, `"Search: Apply Filter"`, `"Checkout: Submit Order"` | **Recommended** | MOBL-05 |
 | 8 | Use consistent casing across platforms | `"Search Products"` on both iOS and Android, not mixed case variants | **Recommended** | MOBL-05 |
-| 9 | Avoid applying `.dtAction()` to every SwiftUI subview | Excess actions create noise; apply only to top-level screens and key interactions | **Recommended** | MOBL-02 |
+| 9 | Exclude SwiftUI controls that add noise | The SwiftUI instrumentor supports global and local exclusion of controls | **Recommended** | MOBL-02 |
 | 10 | Configure user action naming rules in Dynatrace UI | Settings > RUM > Mobile > User action naming; test rules against recent data before deploying | **Recommended** | MOBL-05 |
 | 11 | Keep action hierarchies shallow | Parent + 1 level of child actions maximum for nested actions | **Recommended** | MOBL-05, MOBL-12 |
 
@@ -101,8 +101,8 @@ Best practices for HTTP monitoring, backend correlation, and network performance
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Instrument backend services with OneAgent or OpenTelemetry | Required for `x-dtc` header correlation; enables end-to-end distributed tracing from device to database | **Critical** | MOBL-07 |
-| 2 | Use manual web request tagging for non-standard transports | Add `x-dynatrace` header via `DTXAction.getRequestTag()` (iOS) or `Dynatrace.getRequestTag()` (Android) for WebSocket, gRPC, or custom HTTP clients | **Recommended** | MOBL-12 |
+| 1 | Instrument backend services with OneAgent or OpenTelemetry | Required for `x-dynatrace` / W3C trace-context correlation (W3C from OneAgent for Mobile 8.333); enables end-to-end distributed tracing from device to database | **Critical** | MOBL-07 |
+| 2 | Use manual web request tagging for non-standard transports | Add the header named by `Dynatrace.getRequestTagHeader()` (`x-dynatrace`) with a tag from `action?.getTagFor(url)` (iOS) or `action.getRequestTag()` / `Dynatrace.getRequestTag()` (Android) for WebSocket, gRPC, or custom HTTP clients | **Recommended** | MOBL-12 |
 | 3 | Enable gzip/brotli compression on API responses | Reduces response payload size by 60-80% | **Recommended** | MOBL-07 |
 | 4 | Implement response pagination | Avoid loading entire datasets in a single request | **Recommended** | MOBL-07 |
 | 5 | Use HTTP/2 or HTTP/3 for multiplexing | Reduces connection overhead and round trips | **Recommended** | MOBL-07 |
@@ -120,12 +120,12 @@ Best practices for configuring mobile session replay with appropriate privacy co
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Enable session replay on crash | iOS: `DTXSessionReplayOnCrash = true`; Android: `sessionReplayOnCrash(true)` | **Critical** | MOBL-08 |
-| 2 | Set privacy masking to Safe as the default | iOS: `DTXSessionReplayPrivacyMode = SAFE`; Android: `sessionReplayPrivacyMode("SAFE")` | **Critical** | MOBL-08 |
-| 3 | Set production sample rate to 5-10% | iOS: `DTXSessionReplaySampleRate = 10`; Android: `sessionReplaySampleRate(10)` | **Critical** | MOBL-08 |
+| 1 | Enable session replay on crash | App settings > General > Enablement and cost control > **Enable Session Replay on crashes** (no client-side key) | **Critical** | MOBL-08 |
+| 2 | Choose the masking level deliberately | Safest is the default; to use Safe, set `MaskingConfiguration(maskingLevelType: .safe)` (iOS) or `MaskingConfiguration.Safe()` (Android) in code | **Critical** | MOBL-08 |
+| 3 | Set the production Full Session Replay percentage to 5-10% | App settings > General > Enablement and cost control; there is no SDK sample rate | **Critical** | MOBL-08 |
 | 4 | Set staging/QA sample rate to 100% | Full coverage for pre-release testing and bug verification | **Recommended** | MOBL-08 |
 | 5 | Use Safest masking for financial/healthcare apps | Replays show layout and navigation but no readable content | **Critical** | MOBL-08 |
-| 6 | Only use Custom masking when you need to unmask specific elements | Start with Safe, move to Custom only for targeted debugging; tag specific views with `dtxMaskingMode` | **Recommended** | MOBL-08 |
+| 6 | Only use Custom masking when you need to unmask specific elements | Start with Safest or Safe, move to Custom only for targeted debugging; mask views via `MaskingConfiguration` (`addMaskedView` / `addMaskedIds`), `Modifier.dtMask()` in Compose, or the `data-dtrum-mask` tag | **Recommended** | MOBL-08 |
 | 7 | Temporarily increase sample rate during incidents | Raise to 50-100% when actively investigating a reported issue; lower again after resolution | **Recommended** | MOBL-08 |
 | 8 | Monitor DEM unit consumption for session replay | Track in Dynatrace license overview; session replay is the primary DEM cost driver | **Recommended** | MOBL-08 |
 | 9 | Limit what session replay captures (masking, sampling) | Replay retention is fixed at 35 days in a built-in bucket that cannot currently be modified | **Optional** | MOBL-09 |
@@ -140,12 +140,12 @@ Best practices for enriching sessions with business context and identifying user
 |---|--------------|-----------------|----------|--------|
 | 1 | Tag users with opaque IDs, never PII | `Dynatrace.identifyUser("usr_a1b2c3d4")` -- never email addresses, phone numbers, or full names | **Critical** | MOBL-09 |
 | 2 | Clear user tag on logout | iOS: `Dynatrace.identifyUser(nil)`; Android: `Dynatrace.identifyUser(null)` | **Critical** | MOBL-09 |
-| 3 | Set session properties early in the session | Call `reportValue()` immediately after login or app start so properties apply to all subsequent actions | **Recommended** | MOBL-09 |
+| 3 | Report session-property values early in the session | Call `action.reportValue()` on an early user action (values must be part of a user action) | **Recommended** | MOBL-09 |
 | 4 | Limit to 20-30 custom session properties per app | Excessive properties increase beacon size and processing overhead | **Recommended** | MOBL-09 |
 | 5 | Use enum-like string values for properties | `"tier" = "free"` not `"tier" = "Free Trial Account"` -- enables clean aggregation | **Recommended** | MOBL-09 |
 | 6 | Use consistent property key names across iOS and Android | Same keys on both platforms so a single DQL query covers both | **Recommended** | MOBL-09 |
 | 7 | Never store PII in session property values | Session properties are not subject to data masking | **Critical** | MOBL-09 |
-| 8 | Report A/B test variants as session properties | `reportValue("ab_test_checkout_v2", "variant_b")` -- enables correlation with performance/crash data | **Recommended** | MOBL-12 |
+| 8 | Report A/B test variants as session properties | `action.reportValue("ab_test_checkout_v2", "variant_b")` on an open action -- enables correlation with performance/crash data | **Recommended** | MOBL-12 |
 
 <a id="privacy-compliance"></a>
 
@@ -155,11 +155,11 @@ Best practices for GDPR, CCPA, and general data privacy compliance.
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Implement opt-in mode for GDPR compliance | Set `DTXAutoStart = false` (iOS) or `autoStart = false` (Android); start SDK only after user consent | **Critical** | MOBL-09 |
+| 1 | Implement opt-in mode for GDPR compliance | `DTXUserOptIn = true` (iOS) or `userOptIn(true)` (Android); call `applyUserPrivacyOptions` after user consent | **Critical** | MOBL-09 |
 | 2 | Default data collection level to Performance until consent | `DataCollectionLevel.PERFORMANCE` captures anonymous performance data without user identification | **Critical** | MOBL-09 |
-| 3 | Persist user consent in app storage | SDK does not persist consent; store in UserDefaults (iOS) or SharedPreferences (Android) and check on each launch | **Critical** | MOBL-09 |
+| 3 | Rely on OneAgent to persist the applied preferences | OneAgent persists privacy preferences and re-applies them on restart; the app only needs to ask when no choice exists yet | **Critical** | MOBL-09 |
 | 4 | Provide a way to withdraw consent in app settings | Set data collection level to `Off` when user revokes consent | **Critical** | MOBL-09 |
-| 5 | Implement data deletion API for right-to-erasure requests | POST to `/api/v2/data-privacy/deletion` with `userId`, `startDate`, `endDate`, `dataTypes: ["RUM"]` | **Critical** | MOBL-09 |
+| 5 | Handle right-to-erasure requests with the documented deletion routes | Sensitive Data Center deletion request (UI) or Grail record deletion (API, covers `user.events`, `user.sessions`, `user.replays`) | **Critical** | MOBL-09 |
 | 6 | Minimize retained personal data | RUM data sits in built-in 35-day buckets that cannot currently be modified; set short retention only on data you route yourself (business events) and minimize what the SDK captures | **Recommended** | MOBL-09 |
 | 7 | Separate crash reporting opt-in from general monitoring | Crash reporting has its own `crashReportingOptedIn` flag independent of data collection level | **Recommended** | MOBL-09 |
 | 8 | Display clear, plain-language consent dialog | Explain what data is collected, why, and how; provide granular options for Performance vs User Behavior levels | **Critical** | MOBL-09 |
@@ -175,16 +175,16 @@ Best practices for operationalizing mobile monitoring with dashboards and alerts
 |---|--------------|-----------------|----------|--------|
 | 1 | Include a crash-free rate single-value tile with color thresholds | Green: > 99.5%, Yellow: 98-99.5%, Red: < 98% | **Critical** | MOBL-11 |
 | 2 | Organize dashboard: health at top, trends in middle, drill-down at bottom | Top: single-value tiles (crash rate, sessions); Middle: timeseries (trends); Bottom: tables (top crashes, slowest actions) | **Recommended** | MOBL-11 |
-| 3 | Add a dashboard variable for `useraction.application` | Lets stakeholders filter to their specific app | **Recommended** | MOBL-11 |
+| 3 | Add a dashboard variable for `frontend.name` | Lets stakeholders filter to their specific app | **Recommended** | MOBL-11 |
 | 4 | Set default time range to 24 hours with presets for 1h, 6h, 24h, 7d | Covers most operational use cases without excessive data scanning | **Recommended** | MOBL-11 |
-| 5 | Alert on high crash rate | Static threshold: > 10 crashes in a 1-hour sliding window, severity Critical | **Critical** | MOBL-11 |
+| 5 | Alert on high crash rate | Davis anomaly detector on a DQL crash query (`characteristics.has_crash`), static threshold such as > 10 crashes per hour | **Critical** | MOBL-11 |
 | 6 | Alert on session volume drop | < 50% of rolling 7-day baseline, severity Warning | **Recommended** | MOBL-11 |
 | 7 | Alert on slow app launch | Average app start > 5 seconds over a 15-minute window, severity Warning | **Recommended** | MOBL-11 |
 | 8 | Alert on high HTTP error rate | > 5% of mobile requests returning 5xx, severity Critical | **Critical** | MOBL-11 |
 | 9 | Use Dynatrace Intelligence for adaptive baselines on performance metrics | Dynatrace Intelligence automatically learns patterns; add static thresholds only for hard SLA limits | **Recommended** | MOBL-11 |
-| 10 | Tag mobile app entities with `app-type: mobile` | Enables detected problem workflow triggers filtered to mobile-specific problems | **Recommended** | MOBL-11 |
+| 10 | Tag mobile app entities with `app-type: mobile` | Enables the Problem trigger's affected-entity tag filter for mobile-specific problems (or use the custom filter `matchesValue(affected_entity_ids, "MOBILE_APPLICATION-*")`) | **Recommended** | MOBL-11 |
 | 11 | Create audience-specific dashboards | Developers: 5-min refresh, crash detail; QA: 15-min, crash-free rate by version; Executives: daily KPI snapshot | **Recommended** | MOBL-11 |
-| 12 | Break down crash rate by `app.version` after every release | Identifies if a specific release introduced a regression | **Critical** | MOBL-10, MOBL-11 |
+| 12 | Break down crash rate by `app.short_version` after every release | Identifies if a specific release introduced a regression | **Critical** | MOBL-10, MOBL-11 |
 
 <a id="sdk-performance-optimization"></a>
 
@@ -195,10 +195,9 @@ Best practices for minimizing SDK overhead on battery, network, and CPU.
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
 | 1 | Exclude third-party analytics and CDN URLs from monitoring | Add `excludeURLs` patterns: `analytics.google.com/*`, `firebaselogging.googleapis.com/*`, CDN domains | **Recommended** | MOBL-12 |
-| 2 | Use sampling for high-traffic production apps | 10-50% sampling reduces DEM consumption proportionally; even 1% of millions provides thousands of sessions | **Recommended** | MOBL-08, MOBL-12 |
+| 2 | Use cost and traffic control for high-traffic production apps | App settings > General > Enablement and cost control; a lower monitored-session share reduces DEM consumption | **Recommended** | MOBL-08, MOBL-12 |
 | 3 | Start with full monitoring, reduce only if needed | Do not prematurely optimize; measure SDK overhead first | **Recommended** | MOBL-12 |
-| 4 | Use crash-only mode for ultra-low overhead scenarios | Set performance collection level to crash-only; captures crashes and errors with minimal overhead | **Optional** | MOBL-12 |
-| 5 | App launch time target: under 2 seconds | < 1s: excellent; 1-2s: acceptable; 2-5s: needs improvement; > 5s: investigate immediately | **Critical** | MOBL-10, MOBL-11 |
+| 4 | App launch time target: under 2 seconds | < 1s: excellent; 1-2s: acceptable; 2-5s: needs improvement; > 5s: investigate immediately | **Critical** | MOBL-10, MOBL-11 |
 
 <a id="advanced-instrumentation"></a>
 
@@ -216,8 +215,8 @@ Best practices for custom business events, A/B testing, multi-app strategies, an
 | 6 | Use consistent attribute names across iOS and Android business events | Same keys on both platforms enable unified DQL queries | **Recommended** | MOBL-12 |
 | 7 | Never include PII in business event attributes | No email addresses, phone numbers, or personal data in custom event payloads | **Critical** | MOBL-12 |
 | 8 | Use consistent naming prefixes for multi-app organizations | `"MyBrand Customer"`, `"MyBrand Driver"`, `"MyBrand Admin"` for easy DQL filtering | **Recommended** | MOBL-12 |
-| 9 | Budget DEM units per app based on criticality | 100% monitoring for critical apps; use sampling for high-traffic secondary apps | **Recommended** | MOBL-12 |
-| 10 | Attach `reportValue()` properties to actions for business context | `action.reportValue(withName: "total_price", doubleValue: 49.99)` -- becomes queryable in Grail | **Recommended** | MOBL-12 |
+| 9 | Budget DEM units per app based on criticality | 100% monitoring for critical apps; use cost and traffic control for high-traffic secondary apps | **Recommended** | MOBL-12 |
+| 10 | Attach `reportValue()` properties to actions for business context | `action?.reportValue(withName: "total_price", doubleValue: 49.99)` -- convert to action/session properties in the app settings | **Recommended** | MOBL-12 |
 
 <a id="dql-query-patterns"></a>
 
@@ -227,14 +226,14 @@ Mandatory patterns and filters for querying mobile data in Grail.
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 1 | Always filter mobile data on event.provider | `filter event.provider == "www.dynatrace.com/mobile"` -- this is the key discriminator for mobile events | **Critical** | MOBL-10 |
-| 2 | Use `countDistinct(dt.rum.session.id)` for unique session counts | Never use `count()` for sessions -- each session generates many events | **Critical** | MOBL-10 |
-| 3 | Use conditional countDistinct for crash rate | `countDistinct(if(event.type == "com.dynatrace.crash", then:dt.rum.session.id, else:null))` | **Recommended** | MOBL-10 |
-| 4 | Add `isNotNull()` filters before grouping on optional fields | Fields like `os.type`, `device.model`, `app.version` may be null; filter first to avoid noise | **Recommended** | MOBL-10 |
+| 1 | Query mobile RUM from `user.events` / `user.sessions` | `filter dt.rum.application.type == "mobile"` separates mobile from web; `characteristics.has_*` selects the event type. Mobile RUM is **not** in `bizevents` | **Critical** | MOBL-10 |
+| 2 | Count sessions on `user.sessions` | One record per session, so `count()` is a session count there; on `user.events` use `countDistinct(dt.rum.session.id)` | **Critical** | MOBL-10 |
+| 3 | Compute crash rate at session grain | `fetch user.sessions` then `countIf(error.has_crash == true)` over `count()` | **Recommended** | MOBL-10 |
+| 4 | Add `isNotNull()` filters before grouping on optional fields | Fields like `app.short_version`, `device.model.identifier`, `device.manufacturer` may be null; filter first to avoid noise | **Recommended** | MOBL-10 |
 | 5 | Query mobile app entities for inventory | Preferred: `smartscapeNodes "FRONTEND" \| filter frontend.type == "mobile"`. Classic fallback (still functional): `fetch dt.entity.mobile_application`. No time range needed; returns current state. `dt.entity.device_application` does not exist -- it returns zero rows, not an error | **Recommended** | MOBL-10 |
-| 6 | Filter crashes with `event.type == "com.dynatrace.crash"` | Reported errors use `event.type == "com.dynatrace.error.report"` -- distinguish between the two | **Critical** | MOBL-06, MOBL-10 |
-| 7 | Always specify explicit time ranges on bizevents queries | `fetch bizevents, from:-1h` or `from:-24h` -- never rely on the default 2-hour window | **Critical** | MOBL-10 |
-| 8 | Segment by `app.version` for release monitoring | Enables crash rate and performance comparison across releases | **Recommended** | MOBL-10 |
+| 6 | Filter crashes with `characteristics.has_crash` | Reported errors are `characteristics.has_error` with `characteristics.is_api_reported` -- distinguish between the two | **Critical** | MOBL-06, MOBL-10 |
+| 7 | Always specify explicit time ranges | `fetch user.events, from:-1h` or `from:-24h` -- never rely on the default 2-hour window | **Critical** | MOBL-10 |
+| 8 | Segment by `app.short_version` for release monitoring | Enables crash rate and performance comparison across releases | **Recommended** | MOBL-10 |
 
 ---
 

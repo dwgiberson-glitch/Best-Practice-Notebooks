@@ -1,6 +1,6 @@
 # MOBL-11: Dashboards & Alerting
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 11 of 12 | **Created:** February 2026 | **Last Updated:** 09/24/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 11 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -25,7 +25,7 @@ Effective mobile monitoring requires more than raw telemetry -- you need dashboa
 | Requirement | Details |
 |-------------|----------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `rum.read`, `events.read`, `bizevents.read`, `metrics.read` |
+| **Permissions** | `storage:user.events:read`, `storage:user.sessions:read`, `storage:events:read` (problems) |
 | **Dashboard Permissions** | `document:documents:write` for creating and editing dashboards |
 | **Workflow Permissions** | `automation:workflows:write` for configuring alert-triggered workflows |
 | **Mobile App** | At least one mobile application with active sessions and crash data |
@@ -68,7 +68,7 @@ For environments where SVG doesn't render
 - **Top row: health at a glance** -- Use single-value tiles with color thresholds (green/yellow/red) for crash-free rate, active sessions, and error rate
 - **Middle row: trends** -- Timeseries charts for session volume, action duration, and error trends over the last 7 days
 - **Bottom row: drill-down** -- Tables for top crashes, slowest user actions, and most affected app versions
-- **Use variables** -- Add a dashboard variable for `useraction.application` so stakeholders can filter to their specific app
+- **Use variables** -- Add a dashboard variable for `frontend.name` so stakeholders can filter to their specific app
 - **Time range selector** -- Always include a time range control defaulting to the last 24 hours, with presets for 1h, 6h, 24h, 7d
 
 <a id="crash-rate-monitoring"></a>
@@ -77,19 +77,18 @@ For environments where SVG doesn't render
 
 Crash rate is the most critical mobile KPI. App store algorithms use crash rate to determine visibility and ranking, and users who experience crashes are significantly more likely to uninstall. A crash-free rate below 99% typically indicates a serious quality problem.
 
-The following query builds a daily timeseries showing both total event volume and crash event volume, which you can use to calculate crash rate as a derived metric in your dashboard.
+The following query builds a daily timeseries of mobile sessions and of sessions that contained a crash, read from `user.sessions` (one record per session, with `error.has_crash`). Dividing the two gives a session crash rate.
 
 ```dql
-// Crash rate timeseries by application
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| fieldsAdd is_crash = if(event.type == "com.dynatrace.crash", then:1, else:0)
-| makeTimeseries {total_events = count(), crash_events = sum(is_crash)}, interval:1d
+// Crash rate timeseries (session grain): sessions vs. sessions with a crash
+fetch user.sessions, from:-7d
+| filter dt.rum.application.type == "mobile"
+| makeTimeseries {total_sessions = count(), crash_sessions = countIf(error.has_crash == true)}, time:start_time, interval:1d
 ```
 
 ### Interpreting the Results
 
-This query produces two timeseries arrays: `total_events` (all mobile business events) and `crash_events` (only crashes). To calculate the crash rate percentage on a dashboard tile, divide crash events by total events and multiply by 100. A healthy app should maintain a crash rate below 1%.
+This query produces two timeseries arrays: `total_sessions` (all mobile sessions) and `crash_sessions` (sessions with `error.has_crash`). To calculate the crash rate percentage on a dashboard tile, divide crash sessions by total sessions and multiply by 100; the crash-free rate is 100 minus that. A healthy app should maintain a session crash rate below 1%.
 
 | Crash-Free Rate | Health Status | Action |
 |----------------|---------------|--------|
@@ -98,7 +97,7 @@ This query produces two timeseries arrays: `total_events` (all mobile business e
 | **98.0% - 99.0%** | Degraded | Investigate and prioritize fixes |
 | **< 98.0%** | Critical | Immediate action required |
 
-> **Tip:** Break crash rate down by app version using `by:{app.version}` to identify whether a specific release introduced a regression.
+> **Tip:** Break crash rate down by app version using `by:{app.short_version}` to identify whether a specific release introduced a regression (MOBL-10 §8 has the per-version query).
 
 <a id="app-performance-metrics"></a>
 
@@ -129,39 +128,41 @@ For environments where SVG doesn't render
 | **HTTP Error Rate** | < 1% | 1-5% | > 5% |
 | **Crash-Free Rate** | > 99.5% | 98-99.5% | < 98% |
 
+### User Action Duration
+
+User action duration measures how long it takes for specific interactions to complete -- tapping a button, loading a screen, or submitting a form. Tracking these durations over time reveals performance regressions introduced by new releases or backend changes.
+
 ```dql
-// Session volume timeseries (hourly)
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| makeTimeseries session_count = countDistinct(dt.rum.session.id), interval:1h
+// User action duration trend by interaction type
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| makeTimeseries avg_duration = avg(duration), by:{interaction.type}, interval:1h
 ```
 
-This query counts the number of distinct sessions per hour over the past 7 days. Use it as a dashboard tile to spot usage patterns (peak hours, weekday vs weekend) and detect sudden drops that may indicate an outage or broken update.
+### Reading the Duration Chart
+
+The timeseries above breaks down average action duration by `interaction.type`. Look for:
+
+- **Gradual increases** -- May indicate backend degradation or growing payload sizes
+- **Sudden spikes** -- Often correlated with a new app release or backend deployment
+- **Platform differences** -- Compare iOS vs Android by adding `os.name` to the `by:` list to identify platform-specific bottlenecks
+
+> **Note:** `duration` is a duration value, not a number of milliseconds. Compare it with a duration literal (`duration > 2s`), and convert explicitly (`duration / 1ms`) only when a tile needs a plain number.
 
 <a id="session-volume-trends"></a>
 
 ## 4. Session Volume Trends
 
-User action duration measures how long it takes for specific interactions to complete -- tapping a button, loading a screen, or submitting a form. Tracking these durations over time reveals performance regressions introduced by new releases or backend changes.
+Session volume is the simplest usage signal: how many people are using the app, and when. Sudden drops often point to an outage, a broken release, or a failed store rollout rather than to changing user behaviour.
 
 ```dql
-// User action duration trend by type
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(useraction.duration)
-| makeTimeseries avg_duration = avg(useraction.duration), by:{useraction.type}, interval:1h
+// Session volume timeseries (hourly)
+fetch user.sessions, from:-7d
+| filter dt.rum.application.type == "mobile"
+| makeTimeseries session_count = count(), time:start_time, interval:1h
 ```
 
-### Reading the Duration Chart
-
-The timeseries above breaks down average action duration by type (e.g., `Load`, `Tap`, `Swipe`, `Custom`). Look for:
-
-- **Gradual increases** -- May indicate backend degradation or growing payload sizes
-- **Sudden spikes** -- Often correlated with a new app release or backend deployment
-- **Platform differences** -- Compare iOS vs Android by adding `by:{os.type}` to identify platform-specific bottlenecks
-
-> **Note:** Action durations are captured in milliseconds. Divide by 1000 if you prefer to display values in seconds on your dashboard.
+This query counts mobile sessions per hour (one `user.sessions` record per session) over the past 7 days. Use it as a dashboard tile to spot usage patterns (peak hours, weekday vs weekend) and detect sudden drops that may indicate an outage or broken update.
 
 <a id="metric-alerts"></a>
 
@@ -181,30 +182,23 @@ Dashboards are for humans looking at screens. Alerts are for ensuring problems a
 | **Slow App Launch** | App start duration | > 5 seconds average over 15 minutes | Warning |
 | **High Error Rate** | HTTP 5xx from mobile | > 5% of requests returning server errors | Critical |
 
-### Creating a Metric Event
+### Creating a Crash-Rate Detector (Davis anomaly detector)
 
-> **Prefer a Davis anomaly detector for new mobile alerting.** The metric-event procedure below is the classic surface — `builtin:anomaly-detection.metric-events` is flagged **Blocked at upgrade**, so alerts built here have to be recreated as DQL-based detectors (`builtin:davis.anomaly-detectors`) when the tenant moves to the latest Dynatrace. Existing metric events keep working until then. Note also that Dynatrace's transformation path converts metric *selectors* only — a **Type: Metric key** event like the example below, which is a static threshold on a single key, has no automated conversion and must be rebuilt by hand. See ALERT-02 for choosing between mechanisms.
+Build new mobile alerting as a **Davis anomaly detector** in the Anomaly Detection app, with a DQL query as its source and a static-threshold analyzer. A source query for crash volume per app:
 
-To create a custom alert (metric event) in Dynatrace:
-
-1. Navigate to **Settings** > **Anomaly Detection** > **Metric Events**
-2. Click **Add metric event**
-3. Configure the event:
-
-```yaml
-# Example: High crash rate alert
-Summary: Mobile crash rate exceeds threshold
-Type: Metric key
-Metric key: dt.rum.mobile.crash.count  # (or use a DQL-based metric)
-Aggregation: Count
-Entity filter: Mobile application
-Model type: Static threshold
-Threshold: 10
-Alert condition: Above
-Sliding window: 1 hour
-Dealerting samples: 3
-Severity: Critical
+```dql
+fetch user.events, from:-2h
+| filter characteristics.has_crash
+| makeTimeseries crashes = count(), by:{frontend.name}, interval:5m
 ```
+
+Set the static threshold (for example, above 10 crashes per hour, expressed at the 5-minute interval you choose) and the event template in the detector. Confirm in the detector preview that the query is accepted as a source before relying on it. AIOPS-02 §4 walks through the analyzer, tuning and event-template settings, and ALERT-02 covers choosing between mechanisms.
+
+### Classic path: metric events
+
+The classic surface is **Settings** > **Anomaly Detection** > **Metric Events**. `builtin:anomaly-detection.metric-events` is flagged **Blocked at upgrade**, so metric events built there have to be recreated as DQL-based detectors (`builtin:davis.anomaly-detectors`) when the tenant moves to the latest Dynatrace; existing metric events keep working until then. Use it only while your tenant is still on the classic surface.
+
+> **Correction (09/28/2026).** Earlier revisions showed a metric-event example on a metric key `dt.rum.mobile.crash.count`. No such key is documented, and none appears in the metric catalog of the validation tenant (`metrics | filter startsWith(metric.key, "dt.rum.mobile")` returns nothing, 09/28/2026), so the example could not be built. It has been replaced by the detector above.
 
 ### Dynatrace Intelligence vs Static Thresholds
 
@@ -242,18 +236,19 @@ When you identify a detected problem affecting a mobile application, overlay the
 
 ### Problem Workflow Integration
 
-Connect detected problems to your notification channels so the mobile team is alerted immediately:
+Connect detected problems to your notification channels so the mobile team is alerted immediately. Create a workflow in the workflow editor with the **Problem trigger** and these settings:
+
+| Trigger setting | Value |
+|---|---|
+| Trigger | Problem trigger |
+| Problem state | `active` (starts when the problem opens) |
+| Affected entities | **Include entities with any defined tag below**: `app-type:mobile` (requires that tag on your mobile app entities, MOBL-99 §8 #10) |
+| *or* Additional custom filter query | `matchesValue(affected_entity_ids, "MOBILE_APPLICATION-*")` |
+| Advanced options | Enable **Wait for root cause analysis** to avoid triggering on incomplete problem data |
+
+Then add a Slack task. The message template below uses only fields of the problem record. Action IDs shown are illustrative -- export a workflow built in the editor to get the exact identifiers (see WFLOW-03 §1).
 
 ```yaml
-# Workflow trigger for mobile-specific problems
-trigger:
-  type: davis-problem
-  config:
-    entityTagsMatch: any
-    entityTags:
-      - key: app-type
-        value: mobile
-
 tasks:
   - name: notify_mobile_team
     type: dynatrace.slack:send-message
@@ -268,6 +263,10 @@ tasks:
         Link: {{ problem_link() }}
 ```
 
+> **Correction (09/28/2026).** Earlier revisions showed the trigger as a `trigger: type: davis-problem / entityTagsMatch` YAML block. No editor, export or API accepts that shape. The Problem trigger is configured through the settings above.
+
+> <sub>**Sources:** [Event triggers for workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger/event-trigger) — *"Additional custom filter query : Add a DQL matcher expression to further refine which problems start the trigger."*</sub>
+
 > **Template fields come from the problem record.** The Problem trigger's `event()` is the `dt.davis.problems` record — run `fetch dt.davis.problems, from:-24h | limit 1` to see every field a template can read. It has no `title` field, and its `severity` field is not a CRITICAL/HIGH label (0 of 3,209 problem records on a validation tenant, 09/24/2026): the title is `event.name`, the kind of problem is `event.category`, and the link is `{{ problem_link() }}`, which *"evaluates correctly in workflows with Davis problem event triggers only."* ([Jinja expressions for Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/reference), [Event triggers for workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger/event-trigger))
 
 <a id="executive-summary"></a>
@@ -278,9 +277,9 @@ Executive stakeholders need a single table that answers: "How are our mobile app
 
 ```dql
 // Executive summary -- key metrics per mobile app
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| summarize {total_actions = count(), unique_sessions = countDistinct(dt.rum.session.id), crash_count = countIf(event.type == "com.dynatrace.crash")}, by:{useraction.application}
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize {total_actions = countIf(characteristics.has_user_action == true), unique_sessions = countDistinct(dt.rum.session.id), crash_count = countIf(characteristics.has_crash == true)}, by:{frontend.name}
 | fieldsAdd actions_per_session = toDouble(total_actions) / toDouble(unique_sessions)
 | sort total_actions desc
 | limit 10
@@ -312,10 +311,10 @@ Use the query above as a table tile on your dashboard. Add conditional formattin
 In this notebook, you learned:
 
 - **Dashboard design principles** -- Organize tiles by purpose (health indicators at top, trends in middle, drill-down tables at bottom) with application-level filtering
-- **Crash rate monitoring** -- Build a timeseries comparing total events to crash events, and interpret crash-free rate thresholds
-- **App performance metrics** -- Track session volume and user action duration to detect regressions and correlate with backend changes
+- **Crash rate monitoring** -- Build a session-grain timeseries comparing all sessions to crashed sessions (`user.sessions`, `error.has_crash`), and interpret crash-free rate thresholds
+- **App performance metrics** -- Track user action duration to detect regressions and correlate with backend changes
 - **Session volume trends** -- Identify usage patterns, peak hours, and sudden drops that may indicate outages
-- **Metric alerts** -- Configure Dynatrace Intelligence anomaly detection for adaptive baselines and static thresholds for hard SLA limits
+- **Alerts** -- Build a Davis anomaly detector on a DQL crash query for hard limits, with metric events only as the classic path
 - **detected problem correlation** -- Query problems affecting mobile applications and overlay them with dashboard timeseries
 - **Executive summary tiles** -- Build single-table summaries with total actions, unique sessions, crash count, and engagement metrics
 
@@ -323,10 +322,10 @@ In this notebook, you learned:
 
 ## Next Steps
 
-Continue to **MOBL-12** to explore:
-- Advanced mobile analytics and business impact analysis
-- Funnel analysis for mobile conversion tracking
-- Combining mobile telemetry with business events for end-to-end visibility
+Continue to **MOBL-12: Advanced Instrumentation & Optimization** to explore:
+- Business events from mobile apps with `sendBizEvent`
+- Custom errors, events and request tagging with the OneAgent SDK
+- Feature-flag tracking and data-volume optimization
 
 ---
 
@@ -337,6 +336,7 @@ Continue to **MOBL-12** to explore:
 - [Mobile App Monitoring](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications)
 - [Davis Problems app (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/problems-app)
 - [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows)
+- [Event triggers for workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger/event-trigger)
 
 ---
 

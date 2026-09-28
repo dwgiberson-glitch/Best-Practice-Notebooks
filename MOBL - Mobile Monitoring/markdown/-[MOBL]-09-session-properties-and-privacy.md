@@ -1,6 +1,6 @@
 # MOBL-09: Session Properties & Data Privacy
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 9 of 12 | **Created:** February 2026 | **Last Updated:** 09/24/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 9 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -25,7 +25,7 @@ This notebook covers how to enrich mobile sessions with custom session propertie
 | Requirement | Details |
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `rum.read`, `entities.read`, `bizevents.read` |
+| **Permissions** | `storage:user.sessions:read`, `storage:user.events:read`; `user.identifier` is in the sensitive fieldset `builtin-sensitive-user-events-and-sessions`, so reading user tags also needs a grant for that fieldset |
 | **Mobile App** | At least one mobile app with Dynatrace SDK integrated |
 | **SDK Version** | iOS Agent 8.x+ or Android Agent 8.x+ |
 | **Prior Knowledge** | Basic understanding of GDPR/CCPA privacy regulations |
@@ -55,31 +55,42 @@ For environments where SVG doesn't render
 | Type | Description | Example |
 |------|-------------|---------|
 | **String** | Text values | `"subscription_tier" = "premium"` |
-| **Long** | Integer values | `"items_in_cart" = 5` |
+| **Int / Long** | Integer values | `"items_in_cart" = 5` |
 | **Double** | Decimal values | `"cart_value" = 149.99` |
-| **Date** | Timestamp values | `"trial_expiry" = 2026-03-15` |
+
+The Android SDK documents `int`, `long`, `double` and `string` values; report a date as a string or an epoch number.
 
 ### Setting Properties from the SDK
 
-Properties can be set at any point during a session. They are sent with the next beacon and apply to the entire session.
+Properties can be reported at any point during a session, and are sent with the next beacon.
+
+Values are reported **on a user action** -- *"The reported values must be part of a user action"* -- and are then converted into user action and session properties in the Dynatrace UI. There is no static `reportValue`.
 
 **iOS (Swift):**
 
 ```swift
-// iOS -- set custom session properties
-Dynatrace.identifyUser("user@example.com")
-DTXAction.reportValue(withName: "subscription_tier", stringValue: "premium")
-DTXAction.reportValue(withName: "cart_value", doubleValue: 149.99)
+// iOS -- report values on an open action
+Dynatrace.identifyUser("usr_a1b2c3d4")
+let action = DTXAction.enter(withName: "Load account")
+action?.reportValue(withName: "subscription_tier", stringValue: "premium")
+action?.reportValue(withName: "cart_value", doubleValue: 149.99)
+action?.leave()
 ```
 
 **Android (Kotlin):**
 
 ```kotlin
-// Android -- set custom session properties
-Dynatrace.identifyUser("user@example.com")
-Dynatrace.reportValue("subscription_tier", "premium")
-Dynatrace.reportValue("cart_value", 149.99)
+// Android -- report values on an open action
+Dynatrace.identifyUser("usr_a1b2c3d4")
+val action = Dynatrace.enterAction("Load account")
+action.reportValue("subscription_tier", "premium")
+action.reportValue("cart_value", 149.99)
+action.leaveAction()
 ```
+
+> **Correction (09/28/2026).** Earlier revisions called `DTXAction.reportValue(...)` / `Dynatrace.reportValue(...)` statically. Both SDKs report values on an action instance.
+
+> <sub>**Sources:** [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android) — *"The reported values must be part of a user action."*, [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios).</sub>
 
 ### Server-Side Session Properties
 
@@ -109,7 +120,7 @@ User tagging associates a mobile session with a specific user identity. This ena
 
 ### How User Tagging Works
 
-The `identifyUser()` SDK call sets the user tag for the current session. Once set, the tag persists for the duration of the session and appears in all related telemetry.
+The `identifyUser()` SDK call sets the user tag for the current session. Once set, the tag persists for the duration of the session and appears in all related telemetry. In Grail it is the `user.identifier` field on `user.sessions`, which belongs to the sensitive fieldset `builtin-sensitive-user-events-and-sessions` and is hidden unless that fieldset is granted.
 
 **iOS (Swift):**
 
@@ -181,10 +192,11 @@ Dynatrace provides three **data collection levels** that control how much teleme
 
 ```swift
 // iOS -- configure data collection level and crash reporting
-let privacyConfig = DTXUserPrivacyOptions()
+let privacyConfig = Dynatrace.userPrivacyOptions()
 privacyConfig.dataCollectionLevel = .userBehavior
 privacyConfig.crashReportingOptedIn = true
-Dynatrace.applyUserPrivacyOptions(privacyConfig)
+privacyConfig.crashReplayOptedIn = true // Session Replay on crashes
+Dynatrace.applyUserPrivacyOptions(privacyConfig) { (successful) in }
 ```
 
 **Android (Kotlin):**
@@ -195,9 +207,14 @@ Dynatrace.applyUserPrivacyOptions(
     UserPrivacyOptions.builder()
         .withDataCollectionLevel(DataCollectionLevel.USER_BEHAVIOR)
         .withCrashReportingOptedIn(true)
+        .withCrashReplayOptedIn(true) // Session Replay on crashes
         .build()
 )
 ```
+
+OneAgent **persists** these preferences and applies them again when the app restarts, and starts a new session whenever they change.
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios) — *"OneAgent persists the data privacy preferences and automatically applies them when the application is restarted."*, [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android).</sub>
 
 ### What Each Level Controls
 
@@ -217,55 +234,49 @@ Dynatrace.applyUserPrivacyOptions(
 
 ## 4. Opt-In Mode
 
-**Opt-in mode** means the Dynatrace SDK starts in the "Off" data collection level and waits for the user to explicitly consent before collecting any data. This is the recommended approach for GDPR compliance in the European Union.
+**Opt-in mode** means OneAgent starts with the `OFF` data collection level and waits for the user to explicitly consent before collecting data. This is the recommended approach for GDPR compliance in the European Union.
 
 ### How Opt-In Mode Works
 
-1. **SDK starts silently** -- The app launches with `DTXAutoStart = false` (iOS) or `autoStart = false` (Android). No beacons are sent.
+1. **Enable opt-in mode** -- Add the `DTXUserOptIn` key (set to `true`) to `Info.plist` on iOS, or set `userOptIn(true)` in the Dynatrace Android Gradle plugin configuration (MOBL-03 §3). OneAgent starts, but collects nothing until preferences are applied.
 2. **Consent dialog shown** -- The app displays a privacy consent dialog explaining what data will be collected and why.
-3. **User grants consent** -- If the user accepts, the app calls the SDK startup method and sets the appropriate data collection level.
-4. **User declines** -- If the user declines, the SDK remains in "Off" mode. The app functions normally without monitoring.
+3. **User grants consent** -- The app calls `applyUserPrivacyOptions` with the level the user agreed to.
+4. **User declines** -- The app does nothing (or applies `OFF` explicitly); the app functions normally without monitoring.
 
-### iOS Configuration
+### iOS
+
+```xml
+<!-- Info.plist -->
+<key>DTXUserOptIn</key>
+<true/>
+```
 
 ```swift
-// In your Info.plist or DTXConfig:
-// DTXAutoStart = false
-
-// After user grants consent:
+// After the user grants consent:
 func userGrantedConsent() {
-    // Start the SDK
-    Dynatrace.startup { error in
-        if let error = error {
-            print("Dynatrace startup failed: \(error)")
-            return
-        }
-        // Set the privacy level based on what the user consented to
-        let options = DTXUserPrivacyOptions()
-        options.dataCollectionLevel = .userBehavior
-        options.crashReportingOptedIn = true
-        Dynatrace.applyUserPrivacyOptions(options)
-    }
-}
-
-// If user declines -- do nothing, SDK stays off
-func userDeclinedConsent() {
-    // SDK remains in Off state, no data collected
+    let privacyConfig = Dynatrace.userPrivacyOptions()
+    privacyConfig.dataCollectionLevel = .userBehavior
+    privacyConfig.crashReportingOptedIn = true
+    Dynatrace.applyUserPrivacyOptions(privacyConfig) { (successful) in }
 }
 ```
 
-### Android Configuration
+### Android
 
 ```kotlin
-// In your AndroidManifest.xml or Gradle config:
-// autoStart = false
+// build.gradle.kts (top-level) -- opt-in mode
+configure<com.dynatrace.tools.android.dsl.DynatraceExtension> {
+    configurations {
+        create("sampleConfig") {
+            userOptIn(true)
+        }
+    }
+}
+```
 
-// After user grants consent:
+```kotlin
+// After the user grants consent:
 fun userGrantedConsent() {
-    Dynatrace.startup(application, DynatraceConfigurationBuilder(
-        "<APP_ID>", "<BEACON_URL>"
-    ).buildConfiguration())
-
     Dynatrace.applyUserPrivacyOptions(
         UserPrivacyOptions.builder()
             .withDataCollectionLevel(DataCollectionLevel.USER_BEHAVIOR)
@@ -277,12 +288,15 @@ fun userGrantedConsent() {
 
 ### Persisting Consent
 
-The Dynatrace SDK **does not** persist the user's consent choice. Your app is responsible for:
+OneAgent **persists** the privacy preferences you apply and re-applies them on the next app start, so you do not have to call `applyUserPrivacyOptions` on every launch. Your app is still responsible for:
 
-- Storing the consent status (e.g., in SharedPreferences or UserDefaults)
-- Checking the stored consent on each app launch
-- Starting or not starting the SDK accordingly
-- Providing a way for the user to change their consent in app settings
+- Showing the consent dialog only when no choice has been made yet
+- Providing a way for the user to change their consent in app settings, which calls `applyUserPrivacyOptions` again
+- Recording consent for your own compliance records
+
+> **Correction (09/28/2026).** Earlier revisions implemented opt-in by disabling auto-start and calling a startup method, created privacy options with `DTXUserPrivacyOptions()`, and said the SDK does not persist consent. The documented mechanism is the `DTXUserOptIn` key / `userOptIn` property plus `applyUserPrivacyOptions`, and OneAgent persists the preferences.
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios) — *"To activate the user opt-in mode, add the DTXUserOptIn configuration key to your app's Info.plist file"*, [Adjust OneAgent configuration (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-plugin/adjust-oneagent-configuration) — *"To activate the user opt-in mode (when you use the automatic OneAgent startup ), enable the userOptIn property."*</sub>
 
 <a id="privacy-compliance"></a>
 
@@ -294,13 +308,13 @@ When implementing mobile monitoring, you must comply with applicable privacy reg
 
 | Regulation | Requirement | Dynatrace Feature |
 |------------|-------------|-------------------|
-| GDPR | Consent before collection | Opt-in mode (`DTXAutoStart = false`) |
-| GDPR | Right to erasure (Art. 17) | Data deletion API |
+| GDPR | Consent before collection | Opt-in mode (`DTXUserOptIn` / `userOptIn`) |
+| GDPR | Right to erasure (Art. 17) | Sensitive Data Center deletion request / Grail record deletion |
 | GDPR | Data minimization (Art. 5) | Data collection levels (Off / Performance / User Behavior) |
 | GDPR | Purpose limitation | Configurable session properties (collect only what's needed) |
 | CCPA | Right to opt out | Privacy options API (`applyUserPrivacyOptions`) |
 | CCPA | Data disclosure | Session export via DQL and Grail APIs |
-| CCPA | Right to delete | Data deletion API |
+| CCPA | Right to delete | Sensitive Data Center deletion request / Grail record deletion |
 
 ### GDPR Implementation Checklist
 
@@ -308,7 +322,7 @@ When implementing mobile monitoring, you must comply with applicable privacy reg
 2. **Display clear consent dialog** -- Explain what data is collected and why, using plain language
 3. **Provide granular consent options** -- Allow users to consent to performance monitoring separately from user behavior tracking
 4. **Support consent withdrawal** -- Users must be able to revoke consent at any time (set collection level to "Off")
-5. **Implement data deletion** -- Use the Dynatrace data deletion API when users exercise their right to erasure
+5. **Implement data deletion** -- Use a Sensitive Data Center deletion request (or Grail record deletion) when users exercise their right to erasure
 6. **Document data processing** -- Maintain records of processing activities (Art. 30)
 7. **Avoid storing PII in session properties** -- Use opaque user IDs, not email addresses or names
 
@@ -317,42 +331,37 @@ When implementing mobile monitoring, you must comply with applicable privacy reg
 1. **Add "Do Not Sell" option** -- Provide a mechanism to opt out of data sharing
 2. **Disclose data collection in privacy policy** -- List categories of data collected by the mobile SDK
 3. **Support data access requests** -- Be able to export a user's session data via DQL
-4. **Support data deletion requests** -- Use the Dynatrace data deletion API
+4. **Support data deletion requests** -- Use a Sensitive Data Center deletion request (or Grail record deletion)
 5. **Do not discriminate** -- Users who opt out should receive the same app experience
 
-### Data Deletion API
+### Deleting a User's Data
 
-When a user requests deletion of their data, use the Dynatrace API to remove their sessions:
+Dynatrace documents two routes for erasure requests:
 
-```bash
-# Request deletion of a specific user's data
-curl -X POST 'https://{your-environment-id}.live.dynatrace.com/api/v2/data-privacy/deletion' \
-  -H 'Authorization: Api-Token {api-token}' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "dataTypes": ["RUM"],
-    "userId": "user-id-12345",
-    "startDate": "2025-01-01",
-    "endDate": "2026-12-31"
-  }'
-```
+1. **Sensitive Data Center deletion request** (UI) -- the built-in deletion request workflow searches for, reviews and removes personal data associated with specific end users, tracks each request on the **Requests** tab, and keeps an audit trail of every step.
+2. **Grail record deletion** (API) -- deletes records selected by a DQL condition. It covers `user.events`, `user.sessions` and `user.replays` among other tables; Sensitive Data Center uses this API underneath.
 
-> **Warning:** Data deletion is irreversible. Ensure you have proper authorization and audit logging before processing deletion requests.
+Identify the user's records first, for example by `user.identifier` (the user tag set with `identifyUser()`), then submit the request through one of the two routes.
+
+> **Warning:** Record deletion is final and cannot be undone. Ensure you have proper authorization and audit logging before processing deletion requests.
+
+> **Correction (09/28/2026).** Earlier revisions showed a `POST /api/v2/data-privacy/deletion` call with `dataTypes: ["RUM"]`. That endpoint is not documented, so an erasure procedure built on it would fail.
+
+> <sub>**Sources:** [Delete personal data in Sensitive Data Center (DT docs)](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/data-privacy/sensitive-data-center/delete-personal-data) — *"The built-in deletion request workflow makes it straightforward to search for, review, and remove personal data associated with specific end users."*, [Record deletion in Grail via API (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data/record-deletion-in-grail) — *"Record deletion is final and can't be undone."*</sub>
 
 <a id="querying-session-properties"></a>
 
 ## 6. Querying with Session Properties
 
-Session properties, geolocation, device metadata, and operating system information are available in Grail and can be queried using DQL. The following queries demonstrate how to segment mobile sessions by various dimensions.
+Session properties, geolocation, device metadata, and operating system information are available in Grail and can be queried using DQL. `user.sessions` holds one record per session, so `count()` is a session count; `geo.country.iso_code`, `device.manufacturer`, `device.model.identifier`, `os.name`, `os.version` and `app.short_version` are session fields. The following queries demonstrate how to segment mobile sessions by various dimensions.
 
 ### Sessions by Country (Geolocation)
 
 ```dql
-// Sessions by country (geolocation)
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{geo.country.name}
+// Sessions by country (geolocation) -- one user.sessions record per session
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize session_count = count(), by:{geo.country.iso_code}
 | sort session_count desc
 | limit 20
 ```
@@ -361,10 +370,10 @@ fetch bizevents, from:-24h
 
 ```dql
 // Sessions by device manufacturer
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
 | filter isNotNull(device.manufacturer)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{device.manufacturer}
+| summarize session_count = count(), by:{device.manufacturer}
 | sort session_count desc
 | limit 15
 ```
@@ -373,10 +382,9 @@ fetch bizevents, from:-24h
 
 ```dql
 // Sessions by operating system
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(os.type)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{os.type, os.version}
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize session_count = count(), by:{os.name, os.version}
 | sort session_count desc
 | limit 20
 ```
@@ -385,10 +393,10 @@ fetch bizevents, from:-24h
 
 ```dql
 // Sessions by app version
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(app.version)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{app.version, os.type}
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| filter isNotNull(app.short_version)
+| summarize session_count = count(), by:{app.short_version, os.name}
 | sort session_count desc
 | limit 20
 ```
@@ -423,7 +431,7 @@ A dedicated bucket applies only to data you can route, such as business events y
 | Consideration | Recommendation |
 |---------------|----------------|
 | **GDPR data minimization** | Set the shortest retention that meets business needs where retention is configurable (business events); for RUM data, minimize what the SDK captures |
-| **Right to erasure** | Use the data deletion API for individual user requests; do not rely solely on retention expiry |
+| **Right to erasure** | Use a Sensitive Data Center deletion request (or Grail record deletion) for individual user requests; do not rely solely on retention expiry |
 | **Regulatory audit** | Ensure retention periods are documented in your data processing records |
 | **Cross-border data** | Verify that Grail storage regions comply with data residency requirements |
 | **Session replay** | Replay retention is fixed at 35 days today, so limit what is captured instead — masking and replay sampling (MOBL-08) |
@@ -434,11 +442,11 @@ A dedicated bucket applies only to data you can route, such as business events y
 
 In this notebook, you learned:
 
-- **Custom session properties** -- how to enrich mobile sessions with string, long, double, and date key-value pairs using the SDK `reportValue()` API
+- **Custom session properties** -- how to enrich mobile sessions with key-value pairs using `reportValue()` on a user action
 - **User tagging** -- how `identifyUser()` associates sessions with a user identity, and why opaque IDs are preferred over PII
 - **Data collection levels** -- the three levels (Off, Performance, User Behavior) and what telemetry each controls
-- **Opt-in mode** -- how to start the SDK in silent mode and only begin collection after explicit user consent
-- **GDPR and CCPA compliance** -- regulation requirements mapped to Dynatrace features, including data deletion API
+- **Opt-in mode** -- how `DTXUserOptIn` / `userOptIn` keeps OneAgent from collecting until the app applies the user's consent
+- **GDPR and CCPA compliance** -- regulation requirements mapped to Dynatrace features, including Sensitive Data Center deletion requests and Grail record deletion
 - **Querying session properties** -- DQL patterns for segmenting sessions by country, device, OS, and app version
 - **Data retention** -- built-in 35-day RUM buckets (not currently configurable) and their privacy implications
 
@@ -446,11 +454,10 @@ In this notebook, you learned:
 
 ## Next Steps
 
-Continue to **MOBL-10** to learn:
-- Advanced session replay configuration and privacy masking
-- Configuring action and input masking rules
-- Analyzing replays for UX issue identification
-- Balancing debugging capabilities with user privacy
+Continue to **MOBL-10: DQL for Mobile Analytics** to learn:
+- The mobile data model in Grail (`user.events`, `user.sessions`, Smartscape `FRONTEND`)
+- Engagement, crash, app-start and network analysis queries
+- Device, OS, geography and release segmentation
 
 ---
 
