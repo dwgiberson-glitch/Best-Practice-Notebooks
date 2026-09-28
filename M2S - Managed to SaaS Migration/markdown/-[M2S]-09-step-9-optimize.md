@@ -1,6 +1,6 @@
 # M2S-09: Step 9 — Optimize: Validate, Optimize, and Decommission
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 9 of 9 | **Phase:** Run | **Step:** Optimize | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 9 of 9 | **Phase:** Run | **Step:** Optimize | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 The migration is functionally complete. Agents are reporting, configurations are applied, integrations are reconnected, SaaS-exclusive features are adopted, and users are trained. This final step closes the loop: validate that every success criterion is met, optimize the SaaS environment for long-term performance, obtain stakeholder sign-off, and decommission the Managed cluster.
 
@@ -135,16 +135,17 @@ smartscapeNodes "FRONTEND"
 fetch dt.entity.process_group
 | summarize processGroupCount = count()
 
-// Alternative: Smartscape on Grail (entity.name → name)
-// smartscapeNodes PROCESS
-// | summarize processGroupCount = count()
+// Do not substitute smartscapeNodes "PROCESS" here: it lists individual processes
+// (dt.entity.process_group_instance), not process GROUPS — a different grain that inflates the
+// count. Keep the classic count for this comparison.
 
 ```
 
 ```dql
-// Synthetic monitor count — compare to Step 1 inventory
-smartscapeNodes "BROWSER_MONITOR"
-| summarize syntheticCount = count()
+// Synthetic monitor count by type — compare to Step 1 inventory
+smartscapeNodes "BROWSER_MONITOR", "HTTP_MONITOR", "NETWORK_AVAILABILITY_MONITOR"
+| summarize syntheticCount = count(), by:{type}
+| sort type asc
 
 // Smartscape (preferred, verified 07/2026): dt.entity.synthetic_test maps to the BROWSER_MONITOR
 // node (individual steps are a separate BROWSER_MONITOR_STEP node). HTTP monitors are HTTP_MONITOR,
@@ -152,7 +153,7 @@ smartscapeNodes "BROWSER_MONITOR"
 // corrects an earlier note here that claimed no Smartscape equivalent existed. Unlike ActiveGate,
 // `fetch dt.entity.synthetic_test` does still work and remains a genuine fallback — it reads the
 // classic entity store, which can retain entities Smartscape (live topology) no longer lists.
-// Classic fallback: fetch dt.entity.synthetic_test | summarize syntheticCount = count()
+// Classic fallback (browser monitors only): fetch dt.entity.synthetic_test | summarize syntheticCount = count()
 ```
 
 ### Entity Coverage Comparison
@@ -208,14 +209,15 @@ fetch logs, from:-1h
 
 ### 1.3 Data Gaps Detection
 
-Gaps in data flow indicate agents that lost connectivity during migration or misconfigured network routes. A healthy migration shows consistent counts across all time buckets.
+Gaps in data flow indicate agents that lost connectivity during migration or misconfigured network routes. A healthy migration shows consistent counts across all time buckets. The query returns the host count for every 5-minute bucket; if `minHosts` is lower than `maxHosts`, hosts dropped out at some point — look at `hostsReporting` to see when.
 
 ```dql
 // Count reporting hosts per 5-minute bucket — drops indicate gaps
-timeseries avgCpu = avg(dt.host.cpu.usage), from:-6h, by:{dt.entity.host}
-| fieldsAdd hasData = arrayAvg(avgCpu)
-| filter isNotNull(hasData)
-| summarize hostsReporting = count()
+// to:-5m leaves out the bucket still being filled, which would otherwise always read as a drop
+timeseries c = count(dt.host.cpu.usage), from:-6h, to:-5m, interval:5m, by:{dt.entity.host}
+| fieldsAdd reporting = iCollectArray(if(isNotNull(c[]), 1, else: 0))
+| summarize hostsReporting = sum(reporting[])
+| fieldsAdd minHosts = arrayMin(hostsReporting), maxHosts = arrayMax(hostsReporting)
 ```
 
 ```dql

@@ -1,6 +1,6 @@
 # MZ2POL-99: Best Practice Summary
 
-> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -158,7 +158,7 @@ This notebook consolidates every actionable best practice from the MZ2POL series
 | Practice | Recommended Setting/Value | Priority |
 |----------|----------------|----------|
 | Validate security context coverage reaches 100% | `fetch dt.entity.service \| summarize total = count(), covered = countIf(isNotNull(dt.security_context))` | Critical |
-| Compare MZ membership vs security context alignment per MZ | Query entities `in(managementZones, {"MZ"}) AND dt.security_context == "expected-value"` — all must match | Critical |
+| Compare MZ membership vs security context alignment per MZ | Query entities `in(managementZones, {"MZ"}) AND matchesValue(dt.security_context, "expected-value")` — all must match. `dt.security_context` is an array on `dt.entity.*` records, so `==` against a string is always false and reports every entity as misaligned | Critical |
 | Find entities in MZ but missing from segment | `filter in(managementZones, {"MZ"}) \| filter NOT matchesValue(tags, "key:value")` — result must be empty | Critical |
 | Test each user type with a test account | Log in as test user, verify expected data visible, verify restricted data hidden | Critical |
 | Audit security context weekly | Run coverage query to catch new entities deployed without security context | Recommended |

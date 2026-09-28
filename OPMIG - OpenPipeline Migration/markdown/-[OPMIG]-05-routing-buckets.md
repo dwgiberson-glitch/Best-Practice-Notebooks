@@ -1,10 +1,6 @@
 # OPMIG-05: Dynamic Routing & Bucket Management
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 5 of 10 | **Created:** December 2025 | **Last Updated:** 06/23/2026
-
-> **OpenPipeline Migration Series** | Notebook 5 of 9  
-> **Level:** Intermediate  
-> **Estimated Time:** 60 minutes
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 5 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ---
 
@@ -43,8 +39,8 @@ By completing this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
-| **Permissions** | `openpipeline.configurations.read`, `openpipeline.configurations.write`, `storage.buckets.read` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
+| **Permissions** | `settings:read`, `settings:write` (OpenPipeline configuration), `storage:buckets:read` |
 | **API Access** | `logs.read` token scope |
 | **Knowledge** | OPMIG-01 through OPMIG-04; understanding of pipeline configuration |
 
@@ -63,7 +59,7 @@ Dynamic routing is the mechanism that directs incoming data to specific pipeline
 |-------|-----------|-----------------|
 | Route 1 | k8s.namespace.name == "production" | prod-logs |
 | Route 2 | log.source == "nginx" | nginx-logs |
-| Route 3 | contains(content, "payment") | payment-logs |
+| Route 3 | matchesPhrase(content, "payment") | payment-logs |
 | Default | (no match) | default |
 -->
 
@@ -89,8 +85,10 @@ Route based on data source or ingestion method:
 |-----------|-----------------|----------|
 | `log.source == "nginx"` | nginx-logs | Web server logs |
 | `log.source == "application"` | app-logs | Application logs |
-| `dt.openpipeline.source == "otlp"` | otel-logs | OpenTelemetry |
-| `dt.openpipeline.source == "generic"` | api-logs | API ingestion |
+| `dt.openpipeline.source == "/api/v2/otlp/v1/logs"` | otel-logs | OpenTelemetry (OTLP logs) |
+| `dt.openpipeline.source == "/api/v2/logs/ingest"` | api-logs | API ingestion |
+
+> For built-in API sources, `dt.openpipeline.source` holds the endpoint **path** (`oneagent` for OneAgent). Run OPMIG-02's *View data sources* query to see the values in your tenant before routing on this field.
 
 ### Strategy 2: Environment-Based Routing
 
@@ -108,9 +106,11 @@ Route based on log content patterns:
 
 | Condition | Target Pipeline | Purpose |
 |-----------|-----------------|----------|
-| `contains(content, "payment")` | payment-logs | Financial logs |
-| `contains(content, "security")` | security-logs | Security events |
-| `contains(content, "audit")` | audit-logs | Compliance logs |
+| `matchesPhrase(content, "payment")` | payment-logs | Financial logs |
+| `matchesPhrase(content, "security")` | security-logs | Security events |
+| `matchesPhrase(content, "audit")` | audit-logs | Compliance logs |
+
+> Routing matchers accept `matchesPhrase` (whole tokens or phrases) and `matchesValue` with `*` wildcards (any substring); `contains()` is not enabled in matchers.
 
 ### Strategy 4: Severity-Based Routing
 
@@ -235,13 +235,17 @@ For extremely high-volume, low-value logs:
 2. Sample 10% to a short-retention bucket
 3. Keep statistical visibility without full storage cost
 
-### Pattern 4: Metric Extraction + Drop
+### Pattern 4: Metric Extraction + No Storage
 
 For logs needed only for metrics:
 
-1. Extract metrics (with dimensions) from logs
-2. Drop the raw logs after extraction
-3. Metrics persist for 10 years, logs dropped immediately
+1. Extract metrics (with dimensions) from logs in the **Metric extraction** stage
+2. Assign the raw logs **No storage assignment** (Bucket assignment stage) so each record still runs through Metric extraction but is not stored
+3. Metrics persist for 10 years; the raw logs are never written to a bucket
+
+Do not use a **Drop record** processor for this — it runs in the Processing stage, before Metric extraction, so nothing would be extracted.
+
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — Drop record: *"Drops a record. The record isn't processed further and isn't stored."*; No storage assignment: *"The record continues through all configured pipeline stages and isn't stored only at the end of the pipeline."*</sub>
 
 ---
 
@@ -492,16 +496,16 @@ Different organizations need different bucket architectures based on their scale
 ```
 Route 1 (Critical):
   Condition: loglevel == "ERROR" OR 
-             contains(log.source, "security") OR 
-             contains(log.source, "audit") OR
-             contains(content, "payment")
+             matchesValue(log.source, "*security*") OR 
+             matchesValue(log.source, "*audit*") OR
+             matchesPhrase(content, "payment")
   Pipeline:  critical-logs
   Bucket:    critical_logs (90 days)
 
 Route 2 (Ephemeral):
   Condition: loglevel == "DEBUG" OR 
              loglevel == "TRACE" OR
-             contains(content, "/health")
+             matchesValue(content, "*/health*")
   Pipeline:  ephemeral-logs
   Bucket:    ephemeral_logs (7 days)
 
@@ -814,7 +818,7 @@ ephemeral_healthcheck_logs
 | Drop DEBUG/TRACE | 30-50% volume reduction |
 | Drop health checks | 5-20% volume reduction |
 | Short retention for dev | 70-80% cost reduction |
-| Extract metrics, drop logs | Metrics persist, logs don't |
+| Extract metrics, don't store logs | Metrics persist; assign the raw logs **No storage assignment** (a Drop record processor would run before extraction) |
 | Sample high-volume noise | Keep visibility, reduce storage |
 
 ---
@@ -858,7 +862,7 @@ Processing: DROP all (or route to 3-day bucket)
 
 **Route 1: Audit Logs**
 ```
-Condition: contains(log.source, "audit") OR contains(content, "authentication")
+Condition: matchesValue(log.source, "*audit*") OR matchesPhrase(content, "authentication")
 Pipeline: audit-logs
 Bucket: audit_logs (365 days)
 Processing: Mask PII, add compliance tags
@@ -884,10 +888,6 @@ Now that you understand routing and buckets, continue with:
 - [OpenPipeline Data Flow](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/data-flow)
 - [organize-data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data)
 - [OpenPipeline Limits](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

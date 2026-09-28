@@ -1,6 +1,6 @@
 # DASH-02: Dashboard Hierarchy
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 2 of 7 | **Created:** March 2026 | **Last Updated:** 08/11/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 2 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -88,8 +88,10 @@ Executive dashboards answer: **"Is the business healthy?"**
 
 ```dql
 // Weekly problem trend — suitable for executive line chart
+// time:event.start bins each problem on the day it opened. The default (timestamp) is the
+// problem's last update, which counts old problems again on the day they were touched.
 fetch dt.davis.problems, from:-7d
-| makeTimeseries problem_count = count(), interval:1d
+| makeTimeseries problem_count = count(), interval:1d, time:event.start
 ```
 
 ### Example: Active Problem Count (Single Value)

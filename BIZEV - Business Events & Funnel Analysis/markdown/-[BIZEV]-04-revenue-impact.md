@@ -1,6 +1,6 @@
 # BIZEV-04: Revenue Impact Analysis
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 4 of 7 | **Created:** March 2026 | **Last Updated:** 08/25/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 4 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -56,8 +56,8 @@ fetch dt.davis.problems, from:-7d
 ```
 
 ```dql
-// Business event volume during problem periods vs overall
-// Count concurrent open problems alongside business event volume per hour
+// Business event volume per hour over the past 7 days
+// Overlay with the concurrent-open-problems query in Section 7 to line up dips with incidents
 fetch bizevents, from:-7d
 | makeTimeseries biz_events = count(), interval:1h
 ```
@@ -73,7 +73,7 @@ To measure impact, compare the business event rate during an incident against a 
 - The 7-day rolling average
 
 ```dql
-// Compare today's business event volume vs yesterday (hourly)
+// Compare today's business event volume vs yesterday (two 24-hour totals)
 fetch bizevents, from:-24h
 | summarize today_count = count()
 | append [
@@ -122,8 +122,8 @@ fetch bizevents, from:-24h
 ```
 
 ```dql
-// Estimate revenue loss: compare a specific incident window to the baseline
-// Replace the timeframe values with your actual incident window
+// Hourly revenue — pick the incident hours and compare them with the surrounding hours
+// (or with the same hours from the day-over-day query in Section 5) to estimate the loss
 fetch bizevents, from:-24h
 | filter event.type == "com.myapp.order.completed"
 | filter isNotNull(amount)
@@ -225,11 +225,14 @@ fetch dt.davis.problems, from:-7d
 | filter event.status == "CLOSED"
 | filter dt.davis.is_duplicate == false
 | fieldsAdd duration_hours = resolved_problem_duration / 1h
-| summarize
-    impact_hours = sum(duration_hours),
-    problem_count = count(),
-    affected_entities = countDistinctExact(affected_entity_ids),
-    avg_problem_hours = avg(duration_hours)
+// affected_entity_ids is an array: countDistinctExact on it counts distinct ARRAYS, not
+// entities — flatten the collected arrays first, then count distinct entity IDs.
+| summarize {impact_hours = sum(duration_hours),
+           problem_count = count(),
+           entity_arrays = collectArray(affected_entity_ids),
+           avg_problem_hours = avg(duration_hours)}
+| fieldsAdd affected_entities = arraySize(arrayDistinct(arrayFlatten(entity_arrays)))
+| fieldsRemove entity_arrays
 
 ```
 
@@ -265,7 +268,7 @@ In this notebook, you learned:
 - **Revenue loss estimation** — Using transaction amounts to quantify financial impact
 - **Business hours filtering** — Scoping analysis to when it matters most
 - **Day-over-day comparison** — Detecting business anomalies via historical comparison
-- **SLA measurement** — Calculating availability from problem duration data
+- **Impact hours** — Entity-hours of problem impact, and why they are not an SLA percentage
 - **Impact timelines** — Overlaying problems with business metrics
 
 ### Next Steps

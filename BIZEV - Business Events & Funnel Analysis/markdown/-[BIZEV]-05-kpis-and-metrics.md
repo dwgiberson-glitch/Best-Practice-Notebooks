@@ -1,6 +1,6 @@
 # BIZEV-05: KPIs and Metrics
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 5 of 7 | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 5 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -171,37 +171,31 @@ While DQL queries compute KPIs on demand, **OpenPipeline metric extraction** cre
 
 ### OpenPipeline Configuration
 
-```yaml
-# Example: Extract order count and revenue as metrics
-pipelines:
-  - name: "Business KPI Metrics"
-    processing:
-      - type: metric_extraction
-        condition: "event.type == 'com.myapp.order.completed'"
-        metrics:
-          - key: "business.orders.count"
-            type: count
-          - key: "business.orders.revenue"
-            type: gauge
-            value: "amount"
-            dimensions:
-              - event.provider
-              - product_category
-```
+In **Settings > Process and contextualize > OpenPipeline > Business events**, open the pipeline that processes your business events, go to the **Metric extraction** stage, and add two processors:
+
+| Processor | Matching condition | Metric key | Value field | Dimensions |
+|---|---|---|---|---|
+| **Counter metric** | `event.type == "com.myapp.order.completed"` | `bizevents.orders.count` | — (increments by 1 per matching record) | `event.provider`, `product_category` |
+| **Value metric** | `event.type == "com.myapp.order.completed"` | `bizevents.orders.revenue` | `amount` | `event.provider`, `product_category` |
+
+OpenPipeline matchers accept **double-quoted** strings only — `event.type == 'com.myapp.order.completed'` is rejected.
+
+> **Metric key prefix.** The classic-pipeline extraction page requires keys *"starting with the bizevents. prefix"*; no OpenPipeline page states a prefix rule for business-event metrics. Using `bizevents.` here is the safe choice — it satisfies the classic rule and keeps business metrics easy to find with `metrics | filter startsWith(metric.key, "bizevents.")`.
 
 ### Benefits of Metric Extraction
 
 | Approach | Latency | Retention | Alerting | Cost |
 |----------|---------|-----------|----------|------|
 | DQL on bizevents | Seconds | Event retention (default 35 days) | Manual threshold | Scans event data |
-| Extracted metrics | Sub-second | Metric retention (default 5 years) | Native Dynatrace Intelligence/SLO | Pre-aggregated |
+| Extracted metrics | Sub-second | Metric retention (15 months included, extendable to 10 years) | Native Dynatrace Intelligence/SLO | Pre-aggregated |
 
-> **Classic-pipeline variant — the bridge to classic dashboards.** Alongside the OpenPipeline path shown here, Dynatrace documents business-event metric extraction via the classic pipeline (Settings > Business Observability > Metric extraction). Rules there emit metrics keyed with the `bizevents.` prefix (up to 50 dimensions) that are readable in Data Explorer, classic dashboards, and classic metric-event alerting — useful when report consumers still live in the classic (Gen2) experience. It is closing, though — per [Business event metric extraction via classic pipeline (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-event-processing/bo-metric-extraction): *"For new accounts created from September 2026, classic pipeline is not available. Use OpenPipeline to process your data."* Build new extraction on the OpenPipeline path; either way the output is an ordinary metric. See **BIZEV-07: Gen2 vs Gen3 — Business Events Without (or Before) the Full Move** for the full hybrid-adoption pattern.
+> **Classic-pipeline variant — the bridge to classic dashboards.** Alongside the OpenPipeline path shown here, Dynatrace documents business-event metric extraction via the classic pipeline (Settings > Business Observability > Metric extraction). Rules there emit metrics keyed with the `bizevents.` prefix (up to 50 dimensions) that are readable in Data Explorer, classic dashboards, and classic metric-event alerting — useful when report consumers still live in the classic (Gen2) experience. It is closing, though — per [Business event metric extraction via classic pipeline (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-event-processing/bo-metric-extraction): *"For new accounts created from September 2026, classic pipeline is not available. Use OpenPipeline to process your data."* and *"Processing with the classic pipeline will be deactivated in a future release."* Existing classic rules stop producing metrics once that deactivation reaches your environment, so build new extraction on the OpenPipeline path; either way the output is an ordinary metric. See **BIZEV-07: Gen2 vs Gen3 — Business Events Without (or Before) the Full Move** for the full hybrid-adoption pattern.
 
 ```dql
 // If you have extracted business metrics, query them with timeseries
-// Replace with your actual metric key
-timeseries order_volume = count(business.orders.count), from:-24h
+// Replace with your actual metric key. On a counter metric use sum(): count() returns the
+// number of reported data points, not the number of orders.
+timeseries order_volume = sum(bizevents.orders.count, default: 0), from:-24h
 ```
 
 <a id="business-health-score"></a>
@@ -294,7 +288,9 @@ In this notebook, you learned:
 ### References
 
 - [Dynatrace Business Analytics](https://docs.dynatrace.com/docs/observe/business-observability)
-- [OpenPipeline Metric Extraction](https://docs.dynatrace.com/docs/platform/openpipeline)
+- [Metric extraction stage in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/extraction/metric-extraction) — *"The Counter metric processor increments a counter by 1 for each matching record."*
+- [DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline)
+- [Metrics FAQ (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/faq) — *"Grail metrics come with 15 months of included retention at 1-minute granularity by default. This retention can be increased to up to 10 years."*
 - [DQL structuring commands (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language/commands/structuring-commands)
 
 ---

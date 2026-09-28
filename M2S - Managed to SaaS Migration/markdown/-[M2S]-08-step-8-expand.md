@@ -1,6 +1,6 @@
 # M2S-08: Step 8 — Expand: Adopt New SaaS Capabilities
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 8 of 9 | **Phase:** Run | **Step:** Expand | **Created:** March 2026 | **Last Updated:** 07/24/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 8 of 9 | **Phase:** Run | **Step:** Expand | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 With the migration complete and integrations reconnected, the real value of moving to SaaS begins. Dynatrace SaaS includes an entire generation of capabilities that were never available in Managed — Grail, Notebooks, OpenPipeline, Dynatrace Assist, AppEngine, and AutomationEngine. This notebook provides a structured approach to adopting each capability, with a recommended timeline that avoids overwhelming teams while ensuring steady progress.
 
@@ -94,9 +94,10 @@ Start with queries that replace what you were doing in Managed. These demonstrat
 
 ```dql
 // Cross-data-type analysis: top services by error log volume
-// This query joins logs with entity names — not possible in Managed
+// Logs carry the service entity when OneAgent enriches them — no join needed
+// status == "ERROR" also counts SEVERE/FATAL levels that loglevel == "ERROR" misses
 fetch logs, from:-1h
-| filter loglevel == "ERROR"
+| filter status == "ERROR" and isNotNull(dt.entity.service)
 | summarize errorCount = count(), by:{dt.entity.service}
 | sort errorCount desc
 | limit 10
@@ -106,7 +107,7 @@ fetch logs, from:-1h
 // Grail bucket usage — see how data is distributed across buckets
 // Grail buckets are a SaaS-only concept for data routing and retention
 fetch logs, from:-24h
-| summarize logVolume = count(), by:{dt.system.bucket_name}
+| summarize logVolume = count(), by:{dt.system.bucket}
 | sort logVolume desc
 ```
 
@@ -236,7 +237,7 @@ Create buckets based on data lifecycle and compliance requirements:
 // Check data distribution across Grail buckets
 // If you see only "default_logs", OpenPipeline routing rules have not been configured yet
 fetch logs, from:-1h
-| summarize logCount = count(), by:{dt.system.bucket_name}
+| summarize logCount = count(), by:{dt.system.bucket}
 | sort logCount desc
 ```
 

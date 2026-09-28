@@ -1,6 +1,6 @@
 # FAQ-15: How Does DPL Work?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 15 — How Does DPL Work? | **Created:** July 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 15 — How Does DPL Work? | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -54,14 +54,14 @@ Nearly everyone arrives at DPL fluent in regex, so § 3 handles that head-on: ex
 Five rules explain nearly every DPL problem:
 
 1. **`parse` matches from the start of the string, contiguously.** It does not need to consume the whole line — trailing text is ignored — but it does not search forward for a starting point: `parse("xx 42", "INT:n")` is `null`, while `parse("42 xx", "INT:n")` is `"42"`. Any gap you don't account for breaks the match. `matchesPattern` is stricter still: the pattern must cover the *whole* string (§ 7). *(live-verified)*
-2. **`LD` matches as *little* as possible; character classes like `ALPHA` and `WORD` match as *much* as possible.** These opposite behaviors in one language cause most surprises. *(live-verified)*
+2. **`LD` matches as *little* as possible; POSIX classes like `ALPHA` and `WORD` match as *much* as possible — and a bracket group like `[a-z]` matches exactly one character unless you quantify it.** These different defaults in one language cause most surprises. *(live-verified)*
 3. **There is no backtracking.** A greedy matcher that over-consumes never gives characters back — the pattern fails instead. A quantified matcher must never be able to match the delimiter that follows it. *(live-verified)*
 4. **Failure is silent.** A non-matching pattern yields `null`. An *ambiguous* pattern yields wrong values with no warning at all. There is no error either way.
 5. **Use the dedicated matcher instead of hand-rolling it.** `HTTPDATE` is one token for what most teams write as a nine-part timestamp pattern, and `KVP` parses key-value text that teams usually attack one field at a time.
 
 The single most important habit: **build patterns in DPL Architect against real sample records**, never in your head. See § 11.
 
-> <sub>**Sources:** [Dynatrace Pattern Language (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language), [DPL Grammar (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-grammar). **Derived:** the four-rule framing is an authoring synthesis — the docs describe the grammar, not this diagnostic ordering.</sub>
+> <sub>**Sources:** [Dynatrace Pattern Language (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language), [DPL Grammar (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-grammar). **Derived:** the five-rule framing is an authoring synthesis — the docs describe the grammar, not this diagnostic ordering.</sub>
 
 ---
 
@@ -332,7 +332,13 @@ That makes bounded matchers a neat way to extract *and* filter in one step — `
 
 POSIX classes, usable directly as matchers: `ALNUM`, `ALPHA`, `BLANK`, `CNTRL`, `DIGIT`, `GRAPH`, `LOWER`, `PRINT`, `PUNCT`, `SPACE`, `NSPACE` (non-space), `UPPER`, `XDIGIT`, `ASCII`, `WORD`. Custom groups use bracket syntax — `[0-9]`, `[a-fA-F]`, negated with `^` or `!`.
 
-> ⚠️ **Documented default vs. observed behavior.** The grammar reference gives character classes a default quantifier of `{1,1}`. Live testing shows them consuming greedily: on input `abcdef`, `ALPHA:x` returned **`abcdef`**, not `a`; `ALPHA{2}:x` returned `ab`. *(live-verified 07/20/2026)* Don't rely on either reading — **state the quantifier explicitly** whenever the length matters.
+> ⚠️ **POSIX classes and bracket groups have different defaults.** A POSIX class matches 1 to 4,096 characters by default; a bracket group matches **exactly one** character unless you add a quantifier. On input `abcdef:x`, `ALPHA:x` returns **`abcdef`**, `[a-z]:x` returns **`a`**, and `[a-z]+:x` returns `abcdef`; `ALPHA{2}:x` returns `ab`. *(live-verified 07/20/2026 and 09/28/2026)* A bracket group written as if it were a POSIX class silently captures one character — **state the quantifier explicitly** whenever the length matters.
+
+```dql
+data record(t = "abcdef:x")
+| fieldsAdd posix = parse(t, "ALPHA:x"), bracket = parse(t, "[a-z]:x"), bracket_plus = parse(t, "[a-z]+:x")
+// live-verified 09/28/2026: posix = "abcdef", bracket = "a", bracket_plus = "abcdef"
+```
 
 ### Date and time
 
@@ -362,7 +368,17 @@ data record(t = "2024-12-12 10:30:45")
 
 ### Network
 
-`IPADDR` (v4 or v6), `IPV4` / `IPV4ADDR`, `IPV6` / `IPV6ADDR`. No quantifier, no configuration. **There is no CIDR or prefix matcher.**
+`IP` / `IPADDR` (v4 or v6 — `IP` is the name the docs now lead with, `IPADDR` its alias), `IPV4` / `IPV4ADDR`, `IPV6` / `IPV6ADDR`. Quantifiers `*` and `+` only (no `{n}`), no configuration. **There is no CIDR or prefix matcher.**
+
+**These matchers are not validators.** They read the longest valid leading portion of the address and stop, so an invalid address is **truncated to a shorter valid one rather than returning `null`**:
+
+```dql
+data record(t = "192.168.0.256")
+| fieldsAdd ip = parse(t, "IPADDR:ip")
+// live-verified 09/28/2026: ip = "192.168.0.25" — the out-of-range octet was cut, not rejected
+```
+
+If a pipeline must reject bad addresses, check the parsed value against the source (for example, that the parsed address is the whole token) rather than trusting a non-null result.
 
 ### Structured data
 
@@ -408,13 +424,13 @@ data record(x = "x")
 > <sub>**Sources:**</sub>
 > - <sub>[DPL Grammar (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-grammar)</sub>
 > - <sub>[Numeric matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-numeric)</sub>
-> - <sub>[Lines and strings (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-lines-strings)</sub>
+> - <sub>[Lines and strings (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-lines-strings) — *"By default, POSIX character classes match between 1 and 4096 characters."*; *"By default, [...] matches exactly one character from the group"*</sub>
 > - <sub>[Time and date (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-time-date)</sub>
-> - <sub>[Network matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-network)</sub>
+> - <sub>[Network matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-network) — *"Some invalid or non-standard inputs are therefore truncated to a shorter valid address instead of returning null"* (page updated Aug 06, 2026)</sub>
 > - <sub>[Key-value pairs (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-key-value-pairs)</sub>
 > - <sub>[Positional matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-positional-matchers)</sub>
 > - <sub>[XML matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/dpl-xml) — absent from the grammar table; reachable only by direct link</sub>
-> - <sub>**Derived:** the "does not exist" list and the character-class quantifier discrepancy are live-tenant findings (07/20/2026), not documented statements</sub>
+> - <sub>**Derived:** the "does not exist" list is a live-tenant finding (07/20/2026), not a documented statement</sub>
 
 ---
 
@@ -423,9 +439,9 @@ data record(x = "x")
 
 This section is the reason the entry exists. DPL has **two** failure modes, and the dangerous one produces data rather than nothing.
 
-### Rule 1 — `LD` is minimal; character classes are greedy
+### Rule 1 — `LD` is minimal; POSIX classes are greedy
 
-`LD` consumes **as little as possible** until the next matcher can succeed. Character classes consume **as much as possible**. Both live-verified, and the asymmetry is the root of most confusion:
+`LD` consumes **as little as possible** until the next matcher can succeed. POSIX classes such as `WORD` consume **as much as possible** (a bracket group, by contrast, takes one character unless quantified — § 4). Both live-verified, and the asymmetry is the root of most confusion:
 
 ```dql
 data record(t = "key_abcdef rest")
@@ -764,7 +780,7 @@ Zero bytes scanned, instant feedback, no tenant data required.
 |---------|--------------|
 | Every record `null` | A literal that isn't in the text — different separator, tab vs. space, or the format varies more than your sample showed |
 | Some records `null` | Genuinely optional fields — mark them `?`, or use alternation |
-| One field holds a single character | Two `LD`s with nothing between them (§ 5, Rule 2) |
+| One field holds a single character | Two `LD`s with nothing between them (§ 5, Rule 3), or an unquantified bracket group such as `[a-z]:x` (§ 4) |
 | Works on short lines, fails on long ones | The `{1,4096}` default cap on `LD`/`DATA` |
 | Works on the first line of a multi-line record only | You want `DATA`, not `LD` |
 | Timestamp is right but hours are off | Missing `timezone=` — DPL normalizes to UTC |

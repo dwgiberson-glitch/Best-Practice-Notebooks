@@ -371,7 +371,7 @@ AKS control-plane components (`kube-apiserver`, `kube-audit`, `kube-audit-admin`
 > - <sub>[Set up the Azure log forwarder (DT docs)](https://docs.dynatrace.com/docs/ingest-from/microsoft-azure-services/azure-integrations/set-up-log-forwarder-azure) — *"If you already have multiple integrations, you can additionally use the values cloud.log_forwarder and dt.auth.origin to further refine your filters."*</sub>
 > - <sub>[dynatrace-azure-log-forwarder (Dynatrace GitHub)](https://github.com/dynatrace-oss/dynatrace-azure-log-forwarder)</sub>
 > - <sub>**Dictionary:** `dt.da.source` (`experimental`), `dt.openpipeline.source` (`experimental`), `log.source` (`stable`), `cloud.provider` (`stable`), `azure.resource.id` (`experimental`), read 09/25/2026.</sub>
-> - <sub>[Diagnostic settings in Azure Monitor (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/azure-monitor/platform/diagnostic-settings) — *"Each resource can have up to five diagnostic settings."*</sub>
+> - <sub>[Diagnostic settings in Azure Monitor (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/diagnostic-settings) — *"Each resource can have up to five diagnostic settings."*</sub>
 > - <sub>[Monitor AKS (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/monitor-aks) — *"You can incur substantial cost when you collect resource logs for AKS, particularly for _kube-audit_ logs."*</sub>
 
 <a id="aks-monitoring"></a>

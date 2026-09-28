@@ -1,6 +1,6 @@
 # M2S-06: Step 6 — Integrate: Reconnect Integrations
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 6 of 9 | **Phase:** Upgrade | **Step:** Integrate | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 6 of 9 | **Phase:** Upgrade | **Step:** Integrate | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 With OneAgents reporting to SaaS and configurations migrated, the next challenge is ensuring every external system that depends on Dynatrace is reconnected. Dashboards need updated links, alerting channels need validation, CI/CD pipelines need new API endpoints, and ITSM integrations need reconfiguration. This notebook provides a systematic approach to reconnecting every integration point.
 
@@ -235,32 +235,36 @@ Create dedicated API tokens for each CI/CD integration. Follow the principle of 
 
 ### Deployment Event Validation
 
-After updating CI/CD configurations, trigger a test deployment and verify that deployment events appear in SaaS:
+After updating CI/CD configurations, trigger a test deployment and verify that deployment events appear in SaaS.
+
+Deployment events are identified by **`event.type == "CUSTOM_DEPLOYMENT"`**. `CUSTOM_DEPLOYMENT` is an event *type*; filtering on `event.kind` instead never matches, and returns an empty result that looks exactly like a pipeline that sent nothing. The two queries below were executed successfully against a live tenant, but that tenant held no deployment events, so they were confirmed to run, not confirmed to return rows. The field names come from the documentation and the semantic dictionary. Your first real test deployment is the positive check.
+
+> <sub>**Sources:** [Davis events model (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/davis) — `event.type`: *"The unique type identifier of a given event. Must be one of:"* (the list includes `CUSTOM_DEPLOYMENT`). **Dictionary:** `event.kind` (`stable`), `deployment.release_version` (`experimental`), `deployment.release_stage` (`experimental`); no row for `event.deployment.*`, read 09/28/2026 (control: the same filter returned `deployment.release_*` rows).</sub>
 
 ```dql
 // Verify deployment events are being received from CI/CD pipelines
 fetch events, from:-24h
-| filter event.kind == "CUSTOM_DEPLOYMENT"
-| fieldsKeep event.type, dt.entity.service, timestamp
+| filter event.type == "CUSTOM_DEPLOYMENT"
+| fieldsKeep event.type, event.name, dt.entity.service, timestamp
 | sort timestamp desc
 | limit 10
 ```
 
 ### Release Tracking
 
-If you use Dynatrace release tracking, verify that version metadata is being captured correctly after the CI/CD update:
+If you use Dynatrace release tracking, verify that version metadata is being captured correctly after the CI/CD update. The release fields are `deployment.release_version` and `deployment.release_stage` (both `experimental` in the semantic dictionary) — not `event.deployment.*`, which does not exist:
 
 ```dql
 // Check release versions captured by Dynatrace via deployment events
-// Release version and stage are carried in deployment events, not as entity fields
+// Release version and stage are carried on the deployment event, not as entity fields
 fetch events, from:-7d
-| filter event.kind == "CUSTOM_DEPLOYMENT"
-| fieldsKeep event.name, dt.entity.service, event.deployment.release_version, event.deployment.release_stage, timestamp
+| filter event.type == "CUSTOM_DEPLOYMENT"
+| fieldsKeep event.name, dt.entity.service, deployment.release_version, deployment.release_stage, timestamp
 | sort timestamp desc
 | limit 20
 
 // Note: releaseVersion / releaseStage are not directly addressable fields on dt.entity.service in DQL.
-// Release tracking data surfaces through deployment events (event.kind == "CUSTOM_DEPLOYMENT") or
+// Release tracking data surfaces through deployment events (event.type == "CUSTOM_DEPLOYMENT") or
 // via the Release Monitoring app in the Dynatrace UI.
 
 ```
@@ -465,7 +469,7 @@ curl -s "https://{tenant}.live.dynatrace.com/api/v2/apiTokens/lookup" \
   -d '{"token": "{SAAS_TOKEN}"}' | jq '.scopes'
 ```
 
-> **Deprecation — Dynatrace API 1.348 (pre-release; staged rollout planned from 09/22/2026).** The API 1.348 changelog marks the whole `/apiTokens` endpoint family deprecated — *"The following endpoints are deprecated"*, covering `POST /apiTokens`, `POST /apiTokens/lookup` and the per-token `GET`/`PUT`/`DELETE`. No successor is named. Deprecated endpoints keep working during the deprecation period, so the scope check above (`POST /api/v2/apiTokens/lookup`) and the classic token it inspects remain the working path — re-check the [API 1.348 changelog (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-348) at GA before building new automation on `/apiTokens/lookup`.
+> **Deprecation — Dynatrace API 1.348 (pre-release; staged rollout planned from 09/22/2026).** The API 1.348 changelog marks the whole `/apiTokens` endpoint family deprecated — *"The following endpoints are deprecated"*, covering `GET` and `POST /apiTokens`, `POST /apiTokens/lookup` and the per-token `GET`/`PUT`/`DELETE`. No successor is named. Deprecated endpoints keep working during the deprecation period, so the scope check above (`POST /api/v2/apiTokens/lookup`) and the classic token it inspects remain the working path — re-check the [API 1.348 changelog (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-348) at GA before building new automation on `/apiTokens/lookup`.
 
 <a id="synthetic-monitor-migration"></a>
 
@@ -497,9 +501,11 @@ Public locations are available in both Managed and SaaS. Simply recreate the mon
 ### Verify Synthetic Monitors Are Executing
 
 ```dql
-// Count synthetic monitors in SaaS — compare to your Managed inventory
-smartscapeNodes "BROWSER_MONITOR"
-| summarize monitorCount = count()
+// Count synthetic monitors in SaaS by type — compare to your Managed inventory
+// Browser, HTTP and multi-protocol monitors are separate node types; counting BROWSER_MONITOR alone misses two of them
+smartscapeNodes "BROWSER_MONITOR", "HTTP_MONITOR", "NETWORK_AVAILABILITY_MONITOR"
+| summarize monitorCount = count(), by:{type}
+| sort type asc
 
 // Smartscape (preferred, verified 07/2026): dt.entity.synthetic_test maps to the BROWSER_MONITOR
 // node (individual steps are a separate BROWSER_MONITOR_STEP node). HTTP monitors are HTTP_MONITOR,
@@ -507,14 +513,14 @@ smartscapeNodes "BROWSER_MONITOR"
 // corrects an earlier note here that claimed no Smartscape equivalent existed. Unlike ActiveGate,
 // `fetch dt.entity.synthetic_test` does still work and remains a genuine fallback — it reads the
 // classic entity store, which can retain entities Smartscape (live topology) no longer lists.
-// Classic fallback: fetch dt.entity.synthetic_test | summarize monitorCount = count()
+// Classic fallback (browser monitors only): fetch dt.entity.synthetic_test | summarize monitorCount = count()
 ```
 
 ```dql
-// List synthetic monitors with their names — verify expected monitors are present
-smartscapeNodes "BROWSER_MONITOR"
+// List synthetic monitors with their names and types — verify expected monitors are present
+smartscapeNodes "BROWSER_MONITOR", "HTTP_MONITOR", "NETWORK_AVAILABILITY_MONITOR"
 | fields name, type
-| sort name asc
+| sort type asc, name asc
 
 // Smartscape (preferred, verified 07/2026): dt.entity.synthetic_test maps to the BROWSER_MONITOR
 // node (individual steps are a separate BROWSER_MONITOR_STEP node). HTTP monitors are HTTP_MONITOR,
@@ -526,8 +532,9 @@ smartscapeNodes "BROWSER_MONITOR"
 
 ```dql
 // Verify synthetic execution results are being recorded
-fetch events, from:-1h
-| filter event.kind == "SYNTHETIC_TEST_STEP_RESULT"
+// Execution results live in dt.synthetic.events, not in the generic events table
+fetch dt.synthetic.events, from:-1h
+| filter in(event.type, {"http_monitor_execution", "browser_monitor_execution", "multiprotocol_monitor_execution"})
 | summarize executionCount = count()
 | fieldsAdd status = if(executionCount > 0, then: "Synthetic monitors executing", else: "No synthetic results — check monitor configuration")
 ```

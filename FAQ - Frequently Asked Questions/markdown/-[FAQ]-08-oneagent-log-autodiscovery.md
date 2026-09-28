@@ -1,6 +1,6 @@
 # FAQ-08: How Does OneAgent Decide Which Logs to Collect?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 08 — How OneAgent Decides Which Logs to Collect | **Created:** June 2026 | **Last Updated:** 08/27/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 08 — How OneAgent Decides Which Logs to Collect | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -172,11 +172,11 @@ And several things are deliberately **not** auto-collected, each with a specific
 - **OneAgent's own logs** — collected only if you enable *"Allow OneAgent to monitor Dynatrace logs."*
 - **Files that fail any gate in §3** — wrong path/name, no holding process, stale, too small, non-text, or rewritten-in-place rather than appended.
 
-The per-technology auto-detection toggles and the network-filesystem option live under **Settings → Log Monitoring → OneAgent settings**. Container and Kubernetes specifics (the container-log path, namespace scoping, masking) are covered in depth in the K8S series rather than here.
+The log-module configuration lives under **Settings → Collect and capture → Log monitoring → Configure log module**; the network-filesystem option and *Allow OneAgent to monitor Dynatrace logs* are on its **Advanced settings** page. Container and Kubernetes specifics (the container-log path, namespace scoping, masking) are covered in depth in the K8S series rather than here.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Log ingestion via OneAgent (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa) — default-detected sources (system logs, IIS, Windows Event Log, containers)</sub>
-> - <sub>[Log autodiscovery (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-autodiscovery) — binaries not auto-detected, network-filesystem default-off, "Allow OneAgent to monitor Dynatrace logs"</sub>
+> - <sub>[Log autodiscovery (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-autodiscovery) — binaries not auto-detected, network-filesystem default-off, "Allow OneAgent to monitor Dynatrace logs"; *"Settings > Collect and capture > Log monitoring > Configure log module > Advanced settings"*</sub>
 > - <sub>[Advanced log settings (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/advanced-log-settings) — per-technology toggles (e.g., turning off IIS log detection)</sub>
 > - <sub>[Windows event logs (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-windows-event-logs)</sub> — System / Application / Security channel collection</sub>
 
@@ -185,13 +185,15 @@ The per-technology auto-detection toggles and the network-filesystem option live
 
 When a file fails a gate, the fix is a **custom log source** — an explicit path you tell OneAgent to monitor. A custom log source **supplements** auto-detection for a specific path; it does **not** change the built-in rules or expand what auto-discovery finds elsewhere.
 
-**Where to configure** (narrower scope wins):
+**Where to configure** (narrower scope wins) — the page is the same at every scope; for host and host group, first use **Go to scope** in the upper-left corner of Settings to select the host or host group:
 
 | Scope | Path |
 |-------|------|
-| Environment | Settings → Log Monitoring → Custom log sources |
-| Host group | Host group settings → Log Monitoring → Custom log sources |
-| Host | (host) Settings → Log Monitoring → Custom log sources |
+| Environment | Settings → Collect and capture → Log monitoring → Configure log module → Sources |
+| Host group | Settings → *Go to scope* (host group) → Collect and capture → Log monitoring → Configure log module → Sources |
+| Host | Settings → *Go to scope* (host) → Collect and capture → Log monitoring → Configure log module → Sources |
+
+In each case, select **New log source rule** in the *Add missing log sources* section.
 
 **Path rules:**
 
@@ -211,7 +213,7 @@ When a file fails a gate, the fix is a **custom log source** — an explicit pat
 
 Because custom sources don't expand the rules, the durable fix for "we have a whole class of logs in a non-standard location" is sometimes simpler: write those logs to a `log`/`logs` directory, or give them a `*.log` name, so the built-in include rules catch them without per-host configuration.
 
-> <sub>**Sources:** [Custom log source (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-custom-log-source) — config scopes and precedence, absolute-path requirement, `*`/`#` wildcard semantics, 100 paths/rule and 1000 rules/scope, `dtuser` permission requirement, "custom log sources do not expand auto-detection", [Log autodiscovery (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-autodiscovery) — binary-format option for binary files; rotation-pattern handling, [OneAgent 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-343) — released 07/28/2026; support for rapidly rotated and compressed log files on Linux. **Derived:** the "write to a log/ directory or use a .log name" recommendation combines the §4 include rules with the custom-source-doesn't-expand constraint — neither source states it as advice.</sub>
+> <sub>**Sources:** [Custom log source (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-custom-log-source) — config scopes and precedence (*"Go to Settings > Collect and capture > Log monitoring > Configure log module > Sources"*), absolute-path requirement, `*`/`#` wildcard semantics, 100 paths/rule and 1000 rules/scope, `dtuser` permission requirement, "custom log sources do not expand auto-detection", [Log autodiscovery (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion/lma-log-ingestion-via-oa/lma-autodiscovery) — binary-format option for binary files; rotation-pattern handling, [OneAgent 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-343) — released 07/28/2026; support for rapidly rotated and compressed log files on Linux. **Derived:** the "write to a log/ directory or use a .log name" recommendation combines the §4 include rules with the custom-source-doesn't-expand constraint — neither source states it as advice.</sub>
 
 <a id="scale-limits"></a>
 ## 7. Scale and Limits
@@ -273,11 +275,11 @@ fetch dt.system.events, from:-24h
 
    This surface is billing-cheap — it scans events, not raw log records (0 bytes billed in testing) — and needs only event-read permission rather than logs-table read. It is delivered in **Early Access** and requires opt-in: the OneAgent log module must be enabled to send self-monitoring events to your tenant, and its content is folding into the built-in **Log ingest Overview** dashboard for Dynatrace **1.339+** (staged rollout — verify the events are flowing in your tenant before relying on them). Until they are, the Grail log-records query below remains the working path.
 
-   **Fallback (no opt-in / older tenant).** Query the stored log records directly. This sees only sources that produced records, so it cannot separate "detected but not ingested" from "never detected" — but it needs no opt-in:
+   **Fallback (no opt-in / older tenant).** Query the stored log records directly. This shows only sources that produced records, so it cannot separate "detected but not ingested" from "never detected" — but it needs no opt-in. Group by `log.source` alone: `log.source.file_status` and `log.source.ingest_status` are fields of the `log_source.status` self-monitoring events above, not of log records, and are empty on every log record (0 of 20,006,675 records over 24 h on the validation tenant, 09/28/2026):
 
 ```dql
 fetch logs, from:-24h
-| summarize records = count(), by:{log.source, log.source.file_status, log.source.ingest_status}
+| summarize records = count(), by:{log.source}
 | sort records desc
 | limit 20
 ```

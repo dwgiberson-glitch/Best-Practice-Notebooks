@@ -1,6 +1,6 @@
 # ADOPT-03: Success Metrics
 
-> **Series:** ADOPT — Observability Adoption & Maturity | **Notebook:** 3 of 6 | **Created:** March 2026 | **Last Updated:** 08/25/2026
+> **Series:** ADOPT — Observability Adoption & Maturity | **Notebook:** 3 of 6 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -247,8 +247,12 @@ Dynatrace tracks deployment events and can correlate them with detected problems
 
 ```dql
 // Count deployment events in the last 7 days
+// CUSTOM_DEPLOYMENT is an event.type (the Events API v2 eventType), not an event.kind.
+// API-ingested events carry event.kind == "DAVIS_EVENT"; the kinds seen on the events
+// object are DAVIS_EVENT, DAVIS_PROBLEM, FLEET_EVENT and SYNTHETIC_EVENT, so a filter on
+// event.kind == "CUSTOM_DEPLOYMENT" matches nothing, whether or not you send deployments.
 fetch events, from:-7d
-| filter event.kind == "CUSTOM_DEPLOYMENT"
+| filter event.type == "CUSTOM_DEPLOYMENT"
 | summarize deployment_count = count()
 ```
 

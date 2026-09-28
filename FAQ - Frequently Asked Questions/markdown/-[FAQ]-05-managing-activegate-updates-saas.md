@@ -1,6 +1,6 @@
 # FAQ-05: How to manage ActiveGate updates on Dynatrace SaaS
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 05 — Managing ActiveGate Updates (SaaS) | **Created:** May 2026 | **Last Updated:** 09/02/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 05 — Managing ActiveGate Updates (SaaS) | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -75,36 +75,39 @@ ActiveGate update flow on SaaS:
 
 A few mechanics worth knowing:
 
-- **Settings are per-ActiveGate.** Unlike OneAgent — where host-group is the natural grouping — ActiveGates are managed individually. Each AG has its own update setting. There is no host-group equivalent for AGs.
-- **Auto-update can be disabled.** When disabled, a *one-click "Update now"* control appears in the AG's settings when a new version is available.
+- **Where you control updates depends on the platform surface.** On **Latest Dynatrace**, update control is set centrally: **Settings > Fleet management > ActiveGate version and updates** holds a **target version** (pinned, or a rolling policy such as N-1) and an **update mode** — auto-update as soon as Dynatrace releases, auto-update only during update windows you define, or auto-update disabled. On **Dynatrace Classic**, the older path remains: **Settings > Updates > ActiveGate updates**, a per-ActiveGate *Automatic updates at earliest convenience* toggle. The page does not describe per-role overrides of the Latest Dynatrace setting — verify in your tenant how finely you can scope an update window before designing per-role schedules around it.
+- **Auto-update can be disabled.** On the Classic path, a *one-click "Update now"* control appears in the AG's settings when a new version is available and the toggle is off. On Latest Dynatrace, *Auto-update disabled* is an update mode the docs mark as not recommended.
 - **The check interval is fixed.** Roughly every 30 minutes; this is a platform behavior, not a configurable knob.
 - **The restart window is short.** Tens of seconds typically. HA pair architectures absorb this; single-AG architectures briefly drop traffic.
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — describes per-AG settings, one-click update, the 30-minute availability check; *"Turn on the Automatic updates at earliest convenience toggle for the ActiveGate"*, reached via **Settings > Updates > ActiveGate updates > Auto-update** (re-read 09/02/2026 — the page now gives the navigation path and toggle, replacing an earlier phrasing that pointed at the per-ActiveGate settings screen)</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — Latest Dynatrace: *"Go to Settings > Fleet management > ActiveGate version and updates"*; *"Use the Target version dropdown to set the version that serves as the default for new deployments and as the update target for existing ActiveGates."*; *"Auto-update during an update window —ActiveGates update automatically, but only during the update windows you configure on the Manage update windows tab."*; *"Auto-update disabled —not recommended as it may put your ActiveGates at risk of falling out of the supported version range."* (re-read 09/28/2026)</sub>
+> - <sub>[Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — Dynatrace Classic: *"Go to Settings > Updates > ActiveGate updates"*; *"The availability check runs at 30-minute intervals."*; *"This option is available only when the Automatic updates at earliest convenience toggle is turned off."*</sub>
+> - <sub>[Fleet Management (DT docs)](https://docs.dynatrace.com/docs/ingest-from/fleet-management) — *"Plan and control updates with target versions and update windows."*</sub>
 
 ### A cautionary note on `targetVersion` and `updateWindows`
 
 An earlier revision of this document reported that AG auto-update had gained `targetVersion` (pin the version AGs update to) and `updateWindows` (constrain *when* updates run) as API-configurable properties. That reporting had two defects worth correcting explicitly, because both change what an automator should do.
 
-**First, the API family was wrong.** Those properties live on the **Cluster API v2 (Dynatrace Managed)** endpoints — `GET|PUT /activeGates/autoUpdate`, `POST /activeGates/autoUpdate/validator`, and the three per-AG `/activeGates/{agId}/autoUpdate` equivalents. They were never part of the SaaS Environment API. **On SaaS, the per-ActiveGate settings surface described above remains the control surface** — there is no SaaS API knob to pin a target version or set an update window in its place.
+**First, the API family was wrong.** Those properties live on the **Cluster API v2 (Dynatrace Managed)** endpoints — `GET|PUT /activeGates/autoUpdate`, `POST /activeGates/autoUpdate/validator`, and the three per-AG `/activeGates/{agId}/autoUpdate` equivalents. They were never part of the SaaS Environment API. On SaaS, the equivalent capability is not an API property but the **Fleet management settings page** described above — target version and update windows are configured there on Latest Dynatrace, and the per-ActiveGate toggle remains the Dynatrace Classic path.
 
 **Second, the addition was reversed.** **API 1.344** (published 07/15/2026, rollout from 07/29/2026) **removes `targetVersion` and `updateWindows` again** from all six of those Cluster API v2 endpoints, and also changes the read-only status of properties on the per-AG endpoints. If you automate Dynatrace Managed ActiveGate updates, **remove both properties from your request bodies before the change reaches your cluster** — a `PUT` that still sends them is a request built against a schema that no longer accepts them. Verify against your own cluster's API version rather than assuming the rollout date.
 
-The general lesson generalises past this one property pair: a capability announced in a sprint's release notes can be withdrawn in the next one. That is the reason this series names the version on every release-tied claim and keeps the pre-version guidance in place rather than deleting it — here, the pre-version guidance (per-AG settings on SaaS) turned out to be the guidance that survived.
+The general lesson generalises past this one property pair: a capability announced in a sprint's release notes can be withdrawn in the next one. That is the reason this series names the version on every release-tied claim and keeps the pre-version guidance in place rather than deleting it — here, the Managed API properties were withdrawn, while SaaS gained target versions and update windows through a different surface (Fleet management settings) rather than through the API.
 
-> **Fleet Management.** A centralized console for OneAgent, ActiveGate, and network-zone management at scale, with purpose-built ActiveGate views for deployment health and upgrade scheduling, was introduced around SaaS 1.343 (July 2026). **Its documentation page still carried a "Coming soon" banner when checked in July 2026**, so verify current GA status and feature scope against the [Fleet Management documentation (DT docs)](https://docs.dynatrace.com/docs/ingest-from/fleet-management) and your tenant's release notes before planning around it — availability may vary. Once available in your tenant, fleets beyond a handful of AGs should plan updates from Fleet Management rather than per-AG settings pages; until then, per-AG settings remain the working model.
+> **Fleet Management.** The Fleet Management app is the central place for OneAgent and ActiveGate inventory, health, and update planning. Its documentation page carried a "Coming soon" banner in July 2026; the page as updated on Aug 05, 2026 carries no availability banner and documents inventory of all OneAgents and ActiveGates, health issues with recommendations, and planning updates with **target versions** (a rolling version policy such as N-1, or a pinned version) and **update windows**. Fleets beyond a handful of AGs should plan updates from Fleet management settings rather than per-AG settings pages. If your tenant still shows only the Classic per-ActiveGate toggle, that path remains valid — use it until the Fleet management settings appear.
 
 > <sub>**Sources:**</sub>
 > - <sub>[API changelog 1.342 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-342) — `targetVersion` / `updateWindows` added to the Cluster API v2 ActiveGate `autoUpdate` schemas</sub>
 > - <sub>[API changelog 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — the changelog marks the schema *"Broken compatibility"* and lists *"Removed properties: targetVersion , updateWindows"* on each of the six Cluster API v2 `/activeGates/autoUpdate` endpoints</sub>
 > - <sub>[SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343)</sub>
-> - <sub>[Fleet Management (DT docs)](https://docs.dynatrace.com/docs/ingest-from/fleet-management) — "Coming soon" banner as checked 07/08/2026</sub>
+> - <sub>[Fleet Management (DT docs)](https://docs.dynatrace.com/docs/ingest-from/fleet-management) — *"Plan and control updates with target versions and update windows."*; *"Define an update window to control when updates are applied."* (page updated Aug 05, 2026; a "Coming soon" banner was present when checked 07/08/2026 and absent 09/28/2026)</sub>
 > - <sub>**Derived:** the "remove both properties from request bodies before the change lands" instruction follows from the 1.344 schema removal plus the staged-rollout model</sub>
 
 <a id="modes"></a>
 ## 3. The Auto-Update vs Manual Decision
 
-Two effective modes per ActiveGate:
+Two effective modes per ActiveGate on the Dynatrace Classic path. On Latest Dynatrace the same decision is the **update mode** in Fleet management settings (§2), with a third option — *auto-update during an update window* — that gives the "deliberately scheduled" behavior below without leaving updates to a manual reminder:
 
 | Mode | What it does | When to pick it |
 |------|--------------|-----------------|
@@ -136,7 +139,7 @@ Read the December row carefully — it retires **9.7 and 10.1 point releases acr
 
 > **Also in ActiveGate 1.345 — a transport change under the hood.** Verbatim: *"ActiveGate watchdog communication switches from TCP sockets to named pipes, aligning with OneAgent."* No action is required, but it is worth knowing before the next post-update investigation: local-port expectations, host-firewall rules, or monitoring that watched the watchdog's TCP socket may need revisiting on ActiveGates that have taken 1.345. The same release moves the containerized base image from **Red Hat UBI 9 Micro to UBI 10 Micro** — a change worth flagging to whoever scans your container images, since the scan baseline shifts with it.
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — auto-update toggle is per-AG; one-click *"Update now"* available when auto-update is disabled and a new version is ready, [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — security upgrade addressing CVE-2026-40984 and CVE-2026-40983, shipped inside the ordinary version update, [ActiveGate 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — the OS support end dates tabulated above, the watchdog named-pipes switch, and the UBI 9 → UBI 10 Micro base-image change. **Derived:** the "if the manual process cannot meet the SLA, the answer is HA plus auto-update" conclusion combines the security-fix delivery model with the per-AG restart behavior that HA absorbs.</sub>
+> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — Classic: one-click update *"is available only when the Automatic updates at earliest convenience toggle is turned off"*; Latest Dynatrace: *"Auto-update during an update window —ActiveGates update automatically, but only during the update windows you configure on the Manage update windows tab."*, [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — security upgrade addressing CVE-2026-40984 and CVE-2026-40983, shipped inside the ordinary version update, [ActiveGate 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — the OS support end dates tabulated above, the watchdog named-pipes switch, and the UBI 9 → UBI 10 Micro base-image change. **Derived:** the "if the manual process cannot meet the SLA, the answer is HA plus auto-update" conclusion combines the security-fix delivery model with the per-AG restart behavior that HA absorbs.</sub>
 
 <a id="sequencing"></a>
 ## 4. Sequencing — ActiveGates Before OneAgents
@@ -229,13 +232,13 @@ AWS, Azure, and GCP integration connectors are bundled with the AG. Connector be
 
 ### Common across all roles
 
-- Settings are per-AG. There's no role-grouping for update settings.
+- On Latest Dynatrace, target version and update mode are set in Fleet management settings; the docs describe no per-role grouping, so a role-specific schedule has to be expressed through how you scope update windows (verify in your tenant). On Dynatrace Classic, the toggle is per-AG.
 - Auto-update availability check runs every ~30 minutes.
 - Rollback is uninstall + reinstall of the older installer — no in-place downgrade.
 
 *In community practice the per-role validation below is the checklist teams converge on; Dynatrace documents each role's setup but publishes no post-update validation list, so treat it as a starting point.*
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — per-AG update mechanic, one-click update, availability check interval.</sub>
+> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"The availability check runs at 30-minute intervals."* (Classic path); Latest Dynatrace update control under *"Settings > Fleet management > ActiveGate version and updates"*.</sub>
 
 <a id="validation"></a>
 ## 7. Validation After Update
@@ -297,7 +300,7 @@ In community practice, rollback is usually a containment move while the underlyi
 | **Disabling auto-update on a single AG and forgetting — leaving a known vulnerability unpatched on in-path infrastructure.** | "We'll update manually." Nobody does. The cost is usually described as version drift, which understates it: AG security fixes ship *inside* ordinary version updates (ActiveGate 1.343 carried the fix for CVE-2026-40984 and CVE-2026-40983), so a forgotten AG is not merely behind on features — it holds an open vulnerability window on a component that terminates agent connections and holds connector credentials, for as long as nobody notices. | Either run HA so you can leave auto-update on — the recommended answer — or pair manual mode with a named owner, a calendar mechanism, **and** a check that the manual path fits inside your vulnerability-remediation SLA (§3). If it does not fit, that is the signal to deploy the second AG rather than to tighten the reminder. |
 | **Trusting the 30-minute check to be exact.** | Update windows planned around an assumed exact check time. | The check is *approximate* — design your window with margin (30 minutes is the lower bound, not a deterministic schedule). |
 | **Not validating cloud connectors after an update.** | Connector behavior is usually stable; teams skip the check. | Glance at connector status pages and ingest-lag for cloud metrics post-update — it's a 60-second check that catches the rare regression. |
-| **Automating Managed AG auto-update against `targetVersion` / `updateWindows`.** | Both properties were added to the Cluster API v2 `autoUpdate` endpoints in 1.342 and read as a stable capability. | API 1.344 removes both again. Strip them from request bodies before the change reaches your cluster (§2). On SaaS the properties never existed — per-AG settings are the control surface. |
+| **Automating Managed AG auto-update against `targetVersion` / `updateWindows`.** | Both properties were added to the Cluster API v2 `autoUpdate` endpoints in 1.342 and read as a stable capability. | API 1.344 removes both again. Strip them from request bodies before the change reaches your cluster (§2). On SaaS the Cluster API properties never existed; the SaaS equivalent is the Fleet management target-version and update-window setting (§2). |
 
 *In community practice the remaining items are observed across fleets often enough to flag; none is documented by Dynatrace as an anti-pattern.*
 
@@ -317,6 +320,8 @@ For most SaaS tenants with private ActiveGates, the right configuration is:
 7. **Roll HA pairs one at a time.** Validate the first AG before touching the second.
 8. **Validate per-role after every update** — routes, extensions, synthetic monitors, cloud connectors — at the right cadence for each role. `smartscapeNodes "ACTIVEGATE"` gives you the fleet-wide version inventory in one query (§7).
 9. **Plan rollback as a 24–72 hour containment**, not a steady state. Disable auto-update on rolled-back AGs to prevent revert — and put the rollback on the same SLA clock as item 5, since a rolled-back AG is by definition on an older version.
+
+**On Latest Dynatrace**, items 3 and 4 map onto the update mode in Fleet management settings: *auto-update during an update window* gives a known restart time without leaving updates to a manual reminder, which answers most of the item 5 concern. Because the docs describe target version and update mode as fleet settings rather than per-role ones, check how your update windows are scoped before assuming a synthetic-AG window leaves routing AGs on immediate updates. On Dynatrace Classic, the per-AG toggle described in items 3 and 4 applies as written.
 
 For tenants with no private ActiveGates:
 

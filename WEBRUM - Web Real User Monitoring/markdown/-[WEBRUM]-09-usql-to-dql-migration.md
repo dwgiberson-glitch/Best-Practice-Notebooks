@@ -1,6 +1,6 @@
 # WEBRUM-09: Migrating USQL to DQL
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 9 of 10 | **Created:** July 2026 | **Last Updated:** 09/09/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 9 of 10 | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -208,7 +208,7 @@ Under New RUM the event-type models each expose their own fields — `rum_except
 | USQL (`useraction`) | Classic RUM on Grail | New RUM |
 |---|---|---|
 | `name` | `action.name` | `interaction.name` / `ui_element.name` |
-| `type` | `action.type` | `characteristics.has_*` flags + `characteristics.classifier` |
+| `type` | `action.type` | `characteristics.has_*` flags (`has_page_summary`, `has_navigation`, `has_request`, …) — not `characteristics.classifier` |
 | `duration` | `duration` | `duration` |
 | `application` | `application` | `dt.rum.application.entities` |
 | `largestContentfulPaint` | `largestContentfulPaint` | `web_vitals.largest_contentful_paint` |
@@ -222,7 +222,11 @@ Under New RUM the event-type models each expose their own fields — `rum_except
 
 Request-shaped actions (USQL `type == 'Xhr'`) map onto the `rum_request` model, which exposes `http.request.method`, `http.response.status_code`, and `http.response.reason_phrase` — none of which existed as USQL user-action fields.
 
-> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure) for the documented user-action fields; live query of `dt.semantic_dictionary.models` (models `rum_user_action`, `rum_request`, `rum_exception`, `rum_crash`, Dynatrace tenant, 07/23/2026) for the New RUM column.</sub>
+> **Select `user.events` with the `characteristics.has_*` flags, not `characteristics.classifier`.** The User events semantic-dictionary page describes `characteristics.classifier` as the single characteristic picked by priority when an event has several, and says it is *"Used for internal optimization when storing the data and not intended for query usage."* **Semantic Dictionary 1.349** (published 09/04/2026) removes it from the user-event models, with a **staged tenant rollout** — a tenant that has not reached 1.349 still returns the field, so a classifier filter keeps working until the change arrives and then silently matches nothing. The stable flags (`has_page_summary`, `has_navigation`, `has_error`, `has_request`, …) are the documented selectors and work on both sides of the change.
+>
+> The flags can **overlap** where the classifier picked one winner. A navigation that also carried an error was classified `error`, so `classifier == "navigation"` silently dropped it; `characteristics.has_navigation == true` keeps it. On the validation tenant (24 h, 09/28/2026) that is **7,387** navigations against **6,235** — the 1,152 recovered page loads have full navigation timing. For page summaries the two filters select the same 7,268 events.
+
+> <sub>**Sources:** [User session structure (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/rum/user-sessions/user-session-structure) for the documented user-action fields; live query of `dt.semantic_dictionary.models` (models `rum_user_action`, `rum_request`, `rum_exception`, `rum_crash`, Dynatrace tenant, 07/23/2026) for the New RUM column; [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*; [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349). **Dictionary:** models `rum_page_summary` / `rum_navigation` list `characteristics.has_page_summary` / `characteristics.has_navigation`, read 09/28/2026.</sub>
 
 <a id="worked-conversions"></a>
 ## 7. Worked Conversions

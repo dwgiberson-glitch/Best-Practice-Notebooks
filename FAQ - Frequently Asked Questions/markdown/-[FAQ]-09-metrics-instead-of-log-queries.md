@@ -1,6 +1,6 @@
 # FAQ-09: When Should I Query a Metric Instead of Raw Logs?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 09 — When to Query a Metric Instead of Raw Logs | **Created:** June 2026 | **Last Updated:** 07/08/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 09 — When to Query a Metric Instead of Raw Logs | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -96,12 +96,15 @@ The same answer takes two very different cost paths depending on where the query
 ```dql
 // RECURRING — dashboard tile or alert. Reads a pre-aggregated metric.
 // No log Query capability consumed.
-timeseries sum(log.http.requests), from:-24h, by:{status}
+// Illustrative — log.request.count is the counter metric extracted in §5;
+// substitute your own key.
+timeseries sum(log.request.count), from:-24h, by:{status}
 ```
 
 ```dql
 // ONE-SHOT — root-cause investigation. Scans the raw log stream once.
 // Billed on bytes scanned, so keep the window tight and filter early.
+// Replace "prod" with your namespace.
 fetch logs, from:-1h
 | filter k8s.namespace.name == "prod" and loglevel == "ERROR"
 | summarize errors = count(), by:{dt.entity.host}
@@ -120,7 +123,7 @@ Before building an extraction rule, check whether Dynatrace already produces the
 
 | You want… | Often re-derived from logs as… | OOTB metric already exists |
 |-----------|-------------------------------|----------------------------|
-| Request throughput / error rate / latency | Counting request/error log lines | **Service RED metrics** — the `builtin:service.*` family (request count, failure rate, response time) from OneAgent-instrumented services |
+| Request throughput / error rate / latency | Counting request/error log lines | **Service RED metrics** — the `dt.service.request.*` family (`count`, `failure_count`, `response_time`), the Grail twins of the classic `builtin:service.*` keys (FAQ-11 §3) — DQL reads the `dt.*` form, not `builtin:` |
 | Host CPU / memory / disk | Parsing agent or OS logs | `dt.host.cpu.usage`, `dt.host.memory.usage`, and the `dt.host.*` family |
 | Process resource use | Parsing process logs | The `dt.process.*` family |
 | Log volume / ingest cost | `fetch logs \| summarize count()` over a long window | DPS consumption metrics (the `dt.billing.*` / `dt.system.events` surfaces — see FINOPS-01) |
@@ -138,7 +141,9 @@ Exact metric keys vary by Dynatrace version and by what's deployed in your tenan
 When no OOTB metric fits — a business count, an application-specific status, a value embedded in a log line — extract one at ingest with an **OpenPipeline metric-extraction processor**. The aggregate is computed once, as records arrive, and stored as a metric you then query cheaply forever.
 
 ```yaml
-# OpenPipeline log pipeline — metric-extraction processor
+# Illustrative field layout — in OpenPipeline these are separate
+# Counter / Value / Histogram metric processors configured in the UI or
+# settings API, not this literal YAML.
 - name: extract-request-metric
   type: metric
   enabled: true
@@ -156,16 +161,16 @@ Common shapes:
 | Question | Metric | Dimensions |
 |----------|--------|------------|
 | How many requests, by outcome? | `log.request.count` (count of matches) | service, method, status |
-| What's the latency distribution? | `log.request.duration` (extract numeric field) | service, endpoint |
+| What's the latency distribution? | `log.request.duration` — a **Histogram metric** (SaaS 1.343+, staged rollout) for percentiles; a value metric for min/max/avg | service, endpoint |
 | How many of business event X? | `log.business.<event>.count` | a few business dimensions |
 
 A few framing points:
 
 - **OpenPipeline is the modern path.** Classic Log Monitoring also supports log-metric definitions; new work should use OpenPipeline metric extraction. See **OPLOGS-03 §3** for the full processor walkthrough and **OPMIG-07** for the metric-&-event-extraction deep dive.
 - **Log-derived metrics are exact, not sampled.** Span-derived metrics must be made *sampling-aware* because only a fraction of spans are kept (**OPIPE-03**); logs aren't head/tail-sampled, so a count extracted from logs reflects every matching record.
-- **Count vs. value.** Omit `value` to count matching records; set it to a parsed numeric field to track a measurement. Parse the field first (DPL) so the value and dimensions exist on the record when the metric processor runs.
+- **Counter vs. value vs. histogram.** A Counter metric counts matching records; a Value metric tracks a parsed numeric field (min/max/avg); a Histogram metric captures the distribution of that field so `timeseries` can compute percentiles — the one to use for latency. Histogram extraction arrived with SaaS 1.343 (staged rollout); until it reaches your tenant, a value metric is the working path. Parse the field first (DPL) so the value and dimensions exist on the record when the metric processor runs.
 
-> <sub>**Sources:** [Parse log lines and extract a metric (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/tutorial-log-processing-pipeline), [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing), [Dynatrace Pattern Language (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language). OPLOGS-03, OPMIG-07, and OPIPE-03 carry the implementation depth.</sub>
+> <sub>**Sources:** [Parse log lines and extract a metric (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/tutorial-log-processing-pipeline), [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — metric extraction lists Counter, Histogram and Value metric processors; *"Histogram metrics can be used to calculate percentiles using the timeseries percentile aggregation"*, [SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343) — *"You can now extract histogram metrics from logs or spans using OpenPipeline."*, [Dynatrace Pattern Language (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language). OPLOGS-03, OPMIG-07, and OPIPE-03 carry the implementation depth.</sub>
 
 <a id="cardinality"></a>
 ## 6. Cardinality — The One Thing That Undoes the Savings

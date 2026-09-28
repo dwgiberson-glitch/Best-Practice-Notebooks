@@ -48,7 +48,7 @@ Dynatrace supports multiple approaches for cloud integration, with **direct conn
 2. Select the cloud provider (AWS, Azure, or GCP) and follow the guided onboarding flow.
 3. For **AWS**: Dynatrace deploys a CloudFormation stack in your account that creates IAM roles, Secrets Manager entries, and optional log forwarding resources.
 4. For **Azure**: Create an Azure connection in the Clouds app (Entra ID app registration with a federated identity credential and the Monitoring Reader role), or use the Azure Native Dynatrace Service from the Azure Marketplace.
-5. For **GCP**: Deploy the integration via Helm on a GKE cluster, using Pub/Sub for metric and log forwarding.
+5. For **GCP**: Create a GCP connection in the Clouds app (Preview — keyless service account impersonation), or deploy `dynatrace-gcp-monitor` on GKE (maintenance mode, the working production path), which polls Cloud Monitoring for metrics and pulls logs from Pub/Sub.
 6. Dynatrace connects directly to cloud APIs — **no ActiveGate required** for SaaS deployments.
 7. Discovered resources are mapped to the Dynatrace entity model, enriched with cloud-native metadata (tags, account IDs, regions).
 
@@ -78,7 +78,7 @@ The **Clouds app** provides a streamlined, fully managed experience for connecti
 |---|---|---|
 | **AWS** | Available | CloudFormation template via Clouds app |
 | **Azure** | Available | Azure Native Dynatrace Service or Entra ID app |
-| **GCP** | Available | Helm deployment on GKE with Pub/Sub |
+| **GCP** | Preview | GCP connection (service account impersonation); `dynatrace-gcp-monitor` on GKE remains the working path |
 
 ### Classic ActiveGate-Based Polling (Legacy)
 
@@ -143,7 +143,7 @@ and Azure tables above use. Managed GCP services are modelled under a colon-deli
 
 | Entity Type | Description |
 |---|---|
-| `dt.entity.cloud_application` | GKE workloads, Cloud Run services |
+| `dt.entity.cloud_application` | Kubernetes workloads (GKE and any other monitored cluster) — not Cloud Run, whose OneAgent-monitored instances appear as hosts |
 | `dt.entity.cloud_application_instance` | Individual pods/instances |
 | `dt.entity.cloud:gcp:gce_instance` | Compute Engine VMs |
 | `dt.entity.cloud:gcp:cloud_function` | Cloud Functions |

@@ -1,6 +1,6 @@
 # S2S-10: Migration Scripts
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 10 | **Created:** April 2026 | **Last Updated:** 09/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 10 | **Created:** April 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -24,7 +24,7 @@ Reusable scripts for SaaS-to-SaaS configuration export. These scripts automate t
 
 | Requirement | Details |
 |-------------|----------|
-| **API Token** | Token with `ReadConfig` scope on the source tenant |
+| **API Token** | Token with `apiTokens.write` scope on the source tenant — the scripts use it to create, then revoke, a short-lived export token |
 | **Shell (Option A)** | Bash (macOS, Linux, or WSL) with `curl`, `jq`, `shasum`, `tar` |
 | **Shell (Option B)** | PowerShell 5.1+ on Windows 10/11 (includes `tar.exe` natively) |
 | **Network** | HTTPS access to `github.com` (Monaco download) and source tenant URL |
@@ -49,7 +49,7 @@ The SaaS Upgrade Assistant (SUA) on the target tenant accepts configuration impo
 {
   "clusterUuid": "<source-tenant-id>",
   "productVersion": "1.305.0.20260331-000000",
-  "monacoVersion": "2.28.5",
+  "monacoVersion": "2.30.0",
   "exportTimestamp": "<unix-ms>",
   "environments": [
     {
@@ -62,7 +62,7 @@ The SaaS Upgrade Assistant (SUA) on the target tenant accepts configuration impo
 
 ### Directory Layout Inside the Archive
 
-```
+```text
 configurationExport-YYYY-MM-DD_HH-MM-SS/
 ├── exportMetadata.json
 └── export/
@@ -106,7 +106,7 @@ export ENV_TOKEN="dt0c01.XXXX..."
 
 set -euo pipefail
 
-MONACO_VERSION="2.28.5"
+MONACO_VERSION="2.30.0"   # pinned; check the releases page before reuse
 
 # --- Argument validation ---
 if [ $# -ne 1 ]; then
@@ -118,7 +118,7 @@ fi
 
 if [ -z "${ENV_TOKEN:-}" ]; then
     echo "Error: ENV_TOKEN environment variable is not set."
-    echo "Create a token with ReadConfig scope at:"
+    echo "Create a token with apiTokens.write scope at:"
     echo "  https://$1.live.dynatrace.com/#settings/integration/apikeys"
     exit 1
 fi
@@ -136,6 +136,7 @@ case "${OS}-${ARCH}" in
     Darwin-arm64)  platform="darwin-arm64" ;;
     Darwin-x86_64) platform="darwin-amd64" ;;
     Linux-x86_64)  platform="linux-amd64" ;;
+    Linux-aarch64) platform="linux-arm64" ;;
     Linux-i386)    platform="linux-386" ;;
     *)
         echo "Error: Unsupported platform ${OS}-${ARCH}"
@@ -167,15 +168,26 @@ chmod +x monaco
 echo "  Monaco v${MONACO_VERSION} ready"
 echo ""
 
-# --- Create temporary read-only export token ---
-echo "Creating temporary read-only export token..."
-MONACO_TOKEN=$(curl -s -X POST "https://${tenantId}.live.dynatrace.com/api/v2/apiTokens" \
-  -H "accept: application/json; charset=utf-8" \
-  -H "Content-Type: application/json; charset=utf-8" \
-  -H "Authorization: Api-Token ${ENV_TOKEN}" \
-  -d '{
-    "name": "s2s-monaco-export-temp",
-    "scopes": [
+# --- Revoke the export token on exit (success or failure) ---
+MONACO_TOKEN_ID=""
+revoke_export_token() {
+    if [ -n "${MONACO_TOKEN_ID}" ] && [ "${MONACO_TOKEN_ID}" != "null" ]; then
+        echo "Revoking temporary export token..."
+        curl -s -o /dev/null -w "  DELETE apiTokens -> HTTP %{http_code}\n" -X DELETE \
+          "https://${tenantId}.live.dynatrace.com/api/v2/apiTokens/${MONACO_TOKEN_ID}" \
+          -H "Authorization: Api-Token ${ENV_TOKEN}" \
+          || echo "  Revoke failed: delete token ${MONACO_TOKEN_ID} manually"
+    fi
+}
+trap revoke_export_token EXIT
+
+# --- Create short-lived export token (read scopes only, expires in 24 h) ---
+echo "Creating temporary export token..."
+expiry=$(date -u -v+1d +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -d '+1 day' +%Y-%m-%dT%H:%M:%S)
+token_body=$(jq -n --arg exp "${expiry}" '{
+    name: "s2s-monaco-export-temp",
+    expirationDate: $exp,
+    scopes: [
       "attacks.read",
       "entities.read",
       "extensionConfigurations.read",
@@ -189,20 +201,26 @@ MONACO_TOKEN=$(curl -s -X POST "https://${tenantId}.live.dynatrace.com/api/v2/ap
       "syntheticExecutions.read",
       "syntheticLocations.read",
       "DataExport",
-      "DssFileManagement",
-      "ExternalSyntheticIntegration",
       "ReadConfig",
       "ReadSyntheticData"
     ]
-  }' | jq -r ".token")
+  }')
 
-if [ -z "${MONACO_TOKEN}" ] || [ "${MONACO_TOKEN}" == "null" ]; then
-    echo "  Failed to create export token. Check ENV_TOKEN permissions."
+token_response=$(curl -s -X POST "https://${tenantId}.live.dynatrace.com/api/v2/apiTokens" \
+  -H "accept: application/json; charset=utf-8" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "Authorization: Api-Token ${ENV_TOKEN}" \
+  -d "${token_body}")
+MONACO_TOKEN=$(echo "${token_response}" | jq -r '.token // empty')
+MONACO_TOKEN_ID=$(echo "${token_response}" | jq -r '.id // empty')
+
+if [ -z "${MONACO_TOKEN}" ]; then
+    echo "  Failed to create export token. Check ENV_TOKEN permissions (apiTokens.write)."
     rm -f monaco monaco_checksum
     exit 1
 fi
 export MONACO_TOKEN
-echo "  Export token created"
+echo "  Export token created (expires ${expiry} UTC)"
 echo ""
 
 # --- Create manifest ---
@@ -229,6 +247,12 @@ echo "Running Monaco download..."
 echo "  This may take several minutes depending on configuration volume."
 echo ""
 ./monaco download --environment "${tenantId}" --output-folder "${tenantId}"
+echo ""
+
+# The export token is no longer needed: revoke it now (the EXIT trap covers failures)
+revoke_export_token
+MONACO_TOKEN_ID=""
+unset MONACO_TOKEN
 echo ""
 
 # --- Package in SaaS Upgrade Assistant format ---
@@ -320,11 +344,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$MonacoVersion = "2.28.5"
+$MonacoVersion = "2.30.0"   # pinned; check the releases page before reuse
 
 # --- Validate token ---
 if (-not $env:ENV_TOKEN) {
-    Write-Error "ENV_TOKEN environment variable is not set.`nCreate a token with ReadConfig scope at:`n  https://$TenantId.live.dynatrace.com/#settings/integration/apikeys"
+    Write-Error "ENV_TOKEN environment variable is not set.`nCreate a token with apiTokens.write scope at:`n  https://$TenantId.live.dynatrace.com/#settings/integration/apikeys"
 }
 
 Write-Host "=== Monaco Export v$MonacoVersion ==="
@@ -351,17 +375,18 @@ Write-Host "  Checksum verified"
 Write-Host "  Monaco v$MonacoVersion ready"
 Write-Host ""
 
-# --- Create temporary read-only export token ---
-Write-Host "Creating temporary read-only export token..."
+# --- Create short-lived export token (read scopes only, expires in 24 h) ---
+Write-Host "Creating temporary export token..."
+$expiry = (Get-Date).ToUniversalTime().AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss")
 $tokenBody = @{
-    name   = "s2s-monaco-export-temp"
-    scopes = @(
+    name           = "s2s-monaco-export-temp"
+    expirationDate = $expiry
+    scopes         = @(
         "attacks.read", "entities.read", "extensionConfigurations.read",
         "extensionEnvironment.read", "extensions.read", "geographicRegions.read",
         "javaScriptMappingFiles.read", "networkZones.read", "settings.read",
         "slo.read", "syntheticExecutions.read", "syntheticLocations.read",
-        "DataExport", "DssFileManagement", "ExternalSyntheticIntegration",
-        "ReadConfig", "ReadSyntheticData"
+        "DataExport", "ReadConfig", "ReadSyntheticData"
     )
 } | ConvertTo-Json
 
@@ -379,7 +404,8 @@ if (-not $response.token) {
     Write-Error "Failed to create export token. Check ENV_TOKEN permissions."
 }
 $env:MONACO_TOKEN = $response.token
-Write-Host "  Export token created"
+$tokenId = $response.id
+Write-Host "  Export token created (expires $expiry UTC)"
 Write-Host ""
 
 # --- Create manifest ---
@@ -406,6 +432,23 @@ Write-Host "Running Monaco download..."
 Write-Host "  This may take several minutes depending on configuration volume."
 Write-Host ""
 .\monaco.exe download --environment $TenantId --output-folder $TenantId
+$downloadExit = $LASTEXITCODE
+Write-Host ""
+
+# --- Revoke the export token (also when the download failed) ---
+Write-Host "Revoking temporary export token..."
+try {
+    Invoke-RestMethod `
+        -Uri "https://$TenantId.live.dynatrace.com/api/v2/apiTokens/$tokenId" `
+        -Method Delete -Headers $headers | Out-Null
+    Write-Host "  Export token revoked"
+} catch {
+    Write-Warning "Revoke failed: delete token $tokenId manually (it expires $expiry UTC regardless)"
+}
+Remove-Item Env:\MONACO_TOKEN -ErrorAction SilentlyContinue
+if ($downloadExit -ne 0) {
+    Write-Error "monaco download failed with exit code $downloadExit"
+}
 Write-Host ""
 
 # --- Package in SaaS Upgrade Assistant format ---
@@ -490,7 +533,8 @@ Write-Host "Done. Temporary files cleaned up (archive preserved)."
 ### Both Scripts
 
 - The script downloads Monaco automatically — no pre-installation required
-- A temporary read-only API token is created for the export (named `s2s-monaco-export-temp`)
+- A short-lived export token (`s2s-monaco-export-temp`) is created with read scopes only, expires after 24 hours, and is revoked as soon as the download finishes — also when it fails
+- Monaco is pinned to v2.30.0 (released 09/23/2026); check the [releases page](https://github.com/Dynatrace/dynatrace-configuration-as-code/releases) before reuse and bump `MONACO_VERSION` / `$MonacoVersion`
 - Output is a `.tar.gz` archive compatible with the SaaS Upgrade Assistant
 - The `.tar.gz` format is **required** by SUA — `.zip` archives are not accepted
 - Upload the archive to the target tenant via the SaaS Upgrade Assistant app
@@ -529,7 +573,7 @@ After running the export script:
 
 | Scenario | Use Instead |
 |----------|-------------|
-| You only need specific config types | `monaco download --only-settings` or `--type <type>` |
+| You only need specific config types | `monaco download --only-settings`, `--settings-schema <schema>` or `--api <api>` |
 | You want ongoing config management | Terraform with state management |
 | Target is a Managed environment | SaaS Upgrade Assistant has its own export workflow |
 | You need IAM migration | Terraform — Monaco cannot manage IAM |
@@ -539,7 +583,7 @@ After running the export script:
 | Feature | Script | Manual `monaco download` |
 |---------|--------|--------------------------|
 | Monaco installation | Automatic (downloads + verifies checksum) | Manual pre-installation required |
-| Export token | Auto-created with minimal scopes | Manual token creation |
+| Export token | Auto-created with read scopes, 24 h expiry, revoked after download | Manual token creation and revocation |
 | SUA-compatible packaging | Automatic `.tar.gz` with `exportMetadata.json` | Manual packaging required |
 | Cleanup | Automatic (removes temp files) | Manual cleanup |
 | Cross-platform | Bash + PowerShell versions | Single platform |

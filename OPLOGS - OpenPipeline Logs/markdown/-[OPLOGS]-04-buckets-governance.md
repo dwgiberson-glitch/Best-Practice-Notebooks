@@ -1,6 +1,6 @@
 # OPLOGS-04: Buckets & Data Governance
 
-> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 4 of 8 | **Created:** December 2025 | **Last Updated:** 09/24/2026
+> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 4 of 8 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Strategic Storage Management for OpenPipeline Logs
 This notebook covers Grail bucket architecture, retention policies, routing configuration, access control, and cost optimization strategies.
@@ -221,7 +221,7 @@ routes:
     
   # Route audit logs to compliance bucket
   - name: audit-to-audit-bucket
-    condition: contains(content, "audit") OR contains(k8s.namespace.name, "security")
+    condition: matchesValue(content, "*audit*") OR matchesValue(k8s.namespace.name, "*security*")  # contains() is not enabled in OpenPipeline matchers
     bucket: audit_logs
     
   # Default catch-all

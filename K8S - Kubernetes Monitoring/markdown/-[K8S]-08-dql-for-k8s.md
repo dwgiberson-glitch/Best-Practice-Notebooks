@@ -1,6 +1,6 @@
 # K8S-08: DQL Queries for Kubernetes
 
-> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 8 of 13 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 8 of 13 | **Created:** January 2026 | **Last Updated:** 09/25/2026
 
 ## Advanced Query Patterns for Kubernetes Data
 This notebook provides a comprehensive reference of DQL queries for Kubernetes monitoring. From basic entity queries to complex performance analysis, these patterns help you extract insights from your Kubernetes data.
@@ -198,7 +198,9 @@ timeseries totalThrottle = sum(dt.containers.cpu.throttled_time), from:-1h, by:{
 
 ```dql
 // Namespace-level resource usage — sum() of every container in the namespace
-timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgCpuMillicores = arrayAvg(cpuMillicores)
 | sort avgCpuMillicores desc
 | limit 15
@@ -207,7 +209,9 @@ timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:
 ```dql
 // Resource requests by namespace (capacity planning)
 // Requests are container-grain; sum them to reach the namespace figure.
-timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgReqMillicores = round(arrayAvg(cpuReq), decimals: 0)
 | fields k8s.namespace.name, avgReqMillicores
 | sort avgReqMillicores desc
@@ -363,8 +367,10 @@ timeseries avgCpuMillicores = avg(dt.kubernetes.container.cpu_usage), from:-1h, 
 // Nodes with high utilization — derived, because no node-grain usage metric exists
 // used  = container CPU summed across every container on the node
 // alloc = the one genuinely node-grain family
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
 timeseries {
-    used = sum(dt.kubernetes.container.cpu_usage),
+    used = sum(dt.kubernetes.container.cpu_usage, rollup: avg),
     allocatable = avg(dt.kubernetes.node.cpu_allocatable)
   }, from:-1h, by:{k8s.cluster.name, k8s.node.name}
 | fieldsAdd cpuPercent = round(100 * arrayAvg(used) / arrayAvg(allocatable), decimals: 1)
@@ -399,7 +405,9 @@ fetch logs, from: now() - 24h
 
 ```dql
 // Top namespaces by CPU (bar chart) — sum() of every container in the namespace
-timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgCpuMillicores = arrayAvg(cpuMillicores)
 | sort avgCpuMillicores desc
 | limit 10

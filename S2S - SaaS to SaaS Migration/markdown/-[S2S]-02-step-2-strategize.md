@@ -1,6 +1,6 @@
 # S2S-02: Step 2 — Strategize: Define Your Migration Approach
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 2 of 9 | **Phase:** Plan | **Step:** Strategize | **Created:** March 2026 | **Last Updated:** 08/04/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 2 of 9 | **Phase:** Plan | **Step:** Strategize | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 With your discovery complete, it's time to turn inventory into action. This notebook helps you select a migration approach, sequence your operations, assess risks, and build a timeline that earns stakeholder confidence.
 
@@ -251,7 +251,7 @@ Both tenants are cloud-hosted, which makes parallel operation easier than M2S bu
 | **Historical data** | Stored in source tenant Grail | Accept data gap or extend parallel period |
 | **Dynatrace Intelligence baselines** | Learned from source data | Allow 2-4 weeks to retrain in target |
 | **Problem history** | Stored in source tenant | Export key problems as documentation |
-| **Extensions 2.0** | Neither Monaco nor Terraform supports Extensions 2.0 | Manual reinstall from Dynatrace Hub |
+| **Extensions 2.0** | Monaco does not export extension installations | Terraform install/activate (`dynatrace_hub_extension_active_version`) and configure (`dynatrace_hub_extension_v2_config`), or manual reinstall from Dynatrace Hub |
 
 ### Use Your Discovery Data to Assess Dependencies
 
@@ -457,7 +457,7 @@ Based on successful SaaS-to-SaaS migrations, a consistent pattern emerges:
 | **Credential Vault entries** | Secrets cannot be exported from any tenant | High — must recreate each credential |
 | **Cloud integration credentials** | AWS/Azure/GCP keys are tenant-specific | Medium — reconfigure each integration |
 | **Synthetic private locations** | Tied to source ActiveGates | Medium — recreate with target ActiveGates |
-| **Extensions 2.0** | Neither Monaco nor Terraform supports Extensions 2.0 | Medium — manual reinstall from Hub |
+| **Extensions 2.0** | Monaco does not export extension installations | Medium — Terraform (`dynatrace_hub_extension_active_version`, `dynatrace_hub_extension_v2_config`) or manual reinstall from Hub |
 | **Problem notification webhooks** | URLs and tokens may change between environments | Medium — update each endpoint |
 | **Custom scripts and automation** | Hardcoded source tenant URLs and tokens | Medium — update all references |
 | **Third-party ITSM integrations** | Webhook endpoints change | Medium — reconfigure each connection |

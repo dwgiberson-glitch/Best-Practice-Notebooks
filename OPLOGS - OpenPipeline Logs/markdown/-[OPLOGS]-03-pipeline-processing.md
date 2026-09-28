@@ -1,6 +1,6 @@
 # OPLOGS-03: OpenPipeline Processing
 
-> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 3 of 8 | **Created:** December 2025 | **Last Updated:** 09/24/2026
+> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 3 of 8 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Configuring Pipeline Stages for Log Transformation
 This notebook covers OpenPipeline processing stages: parsing, enrichment, metric extraction, event generation, bucket routing, and filtering.
@@ -148,7 +148,7 @@ processors:
   - name: extract-request-metric
     type: metric
     enabled: true
-    condition: contains(content, "duration=")
+    condition: matchesValue(content, "*duration=*")
     metricKey: log.request.duration
     dimensions:
       - service: k8s.namespace.name
@@ -156,6 +156,8 @@ processors:
       - status: extracted_status
     value: extracted_duration_ms
 ```
+
+> **Write matching conditions without `contains()`.** OpenPipeline matchers accept only a subset of DQL, and `contains()` and `in()` are rejected there (the verifier error `The function contains() isn't enabled.`). Use `matchesValue(field, "*text*")` (case-insensitive substring) or `matchesPhrase(field, "text")` (whole words). The conditions in this notebook's configuration sketches are written that way. `contains()` is still fine inside a DQL processor statement and in queries.
 
 ### Common Metric Extraction Patterns
 
@@ -306,44 +308,29 @@ fetch logs, from: now() - 1h
 ## 5. Event Generation from Logs
 Create **business events** from specific log patterns. Events flow to Grail and can trigger workflows.
 
-### OpenPipeline Event Processor
+### Business event processor (Data extraction stage)
 
-```yaml
-# Generate events from critical log patterns
-processors:
-  - name: generate-payment-events
-    type: bizevents
-    enabled: true
-    condition: contains(content, "payment") AND contains(content, "completed")
-    eventType: com.example.payment.completed
-    attributes:
-      - payment_id: extracted_payment_id
-      - amount: extracted_amount
-      - currency: extracted_currency
-      - customer_id: extracted_customer
+Event generation is a **Business event** processor in the pipeline's **Data extraction** stage — there is no configuration file to write. In **Settings > Process and contextualize > OpenPipeline > Logs > Pipelines**, open the pipeline, go to **Data extraction**, and add one processor per event. Each takes a *Name*, a *Matching condition*, an *Event type* and an *Event provider* (each either a record field or a static string), and a *Field extraction* choice (all fields, only listed fields, or all except listed fields):
 
-  - name: generate-error-events
-    type: bizevents  
-    enabled: true
-    condition: loglevel == "ERROR" AND contains(content, "critical")
-    eventType: com.example.critical.error
-    attributes:
-      - error_type: extracted_error_type
-      - service: k8s.namespace.name
-```
+| Name | Matching condition | Event type (static) | Event provider (static) | Field extraction |
+|------|--------------------|---------------------|-------------------------|------------------|
+| `payment-completed` | `matchesValue(content, "*payment*") AND matchesValue(content, "*completed*")` | `com.example.payment.completed` | `payment-service` | Fields to extract: `payment_id`, `amount`, `currency`, `customer_id` |
+| `critical-error` | `status == "ERROR" AND matchesValue(content, "*critical*")` | `com.example.critical.error` | `app-logs` | Fields to extract: `error_type`, `k8s.namespace.name` |
+
+The fields you extract must already exist on the record when the Data extraction stage runs — parse `payment_id`, `amount` and the others in the **Processing** stage first (§2). Matching conditions accept only a subset of DQL: `contains()` and `in()` are rejected (the verifier error `The function contains() isn't enabled.`), so substring tests use `matchesValue(field, "*text*")`, which is case-insensitive. Both conditions above verify as valid logs matchers; the error condition uses `status == "ERROR"` so SEVERE, CRITICAL and FATAL records are included (see the error-count query in §3).
 
 ### Event Use Cases
 
-| Log Pattern | Event Type | Purpose |
-|-------------|------------|----------|
-| Order completed | `order.completed` | Business analytics |
-| User signup | `user.registered` | Funnel tracking |
-| Deployment | `deployment.completed` | Change tracking |
-| Critical error | `error.critical` | Workflow trigger — **not** a problem; see below |
+| Log Pattern | Event Type | Processor | Purpose |
+|-------------|------------|-----------|----------|
+| Order completed | `order.completed` | Business event | Business analytics |
+| User signup | `user.registered` | Business event | Funnel tracking |
+| Deployment | `deployment` | **Software development lifecycle event** (same stage) | Change tracking — SDLC events, not business events, are the documented path for deployments, builds and releases |
+| Critical error | `error.critical` | Business event | Workflow trigger — **not** a problem; see below |
 
 ### Business events do not open problems
 
-Both processors above are `type: bizevents`, and that determines what the output can do. A business event lands in Grail, is queryable, and can trigger a workflow — but it **never raises a Davis problem** and never enters problem correlation. The `error.critical` row above is the one to watch: a critical-error business event is a perfectly good workflow trigger, and it is not an incident. Nothing in the Problems app will show it, and no on-call escalation built on problem triggers will see it.
+Both processors above are **Business event** processors, and that determines what the output can do. A business event lands in Grail, is queryable, and can trigger a workflow — but it **never raises a Davis problem** and never enters problem correlation. The `error.critical` row above is the one to watch: a critical-error business event is a perfectly good workflow trigger, and it is not an incident. Nothing in the Problems app will show it, and no on-call escalation built on problem triggers will see it.
 
 That distinction decides which processor you want:
 
@@ -354,7 +341,7 @@ That distinction decides which processor you want:
 
 If you need the second, the Davis-event extraction path has one hard prerequisite: the event must be attributable to a Smartscape entity. Events sharing a `dt.smartscape_source.id` merge into a single problem; an event that leaves it unset is attributed to the environment entity instead, so **every** extraction across the tenant names that same entity and collapses into one problem — which, for a per-record processor firing at log volume, produces a permanently-open problem that names nothing you can act on. Since extraction can only read fields already on the record, that means the source stream must be entity-enriched first (§4 above, and the OneAgent attribute-enrichment note in this notebook's prerequisites). OPMIG-07 covers the Davis-event extraction configuration and carries a coverage query for checking the source stream; AIOPS-03 §1 covers the correlation rules.
 
-> <sub>**Sources:** [Avoid overalerting (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/use-cases/avoid-overalerting). **Derived:** the two-row processor-choice table maps the documented correlation requirement onto the bizevents-vs-Davis-event split this section configures.</sub>
+> <sub>**Sources:** [Avoid overalerting (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/use-cases/avoid-overalerting), [Data extraction stage (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/extraction/data-extraction) — *"The Business event processor extracts a business event and re-ingests it."* and, for SDLC events, *"used to track deployments, builds, and releases from CI/CD logs or generic events"*, [DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline). **Derived:** the two-row processor-choice table maps the documented correlation requirement onto the bizevents-vs-Davis-event split this section configures.</sub>
 
 ```dql
 // Discover patterns suitable for event generation
@@ -415,7 +402,7 @@ processors:
     
   - name: route-audit-logs
     type: route
-    condition: contains(content, "audit") OR contains(content, "security")
+    condition: matchesValue(content, "*audit*") OR matchesValue(content, "*security*")
     bucket: audit_logs
     
   - name: route-error-logs
@@ -467,12 +454,12 @@ Reduce log volume by **dropping** low-value records at ingestion.
 processors:
   - name: drop-health-checks
     type: filter
-    condition: contains(content, "health") AND loglevel == "INFO"
+    condition: matchesValue(content, "*health*") AND loglevel == "INFO"
     action: drop
     
   - name: drop-heartbeats
     type: filter
-    condition: contains(content, "heartbeat") OR contains(content, "keepalive")
+    condition: matchesValue(content, "*heartbeat*") OR matchesValue(content, "*keepalive*")
     action: drop
 ```
 
@@ -507,58 +494,30 @@ fetch logs, from: now() - 24h
 
 <a id="complete-pipeline-example"></a>
 ## 8. Complete Pipeline Example
-Here's a comprehensive OpenPipeline configuration:
+Here is one complete log pipeline, written as the processors you add in **Settings > Process and contextualize > OpenPipeline > Logs > Pipelines**. OpenPipeline has no importable pipeline file format of its own; each row is a processor, grouped by the stage it belongs to. Rows are listed in execution order, because *"The sequence of stages is fixed for all pipelines and cannot be modified."* Within a stage, processors run in the order you add them.
 
-```yaml
-# Complete OpenPipeline configuration for logs
-name: production-log-pipeline
-enabled: true
+| # | Stage | Processor | Matching condition | Configuration |
+|---|-------|-----------|--------------------|---------------|
+| 1 | Processing | **Drop record** | `matchesValue(content, "*health*") AND loglevel == "INFO"` | — |
+| 2 | Processing | **DQL** | `matchesValue(content, "*HTTP*")` | `parse content, "LD:method SPACE '/' LD:path SPACE INT:http.status_code SPACE INT:duration_ms"` — parse into `http.status_code`, not `status`, which is the log record's own status field |
+| 3 | Processing | **DQL** | `true` | `fieldsAdd environment = if(contains(k8s.namespace.name, "prod"), "production", else: "non-prod")` |
+| 4 | Processing | **DQL** (masking — the pattern is DPL, not regex) | `true` | `fieldsAdd content = replacePattern(content, "[A-Za-z0-9._%+-]+ '@' [A-Za-z0-9.-]+", "[EMAIL-MASKED]")` |
+| 5 | Bucket assignment | **Bucket assignment** | `loglevel == "DEBUG"` | Bucket: `debug_logs` |
+| 6 | Metric extraction | **Counter metric** | `isNotNull(http.status_code)` | Metric key `log.http.requests`; dimensions `k8s.namespace.name`, `http.status_code` |
+| 7 | Data extraction | **Business event** | `status == "ERROR"` | Event type `com.app.error` (static); event provider `app-logs` (static) |
 
-processors:
-  # 1. FILTER - Remove unwanted logs first
-  - name: drop-health-checks
-    type: filter
-    condition: contains(content, "health") AND loglevel == "INFO"
-    action: drop
+What the stage order means for this pipeline:
 
-  # 2. PARSE - Extract structured fields
-  - name: parse-http-logs
-    type: dql
-    condition: contains(content, "HTTP")
-    dql: parse content, "LD:method SPACE '/' LD:path SPACE INT:status SPACE INT:duration_ms"
+- **Drop record (1) removes the record for good.** *"Drops a record. The record isn't processed further and isn't stored."* Health checks it drops are not counted by the metric in row 6. To count them but not store them, drop nothing and use a **No storage assignment** processor in the Bucket assignment stage instead (§7).
+- **Bucket assignment (5) runs before extraction (6, 7).** Records are extracted whichever bucket they go to.
+- **`contains()` is fine inside a DQL processor (row 3) and rejected in a matching condition.** The processor statement verifies as valid, while the same function in a matcher fails with the verifier error `The function contains() isn't enabled.` Every matching condition above uses `matchesValue` / `isNotNull` / `==` and verifies as a valid logs matcher.
+- **Routing is not bucket assignment.** A *route* sends records to a **pipeline**. The bucket is chosen inside that pipeline, by row 5.
 
-  # 3. ENRICH - Add computed attributes
-  - name: add-environment
-    type: fieldsAdd
-    fields:
-      - name: environment
-        value: if(contains(k8s.namespace.name, "prod"), "production", else: "non-prod")
-
-  # 4. MASK - Protect sensitive data (DQL processor; the pattern is DPL, not regex)
-  - name: mask-emails
-    type: dql
-    dql: fieldsAdd content = replacePattern(content, "[A-Za-z0-9._%+-]+ '@' [A-Za-z0-9.-]+", "[EMAIL-MASKED]")
-
-  # 5. EXTRACT METRICS - Create dimensional metrics
-  - name: extract-request-count
-    type: metric
-    metricKey: log.http.requests
-    dimensions:
-      - namespace: k8s.namespace.name
-      - status: status
-
-  # 6. GENERATE EVENTS - Create business events
-  - name: generate-error-events
-    type: bizevents
-    condition: loglevel == "ERROR"
-    eventType: com.app.error
-
-  # 7. ROUTE - Send to appropriate bucket
-  - name: route-debug
-    type: route
-    condition: loglevel == "DEBUG"
-    bucket: debug_logs
-```
+> <sub>**Sources:**</sub>
+> - <sub>[Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"The sequence of stages is fixed for all pipelines and cannot be modified."* and *"Drops a record. The record isn't processed further and isn't stored."*</sub>
+> - <sub>[Metric extraction stage (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/extraction/metric-extraction) — *"The Counter metric processor increments a counter by 1 for each matching record."*</sub>
+> - <sub>[Data extraction stage (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/extraction/data-extraction)</sub>
+> - <sub>[DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline)</sub>
 
 ```dql
 // Verify current pipeline processing

@@ -1,6 +1,6 @@
 # WEBRUM-05: Error Analysis
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 5 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 5 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -63,9 +63,13 @@ Dynatrace captures several categories of browser-side errors:
 //   user_action.type == "RouteChange" -> "same_view"  (the New RUM SPA route-change value; the
 //                              only other value is "hard_navigation". "Custom" has NO equivalent.)
 //   connection.type         -> network.protocol.name
-// CLASSIFIER MATTERS AS MUCH AS THE FIELD: navigation-timing fields (performance.dom_interactive,
-// performance.load_event_end) live on classifier "navigation" and are 0 on "page_summary", so a
-// page_summary filter silently empties them. ttfb.* is the opposite — it lives on page_summary.
+// THE EVENT CHARACTERISTIC MATTERS AS MUCH AS THE FIELD: navigation-timing fields
+// (performance.dom_interactive, performance.load_event_end) live on navigation events
+// (characteristics.has_navigation) and are unpopulated on page summaries
+// (characteristics.has_page_summary), so a page-summary filter silently empties them.
+// ttfb.* is the opposite — it lives on page summaries. Select with the stable has_* flags, not
+// characteristics.classifier (corrected 09/28/2026): the docs call classifier "not intended for
+// query usage" and Semantic Dictionary 1.349 removes it from the user-event models.
 // Session/performance field vocabulary corrected 08/12/2026 (New RUM). Classic camelCase RUM
 // names are null on New RUM data and fail silently. Verified against 3,261 user.sessions:
 //   userType -> dt.rum.user_type      userActionCount -> user_action_count
@@ -85,7 +89,8 @@ Dynatrace captures several categories of browser-side errors:
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "navigation"
+//   action.type == "Load"              -> characteristics.has_navigation == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -310,6 +315,8 @@ In this notebook, we covered:
 
 - [Configure error detection for web applications (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/configure-errors)
 - [User actions in RUM Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/rum-concepts/user-actions)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

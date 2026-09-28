@@ -1,6 +1,6 @@
 # K8S-06: Namespace Organization and Boundaries
 
-> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 6 of 13 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 6 of 13 | **Created:** January 2026 | **Last Updated:** 09/25/2026
 
 ## Organizing Kubernetes Monitoring with Namespaces
 Namespaces provide logical boundaries in Kubernetes for resource isolation, access control, and organizational structure. This notebook covers namespace strategies and how to leverage them in Dynatrace for filtered views, access control, and cost allocation.
@@ -114,7 +114,9 @@ spec:
 ```dql
 // Namespace CPU usage — sum() adds up every container in the namespace; avg() would
 // return the average container's usage, which ranks namespaces by container size, not consumption
-timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgCpuMillicores = arrayAvg(cpuMillicores)
 | sort avgCpuMillicores desc
 | limit 15
@@ -122,7 +124,9 @@ timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:
 
 ```dql
 // Memory usage by namespace — sum() of every container's working set in the namespace
-timeseries memBytes = sum(dt.kubernetes.container.memory_working_set), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries memBytes = sum(dt.kubernetes.container.memory_working_set, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgMemBytes = arrayAvg(memBytes)
 | sort avgMemBytes desc
 | limit 15
@@ -203,7 +207,9 @@ spec:
 // CPU requests by namespace (quota tracking)
 // Requests are emitted at container grain — there is no dt.kubernetes.workload.requests_cpu.
 // Sum across containers to get the namespace reservation a ResourceQuota is measured against.
-timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgReqMillicores = round(arrayAvg(cpuReq), decimals: 0)
 | fields k8s.namespace.name, avgReqMillicores
 | sort avgReqMillicores desc
@@ -212,7 +218,9 @@ timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu), from:-1h, by:{k8s
 
 ```dql
 // Memory requests by namespace (GiB, quota tracking)
-timeseries memReq = sum(dt.kubernetes.container.requests_memory), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries memReq = sum(dt.kubernetes.container.requests_memory, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgReqGiB = round(arrayAvg(memReq) / 1073741824, decimals: 2)
 | fields k8s.namespace.name, avgReqGiB
 | sort avgReqGiB desc
@@ -347,7 +355,9 @@ metadata:
 ```dql
 // Resource consumption by namespace (for cost allocation) — sum() of every container in the
 // namespace; a per-container avg() under-states namespaces that run many modest containers
-timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuMillicores = sum(dt.kubernetes.container.cpu_usage, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgCpuMillicores = arrayAvg(cpuMillicores)
 | sort avgCpuMillicores desc
 | limit 15

@@ -1,6 +1,6 @@
 # M2S-07: Step 7 — Enable: User Enablement and Communication
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 7 of 9 | **Phase:** Run | **Step:** Enable | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 7 of 9 | **Phase:** Run | **Step:** Enable | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 A successful migration is measured not by the technical cutover but by whether every team in the organization can use the new platform effectively. Step 7 focuses on communication, training, documentation, and establishing the support structures that ensure adoption. Without deliberate enablement, teams will struggle with new URLs, unfamiliar interfaces, and unanswered questions — undermining the value of the migration.
 
@@ -219,10 +219,11 @@ timeseries avgCpu = avg(dt.host.cpu.usage), from:-1h, by:{dt.entity.host}
 
 ```dql
 // Training query 4: Service response time analysis (distributed tracing)
+// Dividing a duration by 1ms turns it into a plain number of milliseconds
 fetch spans, from:-1h
 | filter span.kind == "server"
-| summarize avgDuration = avg(duration), p95Duration = percentile(duration, 95), requestCount = count(), by:{dt.entity.service}
-| sort p95Duration desc
+| summarize {avgDurationMs = avg(duration) / 1ms, p95DurationMs = percentile(duration, 95) / 1ms, requestCount = count()}, by:{dt.entity.service}
+| sort p95DurationMs desc
 | limit 10
 ```
 
@@ -374,7 +375,7 @@ Enablement is not complete when training is delivered — it is complete when us
 
 | Metric | Target | How to Measure |
 |--------|--------|----------------|
-| **Active users (weekly)** | ≥ Managed baseline within 30 days | IAM audit logs |
+| **Active users (weekly)** | ≥ Managed baseline within 30 days | Platform audit events (`dt.system.events`) |
 | **Notebooks created** | 10+ in the first month | Notebook listing / document count |
 | **DQL queries executed** | Increasing week-over-week trend | Query audit (if enabled) |
 | **Support tickets** | Decreasing trend after week 2 | ITSM system |
@@ -385,21 +386,23 @@ Enablement is not complete when training is delivered — it is complete when us
 
 ### Tracking Active Users
 
-Monitor platform adoption using audit events. If audit logging is enabled, query for active user sessions:
+Monitor platform adoption using audit events. On SaaS these are platform audit events in `dt.system.events` (`event.kind == "AUDIT_EVENT"`), not records in the generic `events` table. Grail-based audit logging is on by default. Reading it needs `storage:system:read` for `AUDIT_EVENT` records and `storage:buckets:read` on the `dt_system_events` bucket:
+
+> <sub>**Sources:** [Audit logs (DT docs)](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/configuration/audit-logs-grail) — *"Grail-based audit logging is enabled by default and can't be turned off."*</sub>
 
 ```dql
-// Track daily active users over the past 7 days (requires audit log access)
-fetch events, from:-7d
-| filter event.type == "AUDIT_LOG"
-| summarize activeUsers = countDistinct(user), by:{day = bin(timestamp, 1d)}
+// Track daily active users over the past 7 days (sign-ins recorded in the platform audit log)
+fetch dt.system.events, from:-7d
+| filter event.kind == "AUDIT_EVENT" and event.provider == "API_GATEWAY" and event.type == "LOGIN"
+| summarize activeUsers = countDistinct(user.id), by:{day = bin(timestamp, 24h)}
 | sort day desc
 ```
 
 ```dql
-// Track audit events by category — shows which platform features are being used
-fetch events, from:-7d
-| filter event.type == "AUDIT_LOG"
-| summarize eventCount = count(), by:{event.category}
+// Track audit events by provider — shows which platform surfaces are being used
+fetch dt.system.events, from:-7d
+| filter event.kind == "AUDIT_EVENT"
+| summarize eventCount = count(), by:{event.provider}
 | sort eventCount desc
 | limit 15
 ```

@@ -1,6 +1,6 @@
 # WEBRUM-03: Core Web Vitals
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 3 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 3 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -81,7 +81,8 @@ LCP measures the time from when the user initiates navigation to when the larges
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "page_summary"
+//   action.type == "Load"              -> characteristics.has_page_summary == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -94,7 +95,7 @@ LCP measures the time from when the user initiates navigation to when the larges
 // lcp.*'s 327,099 — it is not a different RUM generation, just a rarely-populated sibling.
 // Average LCP across all applications in the last 24 hours
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(lcp.start_time)
 | summarize avg_lcp = avg(lcp.start_time),
     p75_lcp = percentile(lcp.start_time, 75),
@@ -112,7 +113,7 @@ fetch user.events, from:-24h
 // grand total on every row, which means collapsing to one row, keeping the per-category rows in an
 // array, and expanding back out.
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(lcp.start_time)
 | fieldsAdd lcp_ms = lcp.start_time
 | fieldsAdd lcp_category = if(lcp_ms <= 2500, "Good",
@@ -202,7 +203,7 @@ CLS measures unexpected layout shifts during the entire lifespan of a page. A la
 ```dql
 // CLS distribution — classify into Good / Needs Improvement / Poor
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(cls.value)
 | fieldsAdd cls_category = if(cls.value <= 0.1, "Good",
     else: if(cls.value <= 0.25, "Needs Improvement",
@@ -213,7 +214,7 @@ fetch user.events, from:-24h
 ```dql
 // Worst CLS pages — pages with the most layout shifting
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(cls.value)
 | summarize avg_cls = avg(cls.value),
     p75_cls = percentile(cls.value, 75),
@@ -235,7 +236,7 @@ Aggregate Core Web Vitals by page to identify which pages need optimization:
 // (`below_threshold` = fast enough that no value is reported, the healthy case; `reported` = a slow
 // interaction was actually measured). So INP enters a scorecard as a RATE, not a percentile.
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | summarize {
     p75_lcp_ms   = percentile(lcp.start_time, 75),
     p75_cls      = percentile(cls.value, 75),
@@ -259,7 +260,7 @@ Tracking CWV over time helps identify regressions after deployments, seasonal pa
 ```dql
 // LCP trend over the last 7 days — hourly p75
 fetch user.events, from:-7d
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(lcp.start_time)
 | fieldsAdd lcp_ms = lcp.start_time
 | makeTimeseries p75_lcp = percentile(lcp_ms, 75), interval:1h
@@ -268,7 +269,7 @@ fetch user.events, from:-7d
 ```dql
 // CLS trend over the last 7 days — daily p75
 fetch user.events, from:-7d
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | filter isNotNull(cls.value)
 | makeTimeseries p75_cls = percentile(cls.value, 75), interval:1d
 ```
@@ -284,7 +285,7 @@ Create a single-query CWV scorecard showing the percentage of page loads in each
 // (`below_threshold` = fast enough that no value is reported, the healthy case; `reported` = a slow
 // interaction was actually measured). So INP enters a scorecard as a RATE, not a percentile.
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | summarize {
     total     = count(),
     lcp_good  = countIf(lcp.start_time <= 2500),
@@ -326,6 +327,8 @@ In this notebook, we covered:
 - [Google Core Web Vitals](https://web.dev/articles/vitals)
 - [Experience Vitals (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum/experience-vitals)
 - [INP Documentation](https://web.dev/articles/inp)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

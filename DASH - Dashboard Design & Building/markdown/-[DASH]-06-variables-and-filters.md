@@ -1,18 +1,18 @@
 # DASH-06: Variables and Filters
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 6 of 7 | **Created:** March 2026 | **Last Updated:** 08/24/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 6 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
-Variables transform a static dashboard into a dynamic, reusable tool. Instead of building separate dashboards for each service, environment, or team, a single template dashboard with variables can serve everyone. This notebook covers variable types in Dynatrace dashboards, filter propagation across tiles, variable-driven DQL queries, entity selector patterns, and strategies for building template dashboards that work across environments.
+Variables transform a static dashboard into a dynamic, reusable tool. Instead of building separate dashboards for each service, environment, or team, a single template dashboard with variables can serve everyone. This notebook covers variable types in Dynatrace dashboards, filter propagation across tiles, variable-driven DQL queries, DQL-populated dropdowns for services and hosts, and strategies for building template dashboards that work across environments.
 
 ---
 
 ## Table of Contents
 
 1. [Variable Types](#variable-types)
-2. [Entity Selector Variables](#entity-selector-variables)
-3. [String Variables](#string-variables)
+2. [Service and Host Variables (DQL Type)](#entity-selector-variables)
+3. [List and Free-Text Variables](#string-variables)
 4. [Variable-Driven DQL Queries](#variable-driven-queries)
 5. [Filter Propagation](#filter-propagation)
 6. [Template Dashboard Patterns](#template-patterns)
@@ -36,36 +36,40 @@ Variables transform a static dashboard into a dynamic, reusable tool. Instead of
 
 > **Variables gain a separate display name and key (SaaS 1.346 — staged rollout from 08/25/2026).** A variable now carries two fields: a **Name**, the human-readable label shown in the UI with no symbol restrictions, and a **Key**, the code identifier used in DQL. Keys are auto-generated from names, and **existing variables migrate automatically — no manual action**. The rule that matters for everything below: **DQL references the key, not the name.** So `$myVar` in a query continues to resolve against the key, and renaming a variable for readability no longer breaks the queries that use it — which is precisely the coupling that made variable names awkward before. Until 1.346 reaches your tenant, name and identifier remain the same single field.
 
-Dynatrace dashboards support several variable types, each suited for different filtering needs.
+The Dashboards app has four variable types:
 
-| Variable Type | Description | Use Case |
-|--------------|-------------|----------|
-| **Entity selector** | Dropdown of Dynatrace entities (hosts, services, etc.) | Filter by specific service or host |
-| **String** | Free-text or predefined string values | Environment names, namespaces, log levels |
-| **Query-based** | Values populated from a DQL query | Dynamic lists based on actual data |
-| **Time range** | Dashboard-wide time selector | Override default time range |
+| Variable Type | Values come from | Typical use |
+|--------------|------------------|-------------|
+| **DQL** | A DQL query that runs when you define the variable | Service, host and namespace lists — this is how you build the entity dropdowns that classic dashboards called entity selectors (§2) |
+| **List** | A comma-separated list of values you type | Fixed sets: environments, log levels |
+| **Free text** | Whatever the viewer types, with an optional default | Search strings, IDs |
+| **Code** | A JavaScript function you enter | Values from an API, or computed lists |
+
+There is no entity-selector type and no time-range variable: the timeframe is the dashboard's own selector, not a variable.
 
 ### Variable Naming Conventions
 
 | Convention | Example | Notes |
 |-----------|---------|-------|
 | Descriptive name | `$service`, `$environment` | Immediately clear what it filters |
-| Prefix by type | `$entity_host`, `$str_namespace` | Useful in complex dashboards |
+| Prefix by source | `$dql_services`, `$list_env` | Useful in complex dashboards |
 | Lowercase with underscores | `$k8s_namespace` | Consistent, readable in queries |
 
-> **Important:** Variable names are case-sensitive. Use consistent casing across all tiles that reference the same variable.
+> **Important:** DQL references the variable's **key**, not its display name. Dynatrace derives the key from the name by replacing every character that is not a letter or a number with `_`. Use the same key in every tile that should respond to the variable.
+
+> <sub>**Sources:** [Dashboard variables (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/dashboards-and-notebooks/dashboards-new/components/dashboard-component-variable) — DQL: *"the value is returned from a query you enter when you define the variable"*; List: *"a comma-separated values (CSV) list of values"*; key: *"Dynatrace derives a key from the name by replacing any character that isn't a letter or a number with `_`."*</sub>
 
 > **Update (April 2026): Variables can drive dynamic coloring.** Dashboard variables now feed into tile coloring and threshold conditions, not just query filters. A single template can apply different color thresholds per selected environment or team — for example, a stricter "red above 2%" error threshold in prod versus a looser one in dev — by referencing the variable in the tile's color rules. This keeps visual rules in sync with the variable selection instead of hard-coding one threshold for all contexts.
 
 <a id="entity-selector-variables"></a>
 
-## 2. Entity Selector Variables
+## 2. Service and Host Variables (DQL Type)
 
-Entity selector variables are the most common variable type. They present a searchable dropdown of Dynatrace monitored entities.
+A dropdown of services or hosts is the most common variable. In the Dashboards app it is a **DQL variable** whose query returns the entities — over `smartscapeNodes` or `dt.entity.*` — as the two queries below do.
 
-### Common Entity Selectors
+### Common Service and Host Variables
 
-| Variable | Entity Type | Dashboard Use |
+| Variable | Query over | Dashboard Use |
 |----------|------------|---------------|
 | `$host` | `dt.entity.host` | Filter infrastructure metrics to a specific host |
 | `$service` | `dt.entity.service` | Filter spans and service metrics |
@@ -106,13 +110,13 @@ fetch dt.entity.host
 
 <a id="string-variables"></a>
 
-## 3. String Variables
+## 3. List and Free-Text Variables
 
-String variables accept free-text or predefined values. They are ideal for filtering on attributes like environment, namespace, or log level.
+A **List** variable offers a fixed set of values you type as a comma-separated list; a **Free text** variable takes whatever the viewer types. Both suit attributes like environment, namespace, or log level. When the set changes often, make it a DQL variable instead, using a discovery query like the ones below.
 
 ### Discovering Available Values
 
-Before creating a string variable with predefined options, query the data to discover what values exist.
+Before creating a List variable, query the data to discover what values exist.
 
 ```dql
 // Discover Kubernetes namespaces for variable options
@@ -143,16 +147,16 @@ fetch spans, from:-1h
 
 ## 4. Variable-Driven DQL Queries
 
-Once variables are defined on a dashboard, reference them in tile DQL queries using the `$variable_name` syntax.
+Once variables are defined on a dashboard, reference them in tile DQL queries using the `$key` syntax.
 
 ### Patterns for Using Variables in DQL
 
 | Pattern | DQL Example | Notes |
 |---------|-------------|-------|
-| Entity filter | `filter dt.entity.host == $host` | Entity selector variable |
-| String filter | `filter k8s.namespace.name == $namespace` | String variable |
+| Entity filter | `filter dt.entity.host == $host` | DQL variable returning host IDs |
+| String filter | `filter k8s.namespace.name == $namespace` | List or Free-text variable |
 | Pattern match | `filter k8s.namespace.name ~ $namespace_pattern` | Wildcard string variable |
-| Multi-select | `filter in(loglevel, $log_levels)` | Multi-value string variable |
+| Multi-select | `filter in(loglevel, array($log_levels))` | Multi-select variable — the documented form wraps it in `array()` |
 
 ### Example: Service Latency Filtered by Variable
 
@@ -233,10 +237,10 @@ Filter propagation ensures that when a user selects a variable value, all releva
 
 ### Variable Chaining Pattern
 
-For hierarchical filtering (e.g., select a cluster, then see only namespaces in that cluster), use query-based variables where the second variable's query references the first.
+For hierarchical filtering (e.g., select a cluster, then see only namespaces in that cluster), use DQL variables where the second variable's query references the first.
 
 ```dql
-// Namespaces filtered by cluster — would be a query-based variable
+// Namespaces filtered by cluster — would be a DQL variable
 // In variable config: references $cluster variable
 fetch logs, from:-1h
 | filter isNotNull(k8s.namespace.name) and isNotNull(k8s.cluster.name)
@@ -257,8 +261,9 @@ A single dashboard with an `$environment` variable (prod, staging, dev) that fil
 | Variable | Values | Applied To |
 |----------|--------|------------|
 | `$environment` | prod, staging, dev | Namespace filter, host group filter |
-| `$service` | (entity selector) | Service-specific tiles |
-| `$time_range` | 15m, 1h, 6h, 24h | All tiles |
+| `$service` | (DQL variable) | Service-specific tiles |
+
+Leave the time window to the dashboard's own timeframe selector — it is not a variable.
 
 ### Pattern 2: Team-Owned Service Dashboard
 
@@ -266,8 +271,8 @@ Each team uses the same template but selects their services.
 
 | Variable | Source | Notes |
 |----------|--------|-------|
-| `$team_services` | Query-based: services tagged with team name | Multi-select entity variable |
-| `$severity` | String: ERROR, WARN, INFO | Log level filter |
+| `$team_services` | DQL: services tagged with team name | Multi-select DQL variable |
+| `$severity` | List: ERROR, WARN, INFO | Log level filter |
 
 ### Discovering Tags for Team-Based Variables
 
@@ -399,7 +404,7 @@ That last row is the substantive one: a deep link inherits the reader's own perm
 | **Handle the missing-tag case explicitly** | `filter isNotNull(...)` keeps untagged processes out. Without it, rows render links with `null` spliced into the URL. |
 | **Author in the UI, then validate before committing** | See below — this is the one that bites. |
 
-**On that last guardrail.** Build and test this tile in the UI, clicking the link to confirm it lands where you expect. The moment you round-trip the dashboard through `dynatrace_document` or Monaco, it *becomes* an API-authored dashboard and falls under the validation gate in **DASH-07 §5** — and the `concat()` URL patterns are the most edit-prone part of the payload, because they are long single-line strings that reviewers skim. Under SaaS 1.344 (staged rollout from 07/29/2026) a dashboard that fails validation no longer loads at all, so a payload edited by hand and merged unvalidated takes the whole dashboard down, not just the link column.
+**On that last guardrail.** Build and test this tile in the UI, clicking the link to confirm it lands where you expect. The moment you round-trip the dashboard through `dynatrace_document` or Monaco, it *becomes* an API-authored dashboard and falls under the validation gate in **DASH-07 §5** — and the `concat()` URL patterns are the most edit-prone part of the payload, because they are long single-line strings that reviewers skim. Since SaaS 1.344 — with stricter rules again in SaaS 1.346 — a dashboard that fails validation does not load at all (confirm which version your tenant runs), so a payload edited by hand and merged unvalidated takes the whole dashboard down, not just the link column.
 
 A tag prerequisite that is only half-populated is the other common failure: the tile renders, the dropdown looks right, and links exist for the two products someone remembered to tag. Audit tag coverage across the estate before treating the dropdown as a complete release list.
 
@@ -410,7 +415,7 @@ A tag prerequisite that is only half-populated is the other common failure: the 
 In this notebook you learned:
 
 - The four variable types available in Dynatrace dashboards
-- How to create entity selector and string variables
+- How to build DQL, List and Free-text variables — including service and host dropdowns
 - DQL patterns for referencing variables in tile queries
 - Filter propagation mechanics and best practices
 - Template dashboard patterns: multi-environment, team-owned, and golden signals

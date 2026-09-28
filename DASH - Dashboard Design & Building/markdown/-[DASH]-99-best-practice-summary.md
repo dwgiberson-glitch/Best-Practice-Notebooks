@@ -1,6 +1,6 @@
 # DASH-99: Best Practice Summary
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 08/11/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -103,7 +103,7 @@ This notebook consolidates every actionable best practice from the DASH series (
 | 34 | Include active problems table | Show display_id, event.name, event.category, duration_min. Sort by duration descending | Critical | DASH-04 |
 | 35 | Track log volume by severity level | Stacked area chart: `makeTimeseries count(), interval:5m, by:{loglevel}`. Filter out loglevel == "NONE" | Recommended | DASH-04 |
 | 36 | Detect log volume spikes | Compare current hour log count to same hour yesterday using `append` | Recommended | DASH-04 |
-| 37 | Include deployment event table | Filter `event.kind == "DEPLOYMENT_EVENT" OR event.type == "CUSTOM_DEPLOYMENT"`. Show last 6h | Critical | DASH-04 |
+| 37 | Include deployment event table | Filter `event.type == "CUSTOM_DEPLOYMENT" or (event.kind == "SDLC_EVENT" and event.category == "task" and event.type == "deployment")` — classic and SDLC deployment events. Show last 6h | Critical | DASH-04 |
 | 38 | Add infrastructure tiles for CPU and memory | `timeseries avg(dt.host.cpu.usage)` and `timeseries avg(dt.host.memory.usage)` by host | Recommended | DASH-04 |
 | 39 | Show concurrently open problems over time | Use `spread:timeframe(from:event.start, to:coalesce(event.end, now()))` in makeTimeseries | Recommended | DASH-04 |
 | 40 | Avoid spaghetti line charts | Use top-N filtering or variables instead of plotting all services on one chart | Critical | DASH-04 |
@@ -155,15 +155,15 @@ This notebook consolidates every actionable best practice from the DASH series (
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 63 | Use entity selector variables for services and hosts | Variable type: entity selector. Entity types: `dt.entity.service`, `dt.entity.host` | Critical | DASH-06 |
-| 64 | Use string variables for namespaces, log levels, environments | Predefined values discovered from actual data via DQL | Recommended | DASH-06 |
-| 65 | Variable names are case-sensitive | Use consistent lowercase with underscores: `$k8s_namespace`, `$service`, `$environment` | Critical | DASH-06 |
-| 66 | Reference variables in filter clauses | `filter dt.entity.host == $host` for entity selectors; `filter k8s.namespace.name == $namespace` for strings | Critical | DASH-06 |
-| 67 | Provide an "All" option on every variable | Let users remove the filter to see aggregate data | Recommended | DASH-06 |
-| 68 | Use the same variable name across all related tiles | Ensures filter propagation: changing the dropdown updates every tile that references it | Critical | DASH-06 |
-| 69 | Chain variables for hierarchical filtering | Second variable's query-based options reference the first variable (e.g., cluster > namespace) | Optional | DASH-06 |
-| 70 | Build Golden Signals template dashboards | One variable-driven template with Latency, Traffic, Errors, Saturation sections. Works for any service | Recommended | DASH-06 |
-| 71 | Test variables with extreme values | Select the busiest and quietest entities to verify the layout renders correctly under load | Recommended | DASH-06 |
+| 66 | Use DQL variables for services and hosts | Variable type: DQL, with a query over `smartscapeNodes` or `dt.entity.service` / `dt.entity.host`. The Dashboards app has no entity-selector type | Critical | DASH-06 |
+| 67 | Use List variables for fixed sets: namespaces, log levels, environments | Values discovered from actual data via DQL; switch to a DQL variable when the set changes often | Recommended | DASH-06 |
+| 68 | Reference the variable key, not its display name | DQL uses the key, derived from the name with every non-alphanumeric character replaced by `_`. Keep keys lowercase with underscores: `$k8s_namespace`, `$service`, `$environment` | Critical | DASH-06 |
+| 69 | Reference variables in filter clauses | `filter dt.entity.host == $host` for DQL entity variables; `filter k8s.namespace.name == $namespace` for List or Free-text; `filter in(loglevel, array($log_levels))` for multi-select | Critical | DASH-06 |
+| 70 | Provide an "All" option on every variable | Let users remove the filter to see aggregate data | Recommended | DASH-06 |
+| 71 | Use the same variable name across all related tiles | Ensures filter propagation: changing the dropdown updates every tile that references it | Critical | DASH-06 |
+| 72 | Chain variables for hierarchical filtering | Second variable's query-based options reference the first variable (e.g., cluster > namespace) | Optional | DASH-06 |
+| 73 | Build Golden Signals template dashboards | One variable-driven template with Latency, Traffic, Errors, Saturation sections. Works for any service | Recommended | DASH-06 |
+| 74 | Test variables with extreme values | Select the busiest and quietest entities to verify the layout renders correctly under load | Recommended | DASH-06 |
 
 <a id="refresh-and-performance"></a>
 
@@ -171,14 +171,14 @@ This notebook consolidates every actionable best practice from the DASH series (
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 72 | Executive wall screen refresh | Set to 10-15 minutes | Critical | DASH-02 |
-| 73 | Operations NOC wall refresh | Set to 1-2 minutes | Critical | DASH-02 |
-| 74 | Operations on-call refresh | Set to 2-5 minutes | Recommended | DASH-02 |
-| 75 | Engineering investigation refresh | Set to manual (on-demand) | Recommended | DASH-02 |
-| 76 | Executive weekly review refresh | Set to manual | Optional | DASH-02 |
-| 77 | Never set refresh below 1 minute | Aggressive refresh on complex queries causes unnecessary load. Start at 5 min, decrease only if critical | Critical | DASH-02 |
-| 78 | Use `limit` on all top-N queries | Always append `| limit N` (10-20) to prevent unbounded result sets in tiles | Critical | DASH-04, DASH-05 |
-| 79 | Use `filterOut` instead of `not` for negation filters | `filterOut loglevel == "NONE"` is faster than `filter not loglevel == "NONE"` | Recommended | DASH-04 |
+| 75 | Executive wall screen refresh | Set to 10-15 minutes | Critical | DASH-02 |
+| 76 | Operations NOC wall refresh | Set to 1-2 minutes | Critical | DASH-02 |
+| 77 | Operations on-call refresh | Set to 2-5 minutes | Recommended | DASH-02 |
+| 78 | Engineering investigation refresh | Set to manual (on-demand) | Recommended | DASH-02 |
+| 79 | Executive weekly review refresh | Set to manual | Optional | DASH-02 |
+| 80 | Never set refresh below 1 minute | Aggressive refresh on complex queries causes unnecessary load. Start at 5 min, decrease only if critical | Critical | DASH-02 |
+| 81 | Use `limit` on all top-N queries | Always append `| limit N` (10-20) to prevent unbounded result sets in tiles | Critical | DASH-04, DASH-05 |
+| 82 | Use `filterOut` instead of `not` for negation filters | `filterOut loglevel == "NONE"` is faster than `filter not loglevel == "NONE"` | Recommended | DASH-04 |
 
 <a id="sharing-and-permissions"></a>
 
@@ -186,14 +186,14 @@ This notebook consolidates every actionable best practice from the DASH series (
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 80 | Executive dashboards: platform team owns, leadership views | Owner: platform team lead. Editors: platform team. Viewers: all managers + leadership | Critical | DASH-07 |
-| 81 | Operations dashboards: SRE team owns | Owner: SRE team. Editors: SRE + on-call. Viewers: operations group | Critical | DASH-07 |
-| 82 | Engineering dashboards: service team owns | Owner: service team lead. Editors: service team. Viewers: engineering org | Recommended | DASH-07 |
-| 83 | Limit editor access | Encourage clone-and-customize over editing shared originals | Critical | DASH-07 |
-| 84 | Use naming convention for all dashboards | Format: `[Tier] - [Team/Service] - [Purpose]`. Example: "Ops - Checkout - Service Health" | Critical | DASH-07 |
-| 85 | Tag dashboards with tier, team, and service | Enables filtering and discovery in the dashboard library | Recommended | DASH-07 |
-| 86 | Maintain a dashboard ownership registry | Document who owns each dashboard for accountability | Recommended | DASH-07 |
-| 87 | Archive dashboards not viewed in 90 days | Regular cleanup prevents library bloat | Recommended | DASH-07 |
+| 83 | Executive dashboards: platform team owns, leadership views | Owner: platform team lead. Editors: platform team. Viewers: all managers + leadership | Critical | DASH-07 |
+| 84 | Operations dashboards: SRE team owns | Owner: SRE team. Editors: SRE + on-call. Viewers: operations group | Critical | DASH-07 |
+| 85 | Engineering dashboards: service team owns | Owner: service team lead. Editors: service team. Viewers: engineering org | Recommended | DASH-07 |
+| 86 | Limit editor access | Encourage clone-and-customize over editing shared originals | Critical | DASH-07 |
+| 87 | Use naming convention for all dashboards | Format: `[Tier] - [Team/Service] - [Purpose]`. Example: "Ops - Checkout - Service Health" | Critical | DASH-07 |
+| 88 | Tag dashboards with tier, team, and service | Enables filtering and discovery in the dashboard library | Recommended | DASH-07 |
+| 89 | Maintain a dashboard ownership registry | Document who owns each dashboard for accountability | Recommended | DASH-07 |
+| 90 | Archive dashboards not used in 90 days | Proxy: no tile queries from the Dashboards app in 90 days (`QUERY_EXECUTION_EVENT` in `dt.system.events`) — document reads are not audited. Regular cleanup prevents library bloat | Recommended | DASH-07 |
 
 <a id="reporting-and-automation"></a>
 
@@ -201,12 +201,12 @@ This notebook consolidates every actionable best practice from the DASH series (
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 88 | Automate executive summary via Workflow | Schedule: weekly, Monday 8 AM. Recipients: leadership, management | Recommended | DASH-07 |
-| 89 | Automate operations daily report via Workflow | Schedule: daily, 7 AM. Recipients: SRE team, on-call | Recommended | DASH-07 |
-| 90 | Automate SLA compliance report via Workflow | Schedule: monthly, 1st of month. Recipients: account management, leadership | Recommended | DASH-07 |
-| 91 | Automate cost/volume tracking report | Schedule: weekly. Recipients: platform team, finance | Optional | DASH-07 |
-| 92 | Only report services with error rate >1% in daily ops report | Filter `error_rate_pct > 1.0` to surface only degraded services | Recommended | DASH-07 |
-| 93 | Export dashboard JSON for backup | Use Documents API: `GET /platform/document/v1/documents/<id>`. Store in version control | Recommended | DASH-07 |
+| 91 | Automate executive summary via Workflow | Schedule: weekly, Monday 8 AM. Recipients: leadership, management | Recommended | DASH-07 |
+| 92 | Automate operations daily report via Workflow | Schedule: daily, 7 AM. Recipients: SRE team, on-call | Recommended | DASH-07 |
+| 93 | Automate SLA compliance report via Workflow | Schedule: monthly, 1st of month. Recipients: account management, leadership | Recommended | DASH-07 |
+| 94 | Automate cost/volume tracking report | Schedule: weekly. Recipients: platform team, finance | Optional | DASH-07 |
+| 95 | Only report services with error rate >1% in daily ops report | Filter `error_rate_pct > 1.0` to surface only degraded services | Recommended | DASH-07 |
+| 96 | Export dashboard JSON for backup | Use Documents API: `GET /platform/document/v1/documents/<id>` returns metadata and content as one multipart response — store the content part in version control | Recommended | DASH-07 |
 
 <a id="dashboard-lifecycle"></a>
 
@@ -214,18 +214,18 @@ This notebook consolidates every actionable best practice from the DASH series (
 
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|--------------|-----------------|----------|--------|
-| 94 | Follow the 6-step creation workflow | 1) Define audience/purpose, 2) Identify 5-10 key metrics, 3) Prototype in notebook, 4) Build dashboard, 5) Add variables, 6) Share and iterate | Critical | DASH-01 |
-| 95 | Manage dashboards as code | Use Monaco CLI or Terraform for multi-environment deployment, version control, and peer review | Recommended | DASH-07 |
-| 96 | Validate every dashboard payload before merging it | Deploy to a non-production tenant, open the dashboard in the Dashboards app, confirm **zero** validation warnings. API acceptance (`2xx`) is not render confirmation. Under SaaS 1.344 (rolling out from 07/29/2026) a dashboard that fails validation no longer loads at all, and API- or AI-authored dashboards are the named affected population | Critical | DASH-07 |
-| 97 | Organize dashboard repo by tier | Structure: `dashboards/executive/`, `dashboards/operations/`, `dashboards/engineering/`, `dashboards/templates/` | Recommended | DASH-07 |
-| 98 | Deploy dashboard changes through PR review | Export > modify in feature branch > PR review > deploy to staging > validate schema/render > review data fidelity > deploy to production | Recommended | DASH-07 |
-| 99 | Maintain a query registry | Track which DQL queries power which dashboard tiles. Update when DQL syntax or data sources change | Optional | DASH-07 |
-| 100 | A dashboard is never "done" | Share with target audience, collect feedback, and refine continuously. Evolve with team needs | Recommended | DASH-01 |
-| 101 | Validate dashboard data matches manual reports | Executives lose trust if dashboard numbers differ from status meeting reports. Cross-check availability and MTTR calculations | Critical | DASH-03 |
+| 97 | Follow the 6-step creation workflow | 1) Define audience/purpose, 2) Identify 5-10 key metrics, 3) Prototype in notebook, 4) Build dashboard, 5) Add variables, 6) Share and iterate | Critical | DASH-01 |
+| 98 | Manage dashboards as code | Use Monaco CLI or Terraform for multi-environment deployment, version control, and peer review | Recommended | DASH-07 |
+| 99 | Validate every dashboard payload before merging it | Deploy to a non-production tenant, open the dashboard in the Dashboards app, confirm **zero** validation warnings. API acceptance (`2xx`) is not render confirmation. Since SaaS 1.344 (stricter rules in SaaS 1.346) a dashboard that fails validation does not load at all — confirm which version your tenant runs — and API- or AI-authored dashboards are the named affected population | Critical | DASH-07 |
+| 100 | Organize dashboard repo by tier | Structure: `dashboards/executive/`, `dashboards/operations/`, `dashboards/engineering/`, `dashboards/templates/` | Recommended | DASH-07 |
+| 101 | Deploy dashboard changes through PR review | Export > modify in feature branch > PR review > deploy to staging > validate schema/render > review data fidelity > deploy to production | Recommended | DASH-07 |
+| 102 | Maintain a query registry | Track which DQL queries power which dashboard tiles. Update when DQL syntax or data sources change | Optional | DASH-07 |
+| 103 | A dashboard is never "done" | Share with target audience, collect feedback, and refine continuously. Evolve with team needs | Recommended | DASH-01 |
+| 104 | Validate dashboard data matches manual reports | Executives lose trust if dashboard numbers differ from status meeting reports. Cross-check availability and MTTR calculations | Critical | DASH-03 |
 
 ## Summary
 
-This notebook contains **101 best practices** extracted from the DASH series, organized into 12 categories:
+This notebook contains **104 best practices** extracted from the DASH series, organized into 12 categories:
 
 | Category | Practices | Critical Count |
 |----------|-----------|----------------|
@@ -233,16 +233,16 @@ This notebook contains **101 best practices** extracted from the DASH series, or
 | Design and Layout | 6-13 | 3 |
 | Tile Configuration | 14-18 | 2 |
 | Executive Tier | 19-30 | 8 |
-| Operations Tier | 31-40 | 4 |
-| Engineering Tier | 41-51 | 5 |
-| DQL Query Standards | 52-62 | 6 |
-| Variables and Filters | 63-71 | 4 |
-| Refresh and Performance | 72-79 | 4 |
-| Sharing and Permissions | 80-87 | 3 |
-| Reporting and Automation | 88-93 | 0 |
-| Dashboard Lifecycle | 94-101 | 3 |
+| Operations Tier | 31-40 | 5 |
+| Engineering Tier | 41-51 | 6 |
+| DQL Query Standards | 52-65 | 11 |
+| Variables and Filters | 66-74 | 4 |
+| Refresh and Performance | 75-82 | 4 |
+| Sharing and Permissions | 83-90 | 4 |
+| Reporting and Automation | 91-96 | 0 |
+| Dashboard Lifecycle | 97-104 | 3 |
 
-**Priority breakdown:** 45 Critical, 42 Recommended, 4 Optional. Start with Critical practices first, then layer in Recommended practices for a mature dashboard strategy.
+**Priority breakdown:** 53 Critical, 46 Recommended, 5 Optional. Start with Critical practices first, then layer in Recommended practices for a mature dashboard strategy.
 
 ---
 

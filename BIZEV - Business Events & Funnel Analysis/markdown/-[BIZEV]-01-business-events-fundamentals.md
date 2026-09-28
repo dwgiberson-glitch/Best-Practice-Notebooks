@@ -1,6 +1,6 @@
 # BIZEV-01: Business Events Fundamentals
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 1 of 7 | **Created:** March 2026 | **Last Updated:** 08/04/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 1 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -12,7 +12,7 @@ Sprint 1.337 added **OneAgent primary fields and primary tags as top-level attri
 
 - **`dt.security_context`** rides on every business event from OneAgent-instrumented sources — useful when business events carry data subject to regulatory boundaries (PCI, GDPR, SOX). IAM policies can ABAC on this field directly without OpenPipeline parsing.
 - **`dt.cost.costcenter` / `dt.cost.product`** + customer-defined primary tags ride along too — enable funnel and conversion dashboards that automatically segment by cost center or product line without per-event tagging in application code.
-- For business events emitted via SDK or HTTP API (not OneAgent-instrumented), use OpenPipeline `enrichment` processors to add equivalent fields at ingest.
+- For business events sent through the HTTP API or the RUM/mobile APIs (not OneAgent-captured), add equivalent fields at ingest with a `fieldsAdd` or DQL processor in the OpenPipeline Processing stage.
 
 Available on Latest Dynatrace tenants only.
 
@@ -164,7 +164,7 @@ Business events reach Dynatrace Grail through several ingestion pathways.
 OneAgent can automatically capture business events from web requests when configured via **business event capture rules** in Settings. This requires:
 
 - OneAgent deployed on the application host
-- Capture rules defined in **Settings > Business Analytics > Capture rules**
+- Capture rules defined in **Settings > Collect and Capture > Business events**
 - Request attributes or session properties mapped to event fields
 
 ### Method 2: Business Events API
@@ -189,27 +189,24 @@ curl -X POST "https://{your-environment}.live.dynatrace.com/api/v2/bizevents/ing
 
 > **Note:** The API expects [CloudEvents](https://cloudevents.io/) format. The `type` field maps to `event.type` and `source` maps to `event.provider` in DQL.
 
-### Method 3: OpenPipeline Routing
+### Method 3: OpenPipeline Extraction from Logs and Spans
 
-OpenPipeline can route data from other sources (logs, spans) into the `bizevents` table using processing rules. This is useful when business signals are embedded in existing telemetry.
+OpenPipeline can create business events from other telemetry: a **Business event** processor in the **Data extraction** stage of a logs or spans pipeline emits a new bizevent for each matching record. This is useful when business signals are embedded in existing telemetry.
 
-### Method 4: sendBizEvent() SDK
+### Method 4: RUM and Mobile `sendBizEvent`
 
-Application code can send business events using the Dynatrace SDK:
+Browser code sends business events through the RUM JavaScript API; the mobile agents and OpenKit offer equivalent methods:
 
 ```javascript
-// JavaScript/Node.js example
-const { sendBizEvent } = require('@dynatrace/oneagent-sdk');
-
-sendBizEvent({
-  type: 'com.myapp.checkout.completed',
-  data: {
-    order_id: 'ORD-12345',
-    total: 149.99,
-    items: 3
-  }
+// Browser (RUM JavaScript API)
+dynatrace.sendBizEvent('com.myapp.checkout.completed', {
+  order_id: 'ORD-12345',
+  total: 149.99,
+  items: 3
 });
 ```
+
+There is no OneAgent SDK method for business events; backend code without a capture rule uses the API (Method 2). Workflows can also emit business events with the **Ingest business event** action.
 
 ```dql
 // Identify ingestion sources — which providers are sending business events?
@@ -248,7 +245,7 @@ fetch bizevents, from:-24h
 ```
 
 ```dql
-// Total business event volume per getHour(all types combined)
+// Total business event volume per hour (all types combined)
 fetch bizevents, from:-24h
 | makeTimeseries total_events = count(), interval:1h
 ```
@@ -281,7 +278,7 @@ In this notebook, you learned:
 
 - **What business events are** and how they differ from generic events
 - **The bizevents data model** — required fields (`event.type`, `event.provider`) and custom payload
-- **Four ingestion methods** — OneAgent auto-capture, API, OpenPipeline, and SDK
+- **Four ingestion methods** — OneAgent capture rules, API, OpenPipeline extraction, and the RUM/mobile APIs
 - **Core DQL patterns** for exploring business events: counting, grouping, and time-series visualization
 
 ### Next Steps
@@ -293,6 +290,8 @@ In this notebook, you learned:
 
 - [Dynatrace Business Analytics](https://docs.dynatrace.com/docs/observe/business-observability)
 - [Environment API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api)
+- [Business event capture (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing) — *"Obtain RUM business events by leveraging a dedicated method of the RUM JavaScript API, OneAgent for Mobile, or OpenKit."*
+- [RUM JavaScript API — dynatrace (DT docs)](https://docs.dynatrace.com/javascriptapi/doc/types/dynatrace.html)
 - [CloudEvents Specification](https://cloudevents.io/)
 
 ---

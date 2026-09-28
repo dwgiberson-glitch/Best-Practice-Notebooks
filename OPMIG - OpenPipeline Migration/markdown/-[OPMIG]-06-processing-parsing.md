@@ -1,6 +1,6 @@
 # OPMIG-06: Processing, Parsing & Transformation
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 6 of 10 | **Created:** December 2025 | **Last Updated:** 07/20/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 6 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ---
 
@@ -40,8 +40,8 @@ By completing this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
-| **Permissions** | `openpipeline.configurations.read` and `openpipeline.configurations.write` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
+| **Permissions** | `settings:read` and `settings:write` (OpenPipeline configuration) |
 | **API Access** | `logs.read` token scope |
 | **DPL Architect** | Access to `https://{env}.apps.dynatrace.com/ui/apps/dynatrace.dpl.architect` |
 | **Knowledge** | OPMIG-01 through OPMIG-05; basic regex or pattern matching familiarity |
@@ -50,45 +50,15 @@ By completing this notebook, you will:
 
 ## Processing Stage Overview
 
-The Processing stage is where all data transformation happens. Per the official `/concepts/processing` documentation, it contains processor categories that execute in the order defined within the pipeline:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  PROCESSING STAGE (in-pipeline order)            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. MASKING (security first)                                     │
-│     └─ DQL with replacePattern — redact PII before anything      │
-│                                                                  │
-│  2. FILTERING (Drop record)                                      │
-│     └─ Remove unwanted records before transformation             │
-│                                                                  │
-│  3. TRANSFORM                                                    │
-│     ├─ DQL processor (fieldsAdd / fieldsRemove / fieldsRename)   │
-│     ├─ Parse processor (DPL patterns)                            │
-│     └─ Technology parser (Apache, Nginx, JSON, syslog, log4j…)   │
-│                                                                  │
-│  4. EXTRACT (counter, value, histogram, Smartscape, events)      │
-│     └─ Covered in OPMIG-07                                       │
-│                                                                  │
-│  5. COST & SECURITY                                              │
-│     ├─ DPS Cost Allocation — Cost Center / Product               │
-│     └─ Set dt.security_context                                   │
-│                                                                  │
-│  6. STORAGE ASSIGNMENT                                           │
-│     ├─ Bucket assignment                                         │
-│     └─ No storage assignment (skip retention)                    │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-> **Doc alignment (May 2026):** These are processor *categories within* the Processing stage of the 4-stage data flow (Ingest → Routing → Processing → Storage). Earlier versions of this notebook referred to "three sub-stages"; the documented model has all of the categories above executing in defined order inside Processing. See OPMIG-02 § Data Flow Architecture for the full stage diagram.
+Masking, dropping, parsing and transformation are processors in the **Processing** stage — the first stage of every pipeline. The remaining stages (Smartscape node and edge, Permission, Product and Cost allocation, Bucket assignment, Metric extraction, Davis, Data extraction) follow in a fixed order that you cannot change; OPMIG-02 § *Understanding Processing Order* has the full ten-stage table. This notebook covers the Processing stage; OPMIG-07 covers extraction.
 
 ### Processor Execution Order
 
-Within the Processing stage, processors execute in the order they're defined. You can reorder them in the UI. This notebook focuses on categories 1-3 (masking, filtering, transform); OPMIG-07 covers extraction.
+Within the Processing stage, processors execute in the order they're defined, and *"each processor output becomes the input for the next one."* You can reorder them in the UI.
 
 > 💡 **Best Practice:** Order processors logically — mask first, drop second, then parse, then enrich with computed fields based on parsed values.
+
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"The sequence of stages is fixed for all pipelines and cannot be modified."*</sub>
 
 ---
 
@@ -110,8 +80,8 @@ The DQL processor supports a subset of DQL commands for data transformation.
 #### Static Values
 ```dql
 fieldsAdd environment = "production"
-fieldsAdd application = "checkout-service"
-fieldsAdd team = "platform-engineering"
+| fieldsAdd application = "checkout-service"
+| fieldsAdd team = "platform-engineering"
 ```
 
 #### Conditional Values (if/else)
@@ -124,15 +94,15 @@ fieldsAdd severity = if(loglevel == "ERROR", "critical",
 #### Computed Values
 ```dql
 fieldsAdd message_length = stringLength(content)
-fieldsAdd short_host = substring(host.name, 0, 15)
-fieldsAdd is_error = loglevel == "ERROR"
+| fieldsAdd short_host = substring(host.name, from: 0, to: 15)
+| fieldsAdd is_error = loglevel == "ERROR"
 ```
 
 #### String Operations
 ```dql
-fieldsAdd normalized_status = toLowerCase(status)
-fieldsAdd log_prefix = substring(content, 0, 50)
-fieldsAdd clean_message = trim(content)
+fieldsAdd normalized_status = lower(status)
+| fieldsAdd log_prefix = substring(content, from: 0, to: 50)
+| fieldsAdd clean_message = trim(content)
 ```
 
 #### Coalesce (First Non-Null)
@@ -143,10 +113,12 @@ fieldsAdd effective_level = coalesce(loglevel, status, "UNKNOWN")
 ### fieldsRemove Examples
 
 ```dql
-// Remove single field
+// Remove a single field
 fieldsRemove internal_id
+```
 
-// Remove multiple fields
+```dql
+// Remove multiple fields in one command
 fieldsRemove temp_field, debug_info, internal_state
 ```
 
@@ -155,8 +127,8 @@ fieldsRemove temp_field, debug_info, internal_state
 ```dql
 // Standardize field names
 fieldsRename user_id = userId
-fieldsRename request_id = requestId
-fieldsRename transaction_id = transactionId
+| fieldsRename request_id = requestId
+| fieldsRename transaction_id = transactionId
 ```
 
 ---
@@ -226,13 +198,13 @@ Production-ready DPL patterns for the most common log formats.
 ```dql
 parse content, """
   IPADDR:client_ip SPACE '-' SPACE LD:user SPACE
-  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):timestamp ']' SPACE
+  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):log_time ']' SPACE
   '"' LD:method SPACE LD:request_path SPACE LD:protocol '"' SPACE
   INT:status_code SPACE INT:response_bytes
 """
 ```
 
-**Extracted:** client_ip, user, timestamp, method, request_path, protocol, status_code, response_bytes
+**Extracted:** client_ip, user, log_time, method, request_path, protocol, status_code, response_bytes
 
 ### Nginx (with Response Time)
 
@@ -241,7 +213,7 @@ parse content, """
 ```dql
 parse content, """
   IPADDR:client_ip SPACE '-' SPACE '-' SPACE
-  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):timestamp ']' SPACE
+  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):log_time ']' SPACE
   '"' LD:method SPACE LD:request_path SPACE LD:protocol '"' SPACE
   INT:status_code SPACE INT:response_bytes SPACE
   '"' LD:referrer '"' SPACE '"' LD:user_agent '"' SPACE
@@ -261,9 +233,9 @@ parse content, """
 **Option 2: DQL Parsing**
 ```dql
 parse content, "JSON:log_data"
-| fieldsAdd service = log_data["service"]
-| fieldsAdd message = log_data["message"]
-| fieldsAdd level = log_data["level"]
+| fieldsAdd service = log_data[service]
+| fieldsAdd message = log_data[message]
+| fieldsAdd level = log_data[level]
 ```
 
 ### Syslog (RFC 3164)
@@ -273,7 +245,7 @@ parse content, "JSON:log_data"
 ```dql
 parse content, """
   '<' INT:priority '>' 
-  TIMESTAMP('MMM dd HH:mm:ss'):timestamp SPACE
+  TIMESTAMP('MMM dd HH:mm:ss'):log_time SPACE
   LD:hostname SPACE LD:app_name '[' INT:pid ']:' SPACE
   DATA:message
 """
@@ -304,14 +276,16 @@ parse content, "LD:exception_class ':' SPACE LD:exception_message EOL"
 
 **Sample:** `2024-12-12T10:30:45.123456789Z stdout F {"level":"info","msg":"Request processed"}`
 
+> The `T` separator is written as a plain letter inside `TIMESTAMP('…')` — a quoted `\'T\'` is rejected (*Named pattern element 'T' is not valid*). The parsed value keeps millisecond precision.
+
 ```dql
 parse content, """
-  TIMESTAMP('yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSSSSXXX'):k8s_timestamp SPACE
+  TIMESTAMP('yyyy-MM-ddTHH:mm:ss.SSSSSSSSSZ'):k8s_timestamp SPACE
   LD:stream SPACE LD:log_tag SPACE
   JSON:log_payload
 """
-| fieldsAdd level = log_payload["level"]
-| fieldsAdd msg = log_payload["msg"]
+| fieldsAdd level = log_payload[level]
+| fieldsAdd msg = log_payload[msg]
 ```
 
 ---
@@ -329,7 +303,7 @@ parse content, """
 
 **DPL Pattern:**
 ```dql
-parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:timestamp ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
+parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:log_time ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
 ```
 
 ### Key-Value Logs
@@ -403,7 +377,7 @@ parse content, "LD:exception_class ':' LD:exception_message"
 
 **Processor 1: Parse log structure**
 ```dql
-parse content, "'[' TIMESTAMP('yyyy-MM-dd\'T\'HH:mm:ss'):log_time ']' SPACE LD:level SPACE LD:service ' - ' DATA:message"
+parse content, "'[' TIMESTAMP('yyyy-MM-ddTHH:mm:ss'):log_time ']' SPACE LD:level SPACE LD:service ' - ' DATA:message"
 ```
 
 **Processor 2: Extract payment details**
@@ -451,8 +425,8 @@ fieldsAdd normalized_level = if(contains(content, "ERROR") OR contains(content, 
 
 | Format | Example | DPL |
 |--------|---------|-----|
-| ISO 8601 | `2024-12-12T10:30:45Z` | `TIMESTAMP('yyyy-MM-dd\'T\'HH:mm:ssXXX')` |
-| ISO + MS | `2024-12-12T10:30:45.123Z` | `TIMESTAMP('yyyy-MM-dd\'T\'HH:mm:ss.SSSXXX')` |
+| ISO 8601 | `2024-12-12T10:30:45Z` | `TIMESTAMP('yyyy-MM-ddTHH:mm:ssZ')` |
+| ISO + MS | `2024-12-12T10:30:45.123Z` | `TIMESTAMP('yyyy-MM-ddTHH:mm:ss.SSSZ')` |
 | Apache | `12/Dec/2024:10:30:45 +0000` | `TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z')` |
 | Syslog | `Dec 12 10:30:45` | `TIMESTAMP('MMM dd HH:mm:ss')` |
 | Java | `2024-12-12 10:30:45,123` | `TIMESTAMP('yyyy-MM-dd HH:mm:ss,SSS')` |
@@ -462,11 +436,11 @@ fieldsAdd normalized_level = if(contains(content, "ERROR") OR contains(content, 
 ### HTTP Request Patterns
 
 ```dql
-// Full request line
-parse content, "'"' LD:method SPACE LD:path SPACE LD:protocol '"'"
+// Full request line (a literal " inside the DQL string is escaped as \")
+parse content, "'\"' LD:method SPACE LD:path SPACE LD:protocol '\"'"
 
 // Separate path and query
-parse content, "'"' LD:method SPACE LD:path ('?' LD:query)? SPACE LD:protocol '"'"
+parse content, "'\"' LD:method SPACE LD:path ('?' LD:query)? SPACE LD:protocol '\"'"
 
 // RESTful API paths (/api/v1/users/12345)
 parse content, "'/api/v' INT:api_version '/' LD:resource '/' INT:id"
@@ -479,10 +453,10 @@ parse content, "'/api/v' INT:api_version '/' LD:resource '/' INT:id"
 parse content, "'user=' LD:user SPACE 'count=' INT:count"
 
 // Quoted: user="John Doe" email="john@example.com"
-parse content, "'user="' LD:user '"' SPACE 'email="' LD:email '"'"
+parse content, "'user=\"' LD:user '\"' SPACE 'email=\"' LD:email '\"'"
 
 // Logfmt: level=info msg="OK" duration=150ms
-parse content, "'level=' LD:level SPACE 'msg="' LD:msg '"' SPACE 'duration=' INT:dur 'ms'"
+parse content, "'level=' LD:level SPACE 'msg=\"' LD:msg '\"' SPACE 'duration=' INT:dur 'ms'"
 ```
 
 ### Stack Trace Patterns
@@ -498,24 +472,25 @@ parse content, "'at ' LD:class_method '(' LD:file ':' INT:line ')'"
 parse content, "'Caused by: ' LD:caused_by ':' SPACE LD:message"
 
 // Python traceback
-parse content, "'File "' LD:file '", line ' INT:line ', in ' LD:function"
+parse content, "'File \"' LD:file '\", line ' INT:line ', in ' LD:function"
 ```
 
 ### PII Masking Patterns
 
+Masking uses `replacePattern`, which takes a **DPL** pattern (not a regular expression — there is no `replaceAll` function). See OPMIG-08 for the full masking set.
+
 ```dql
 // Credit cards (1234-5678-9012-3456 → ****-****-****-****)
-fieldsAdd content = replaceAll(content, "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b", "****-****-****-****")
-
-// Partial masking (keep last 4)
-fieldsAdd content = replaceAll(content, "\\b(\\d{4})[\\s-]?(\\d{4})[\\s-]?(\\d{4})[\\s-]?(\\d{4})\\b", "****-****-****-$4")
+fieldsAdd content = replacePattern(content, "CREDITCARD", replacement: "****-****-****-****")
 
 // Email addresses
-fieldsAdd content = replaceAll(content, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "***@***.***")
+| fieldsAdd content = replacePattern(content, "[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+", replacement: "***@***.***")
 
 // SSN (123-45-6789 → ***-**-****)
-fieldsAdd content = replaceAll(content, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "***-**-****")
+| fieldsAdd content = replacePattern(content, "[0-9]{3} '-' [0-9]{2} '-' [0-9]{4}", replacement: "***-**-****")
 ```
+
+> **Partial masking ("keep the last 4 digits")** has no DPL equivalent — `replacePattern` has no back-references, so the previous `$4` example cannot be expressed. Mask the whole number.
 
 ### Network Patterns
 
@@ -529,8 +504,8 @@ parse content, "IPV4ADDR:ipv4"
 // IPv6 only
 parse content, "IPV6ADDR:ipv6"
 
-// URL parsing
-parse content, "LD:protocol '://' LD:hostname (':' INT:port)? LD:path ('?' LD:query)?"
+// URL parsing (an LD must be followed by something it can stop at, so the path starts at '/')
+parse content, "LD:protocol '://' LD:hostname (':' INT:port)? '/' LD:path"
 ```
 
 ---
@@ -557,7 +532,7 @@ parse content, "LD:protocol '://' LD:hostname (':' INT:port)? LD:path ('?' LD:qu
 ```dql
 parse content, """
   IPADDR:client_ip SPACE LD:ident SPACE LD:auth SPACE
-  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):timestamp ']' SPACE
+  '[' TIMESTAMP('dd/MMM/yyyy:HH:mm:ss Z'):log_time ']' SPACE
   '"' LD:method SPACE LD:request_path (SPACE LD:http_version)? '"' SPACE
   INT:status_code SPACE (INT:response_bytes | '-') SPACE
   '"' LD:referrer '"' SPACE '"' LD:user_agent '"'
@@ -641,10 +616,12 @@ Drop processors remove records from the pipeline before storage.
 |----------|--------------------|
 | Debug logs | `loglevel == "DEBUG"` |
 | Trace logs | `loglevel == "TRACE"` |
-| Health checks | `contains(content, "health")` |
-| Readiness probes | `contains(content, "/ready")` |
-| Metrics endpoints | `contains(content, "/metrics")` |
-| Heartbeats | `contains(content, "heartbeat")` |
+| Health checks | `matchesValue(content, "*health*")` |
+| Readiness probes | `matchesValue(content, "*/ready*")` |
+| Metrics endpoints | `matchesValue(content, "*/metrics*")` |
+| Heartbeats | `matchesPhrase(content, "heartbeat")` |
+
+> Matching conditions accept `matchesValue` (with `*` wildcards, any substring) and `matchesPhrase` (whole tokens); `contains()` is not enabled in a matcher.
 | Specific source | `log.source == "noisy-service"` |
 
 ### Drop Processor Configuration
@@ -661,8 +638,8 @@ Matching Condition: loglevel == "DEBUG" OR status == "DEBUG"
 // Drop all non-essential logs
 loglevel == "DEBUG" 
   OR loglevel == "TRACE" 
-  OR contains(content, "health") 
-  OR contains(content, "/metrics")
+  OR matchesValue(content, "*health*") 
+  OR matchesValue(content, "*/metrics*")
 ```
 
 > ⚠️ **Important:** Dropped data is gone forever. Test drop conditions carefully before deploying.
@@ -679,6 +656,10 @@ When logs have a custom timestamp format that's not recognized:
 // Parse timestamp from content
 parse content, "'[' TIMESTAMP('yyyy-MM-dd HH:mm:ss'):parsed_timestamp ']'"
 ```
+
+Parse into a **new** field (`parsed_timestamp`, `log_time`). Overwriting `timestamp` risks the record failing log schema validation — a stored log must have a `timestamp` *"Within the ingestion range"*, and one that is not is dropped. Set `timestamp` deliberately and only from a parsed `TIMESTAMP` value.
+
+> <sub>**Sources:** [OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — *Schema validation for logs*: *"A processed log record is persisted only if all the following field conditions are satisfied. If the schema is not valid, the log is dropped."*</sub>
 
 ### Pattern 2: Fix Missing Log Level
 
@@ -826,7 +807,7 @@ Dynatrace provides a **DPL Architect** tool for building and testing patterns:
 
 **Processor 1: Drop Debug (Drop)**
 ```
-Matching: loglevel == "DEBUG" OR contains(content, "[DEBUG]")
+Matching: loglevel == "DEBUG" OR matchesValue(content, "*[DEBUG]*")
 ```
 
 **Processor 2: Parse Application Log (DQL)**
@@ -874,10 +855,6 @@ Now that you can transform data, continue with:
 - [Dynatrace Pattern Language](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language)
 - [DPL Architect Tool](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/dpl-architect)
 - [DQL Functions in OpenPipeline](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/openpipeline-dql-functions)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

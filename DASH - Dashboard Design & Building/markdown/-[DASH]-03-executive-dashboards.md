@@ -1,6 +1,6 @@
 # DASH-03: Executive Dashboards
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 3 of 7 | **Created:** March 2026 | **Last Updated:** 08/25/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 3 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -166,9 +166,10 @@ Problem trends reveal whether operational health is improving or declining over 
 
 ```dql
 // Problem trend by category over 7 days
+// time:event.start bins each problem on the day it opened, not the day it was last updated
 fetch dt.davis.problems, from:-7d
 | filter dt.davis.is_duplicate == false
-| makeTimeseries problem_count = count(), interval:1d, by:{event.category}
+| makeTimeseries problem_count = count(), interval:1d, by:{event.category}, time:event.start
 ```
 
 ### Problems by Severity — Executive Summary Table

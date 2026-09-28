@@ -1,6 +1,6 @@
 # M2S-04: Step 4 — Prepare: Readiness and Pre-Migration
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 4 of 9 | **Phase:** Upgrade | **Step:** Prepare | **Created:** March 2026 | **Last Updated:** 07/30/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 4 of 9 | **Phase:** Upgrade | **Step:** Prepare | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 With the target architecture designed, it is time to prepare everything needed for migration execution. This step ensures your SaaS tenant is provisioned, identity is configured, ActiveGates are deployed in parallel, and rollback procedures are tested—so that when you flip the switch in Step 5, there are no surprises.
 
@@ -566,14 +566,30 @@ Send to all Dynatrace users and configuration owners:
 
 ### 7.4 Freeze Verification
 
-Monitor for unauthorized changes during the freeze period:
+Monitor for unauthorized changes during the freeze period. The check runs in two places, with two different tools.
+
+**On Managed (the frozen source), use the audit log API, not DQL.** Grail and DQL are not available on Managed. Configuration changes are recorded in the Environment API v2 audit log under the `CONFIG` category:
+
+```bash
+# Managed: configuration changes in the last 24 h
+curl -s -G "https://{managed}/e/{env-id}/api/v2/auditlogs" \
+  --data-urlencode 'filter=category("CONFIG")' \
+  --data-urlencode 'from=now-24h' \
+  -H "Authorization: Api-Token {MANAGED_TOKEN}"
+```
+
+The token needs the `auditLogs.read` scope.
+
+**On SaaS (the target), use DQL.** Changes made directly in the SaaS tenant after the Upgrade Assistant run drift away from what was migrated. Settings changes are recorded as platform audit events in `dt.system.events`:
+
+> <sub>**Sources:** [Audit logs API - GET audit log (DT Managed docs)](https://docs.dynatrace.com/managed/dynatrace-api/environment-api/audit-logs/get-log) — *"you need an access token with auditLogs.read scope"*; [Audit logs (DT docs)](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/configuration/audit-logs-grail).</sub>
 
 ```dql
-// Monitor for configuration changes during freeze period
-// Run this on the Managed environment to detect unauthorized changes
-fetch events, from:-24h
-| filter event.kind == "CONFIG"
-| fields timestamp, event.type, user = dt.user, description = event.description
+// SaaS target: configuration changes in the last 24 h (Settings audit events)
+// Do not run this on Managed — Grail and DQL are SaaS-only; use the audit log API shown above there
+fetch dt.system.events, from:-24h
+| filter event.kind == "AUDIT_EVENT" and event.provider == "SETTINGS"
+| fields timestamp, event.type, user.id, schema = details.dt.settings.schema_id
 | sort timestamp desc
 | limit 50
 ```

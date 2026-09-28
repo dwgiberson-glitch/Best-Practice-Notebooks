@@ -549,7 +549,7 @@ In this notebook, you learned:
 - [Notification actions umbrella (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/actions)
 - [HTTP request action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/http-request-workflow-action)
 - [Davis Problems app (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/problems-app)
-- [PagerDuty Events API v2 (PagerDuty Developer)](https://developer.pagerduty.com/docs/events-api-v2/overview/)
+- [PagerDuty Events API v2 (PagerDuty Developer)](https://docs.pagerduty.com/developer/events-api-v2-overview)
 - [ServiceNow REST API reference (ServiceNow Developer)](https://developer.servicenow.com/dev.do#!/reference/api)
 
 ---

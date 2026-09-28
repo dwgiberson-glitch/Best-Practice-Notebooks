@@ -1,10 +1,10 @@
 # BIZEV-02: Instrumentation
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 2 of 7 | **Created:** March 2026 | **Last Updated:** 08/04/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 2 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
-Capturing meaningful business events requires deliberate instrumentation. This notebook covers the practical techniques for generating business events — from OneAgent auto-detection of web request data, to custom API ingestion, SDK integration, and OpenTelemetry span-to-bizevent mapping. You will also learn best practices for event naming conventions, payload design, and cardinality management to keep your business analytics clean and performant.
+Capturing meaningful business events requires deliberate instrumentation. This notebook covers the practical techniques for generating business events — from OneAgent capture rules on web request data, to custom API ingestion, the RUM and mobile `sendBizEvent` APIs, and OpenPipeline span-to-bizevent extraction. You will also learn best practices for event naming conventions, payload design, and cardinality management to keep your business analytics clean and performant.
 
 ---
 
@@ -12,7 +12,7 @@ Capturing meaningful business events requires deliberate instrumentation. This n
 
 1. [OneAgent Auto-Detection](#oneagent-auto-detection)
 2. [Business Events API Ingestion](#business-events-api-ingestion)
-3. [SDK Integration](#sdk-integration)
+3. [Code-Level Capture: RUM, Mobile and Workflows](#code-level-capture)
 4. [OpenTelemetry Span-to-Bizevent Mapping](#opentelemetry-span-to-bizevent-mapping)
 5. [Event Naming Best Practices](#event-naming-best-practices)
 6. [Payload Design and Cardinality](#payload-design-and-cardinality)
@@ -40,7 +40,7 @@ OneAgent can automatically capture business events from web application requests
 
 ### Setting Up Capture Rules
 
-Navigate to **Settings > Business Analytics > OneAgent > Capture rules** and define:
+Navigate to **Settings > Collect and Capture > Business events** (**Incoming** or **Outgoing**) and define:
 
 | Setting | Description | Example |
 |---------|-------------|----------|
@@ -54,9 +54,8 @@ Navigate to **Settings > Business Analytics > OneAgent > Capture rules** and def
 When a capture rule matches, OneAgent creates a business event with:
 
 - The configured `event.type`
-- `event.provider` set to the application name
+- `event.provider` — the value you configure in the rule (for example, `www.easytrade.com`)
 - Extracted request attributes as custom payload fields
-- Automatic correlation with the trace context (span ID, trace ID)
 
 > **Tip:** Start with auto-detection for existing web applications, then add custom instrumentation for backend processes that don't have HTTP endpoints.
 
@@ -128,34 +127,16 @@ fetch bizevents, from:-1h
 | sort event_count desc
 ```
 
-<a id="sdk-integration"></a>
+<a id="code-level-capture"></a>
 
-## 3. SDK Integration
+## 3. Code-Level Capture: RUM, Mobile and Workflows
 
-The Dynatrace OneAgent SDK provides language-specific methods to send business events directly from application code.
+The *Business event capture* page lists five capture methods — OneAgent capture rules, web and mobile RUM, external sources (the API), logs and spans (OpenPipeline), and Workflows. A OneAgent SDK is not among them, so there is no server-side SDK call to add to application code. Code-level capture is available on the client side, through the RUM JavaScript API and the mobile agents, and from automation, through Workflows. Backend code that has no capture rule sends events through the Business Events API (Section 2).
 
-### Java Example
-
-```java
-import com.dynatrace.oneagent.sdk.api.BusinessEventsOneAgentApi;
-
-Map<String, Object> attributes = new HashMap<>();
-attributes.put("order_id", "ORD-12345");
-attributes.put("total", 149.99);
-attributes.put("items", 3);
-
-BusinessEventsOneAgentApi.sendBizEvent(
-    "com.myapp.checkout.completed",
-    attributes
-);
-```
-
-### JavaScript / Node.js Example
+### Browser (RUM JavaScript API)
 
 ```javascript
-const dtrum = window.dtrum;
-
-dtrum.sendBizEvent('com.myapp.add-to-cart', {
+dynatrace.sendBizEvent('com.myapp.add-to-cart', {
   product_id: 'PROD-456',
   product_name: 'Widget Pro',
   price: 29.99,
@@ -163,55 +144,45 @@ dtrum.sendBizEvent('com.myapp.add-to-cart', {
 });
 ```
 
-### Python Example
+The method lives on the `dynatrace` object of the RUM JavaScript API, not on `dtrum`. Events are reported only for monitored sessions — if the RUM JavaScript is disabled for a session (for example by cost and traffic control), its business events are not sent.
 
-```python
-import oneagent
+### Mobile and OpenKit
 
-sdk = oneagent.get_sdk()
-sdk.send_biz_event(
-    event_type="com.myapp.signup.completed",
-    attributes={
-        "user_id": "USR-789",
-        "plan": "premium",
-        "source_campaign": "spring-2026"
-    }
-)
-```
+The mobile agents (Android, iOS, Cordova, Flutter, React Native, .NET MAUI, Xamarin) and OpenKit each provide their own business-event method. See the per-platform tabs on the *Get business events from web and mobile RUM* page for the exact call.
 
-> **Tip:** SDK-generated events are automatically correlated with the active PurePath, linking business events to the full distributed trace.
+### Workflows
+
+To generate business events from automated tasks, add an **Ingest business event** action to a workflow.
+
+> **Tip:** For backend services, prefer a OneAgent capture rule (Section 1) when the data is already in the request, or the Business Events API (Section 2) when it is not. Both avoid adding telemetry code to the application.
 
 <a id="opentelemetry-span-to-bizevent-mapping"></a>
 
 ## 4. OpenTelemetry Span-to-Bizevent Mapping
 
-If your application already produces OpenTelemetry spans with business-relevant attributes, you can map them to business events using **OpenPipeline processing rules**.
+If your application already produces spans with business-relevant attributes, OpenPipeline can create business events from them with a **Business event** processor in the **Data extraction** stage of the spans pipeline.
 
 ### How It Works
 
-1. Application emits OTel spans with business attributes (e.g., `order.id`, `order.total`)
-2. OpenPipeline receives the span data
-3. A processing rule extracts business attributes and routes them to `bizevents`
+1. Application emits spans with business attributes (e.g., `order.id`, `order.total`)
+2. OpenPipeline receives the span data and a dynamic route sends it to your spans pipeline
+3. A **Business event** processor in the **Data extraction** stage emits a **new** bizevent record for each matching span
 4. The original span remains in `spans` — the business event is an additional record
 
 ### OpenPipeline Configuration
 
-```yaml
-# Example OpenPipeline rule for span-to-bizevent mapping
-pipelines:
-  - name: "Extract checkout events from spans"
-    processing:
-      - type: bizevent
-        condition: "span.name == 'checkout.complete'"
-        eventType: "com.myapp.checkout.completed"
-        attributes:
-          - source: "order.id"
-            target: "order_id"
-          - source: "order.total"
-            target: "amount"
-```
+In **Settings > Process and contextualize > OpenPipeline > Spans**, open the pipeline that processes the spans, then go to **Data extraction** and add a **Business event** processor:
 
-> **Note:** This approach avoids double-instrumentation. If your spans already carry business data, use OpenPipeline rather than adding SDK calls.
+| Setting | Value |
+|---|---|
+| Matching condition | `span.name == "checkout.complete"` |
+| Event type (static string) | `com.myapp.checkout.completed` |
+| Event provider (static string) | `checkout-service` |
+| Field extraction | `order.id`, `order.total` (or *Extract all fields*) |
+
+OpenPipeline matchers accept **double-quoted** strings only; a single-quoted value such as `'checkout.complete'` is rejected. Finish by adding a **Dynamic routing** entry that sends the relevant spans to this pipeline.
+
+> **Note:** This approach avoids double-instrumentation. If your spans already carry business data, extract it in OpenPipeline rather than adding a second telemetry call to the code.
 
 ```dql
 // Look for business events that may have originated from spans
@@ -334,10 +305,10 @@ fetch bizevents, from:-1h
 
 In this notebook, you learned:
 
-- **OneAgent auto-detection** — Capture business events from web requests without code changes
+- **OneAgent capture rules** — Capture business events from web requests without code changes
 - **API ingestion** — Send events from any system using CloudEvents format
-- **SDK integration** — Emit events directly from application code with trace correlation
-- **OpenTelemetry mapping** — Route span data to bizevents via OpenPipeline
+- **Code-level capture** — `dynatrace.sendBizEvent` (RUM JavaScript), the mobile agents, and the Workflows *Ingest business event* action
+- **Span extraction** — A Business event processor in the OpenPipeline Data extraction stage creates bizevents from spans
 - **Naming conventions** — Use reverse-domain notation with action verbs
 - **Payload design** — Balance richness with cardinality management
 
@@ -349,7 +320,12 @@ In this notebook, you learned:
 ### References
 
 - [Environment API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api)
-- [OneAgent SDK for Business Events](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing)
+- [Get business events via OneAgent (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing/bo-events-capturing-oneagent) — *"OneAgent Full-Stack Monitoring mode is mandatory for the hosts in which you want to capture business events."*
+- [Get business events from web and mobile RUM (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing/web-and-mobile-rum) — *"Business events are available for all Dynatrace RUM technologies (web RUM, mobile RUM, and OpenKit)."*
+- [RUM JavaScript API — dynatrace (DT docs)](https://docs.dynatrace.com/javascriptapi/doc/types/dynatrace.html) — *"Business events are only supported on Dynatrace SaaS deployments currently."*
+- [Business event capture (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing) — *"Use the Ingest business event action within Workflows to generate business events from automated tasks."*
+- [Get business events from logs and spans (DT docs)](https://docs.dynatrace.com/docs/observe/business-observability/bo-events-capturing/bo-events-capturing-logs-and-spans) — *"When spans are captured by OneAgent, span-level request attributes are available and can be mapped as data fields."*
+- [DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline)
 - [OpenPipeline Processing](https://docs.dynatrace.com/docs/platform/openpipeline)
 
 ---

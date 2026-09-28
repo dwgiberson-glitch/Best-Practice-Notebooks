@@ -1,6 +1,6 @@
 # OPMIG-09: Troubleshooting & Validation
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 9 of 10 | **Created:** December 2025 | **Last Updated:** 09/24/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 9 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 > **Level:** Intermediate  
 > **Prerequisites:** OPMIG-01 through OPMIG-08  
 > **Estimated Time:** 45 minutes  
@@ -44,8 +44,8 @@ By the end of this notebook, you will be able to:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and active OpenPipeline pipelines |
-| **Permissions** | `openpipeline.configurations.read`, `logs.read` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and active OpenPipeline pipelines — Managed is not covered by this series |
+| **Permissions** | `settings:read` (OpenPipeline configuration), `storage:logs:read` |
 | **API Access** | `logs.read` token scope |
 | **Knowledge** | OPMIG-01 through OPMIG-08; at least one active pipeline configured |
 
@@ -155,7 +155,7 @@ Visual decision trees for diagnosing and resolving common OpenPipeline issues.
 |------|----------|-------------|------------------|
 | 1 | Query for unmasked data? | Masking broken → Step 2 | May be working, verify |
 | 2 | Processor order correct? | Move masking earlier | Go to Step 3 |
-| 3 | Regex pattern matches? | Update regex pattern | Go to Step 4 |
+| 3 | DPL pattern matches? | Update DPL pattern | Go to Step 4 |
 | 4 | All fields masked? | Add field masking, fieldsRemove | Complete! |
 -->
 
@@ -266,12 +266,12 @@ When OpenPipeline issues occur in production, follow these emergency procedures.
    **Alternative Query:**
 ```dql
 // Monitor pipeline log volume and sources instead
-fetch logs
-| filter dt.openpipeline.pipelines == "my-pipeline"
+// dt.openpipeline.pipelines is an array of "<scope>:<pipeline id>" strings, so == never matches
+fetch logs, from: now() - 1h
+| filter matchesValue(dt.openpipeline.pipelines, "*my-pipeline*")
 | summarize
     log_count = count(),
     sources = collectDistinct(dt.openpipeline.source)
-| sort log_count desc
 ```
 
 3. **Test Parse Pattern Offline**
@@ -323,25 +323,26 @@ fetch logs
        affected_count = count()
 ```
 
-3. **Purge Sensitive Data (if supported)**
-```
-   ⚠️ IMPORTANT: Dynatrace does not support selective log deletion
+3. **Delete the Exposed Records**
+```text
+   Use the Grail record deletion API (POST /delete:execute, "Grail - Storage Record Deletion"
+   in the Dynatrace API definitions) — or Sensitive Data Center, which is built on it — with a
+   DQL filter scoped to the exposure window from step 2.
    
-   Options:
-   1. Wait for retention period to expire
-   2. Contact Dynatrace support for emergency data purge
-   3. Revoke bucket access to prevent further exposure
-   4. Document incident for compliance audit
+   Deletion is final and can't be undone: export the evidence the incident record needs first.
+   Requires a custom policy with storage:records:delete plus the matching storage:*:read and
+   storage:buckets:read permissions.
 ```
 
-4. **Revoke Bucket Access**
+4. **Restrict Read Access While Investigating**
+```text
+   Bucket read access is granted through IAM policies (storage:buckets:read plus table
+   permissions such as storage:logs:read), and record-level access through dt.security_context —
+   there is no per-bucket "Access Control" screen. Tighten the policies bound to the groups that
+   can read the affected bucket until the exposed records are deleted.
 ```
-   Settings → Buckets → Select bucket
-   → Access Control → Remove all users except admins
-   → Save
-   
-   Effect: Prevents unauthorized viewing while investigating
-```
+
+> <sub>**Sources:** [Record deletion in Grail via API (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data/record-deletion-in-grail) — *"The record deletion API is primarily designed to help users remove selected records containing sensitive data."*; *"Record deletion is final and can't be undone."*</sub>
 
 5. **Fix Masking and Re-Enable**
 ```dql
@@ -598,7 +599,7 @@ fetch logs
 
 | Cause | Solution | Expected Improvement |
 |-------|----------|---------------------|
-| Complex regex in parse/mask | Simplify patterns, use anchors | 50-80% faster |
+| Complex DPL patterns in parse/mask | Simplify patterns, start with literals | 50-80% faster |
 | Too many processors | Consolidate logic, remove unused | 30-50% faster |
 | High-volume debug logs | Add drop processor early | 60-90% reduction |
 | Expensive fieldsAdd logic | Pre-compute values, use lookup | 40-70% faster |
@@ -608,22 +609,23 @@ fetch logs
 
 ```dql
 // ❌ SLOW: Multiple replacePattern in sequence
-| fieldsAdd content = replacePattern(content, "pattern1", "X")
-| fieldsAdd content = replacePattern(content, "pattern2", "Y")
-| fieldsAdd content = replacePattern(content, "pattern3", "Z")
+| fieldsAdd content = replacePattern(content, "'pattern1'", replacement: "X")
+| fieldsAdd content = replacePattern(content, "'pattern2'", replacement: "Y")
+| fieldsAdd content = replacePattern(content, "'pattern3'", replacement: "Z")
 
-// ✅ FAST: Single regex with alternation
-| fieldsAdd content = replacePattern(content, "(pattern1|pattern2|pattern3)", "[REDACTED]")
+// ✅ FAST: Single DPL pattern with alternatives (replacePattern takes DPL, not regex)
+| fieldsAdd content = replacePattern(content, "('pattern1'|'pattern2'|'pattern3')", replacement: "[REDACTED]")
 ```
 
 ```dql
-// ❌ SLOW: Parse all logs, then filter
+// ❌ SLOW: one processor that parses every record
+// Matching condition: true
 parse content, """complex pattern"""
-| filter loglevel == "ERROR"
 
-// ✅ FAST: Filter first, then parse
-| filter matchesPhrase(content, "ERROR")
-| parse content, """complex pattern"""
+// ✅ FAST: narrow with the processor's MATCHING CONDITION, not a filter command
+// (`filter` is not enabled in a DQL processor definition)
+// Matching condition: matchesPhrase(content, "ERROR")
+parse content, """complex pattern"""
 ```
 
 ---
@@ -667,15 +669,15 @@ fetch logs
 
 ```dql
 // 3. Analyze droppable logs
-fetch logs
-| filter timestamp > now() - 1h
+// toDouble() matters: long / long is integer division in DQL, so without it the percentage is 0
+fetch logs, from: now() - 1h
 | summarize 
     total = count(),
     debug = countIf(loglevel == "DEBUG"),
     trace = countIf(loglevel == "TRACE"),
     health = countIf(contains(content, "/health")),
     by: {log.source}
-| fieldsAdd droppable_pct = (debug + trace + health) / total * 100
+| fieldsAdd droppable_pct = toDouble(debug + trace + health) / toDouble(total) * 100
 | filter droppable_pct > 30
 | sort droppable_pct desc
 ```
@@ -693,11 +695,11 @@ fetch logs
 **Example: Aggressive Volume Reduction**
 
 ```dql
-// Drop low-value logs (in pipeline drop processor)
+// Drop low-value logs (matching condition of a Drop record processor)
 loglevel == "DEBUG" OR
 loglevel == "TRACE" OR
-contains(content, "/health") OR
-contains(content, "/metrics") OR
+matchesValue(content, "*/health*") OR
+matchesValue(content, "*/metrics*") OR
 matchesPhrase(content, "/ping") OR
 (loglevel == "INFO" AND matchesPhrase(log.source, "chatty-service"))
 
@@ -801,9 +803,10 @@ fetch logs
 | fieldsAdd api_path = request_path
 
 // ✅ GOOD: Normalize to /api/users/{id}
-| fieldsAdd api_path = replacePattern(request_path, "/api/users/\\d+", "/api/users/{id}")
-| fieldsAdd api_path = replacePattern(api_path, "/api/orders/\\d+", "/api/orders/{id}")
-| fieldsAdd api_path = replacePattern(api_path, "/api/products/[a-f0-9-]+", "/api/products/{uuid}")
+// replacePattern takes a DPL pattern: literals in single quotes, INT for the numeric ID
+| fieldsAdd api_path = replacePattern(request_path, "'/api/users/' INT", replacement: "/api/users/{id}")
+| fieldsAdd api_path = replacePattern(api_path, "'/api/orders/' INT", replacement: "/api/orders/{id}")
+| fieldsAdd api_path = replacePattern(api_path, "'/api/products/' [a-f0-9-]+", replacement: "/api/products/{uuid}")
 // Result: 20 normalized paths instead of 100,000+ unique paths
 ```
 
@@ -950,8 +953,8 @@ fetch logs, from: now() - 1h
 ```
 
 **Solution:**
-1. Verify masking processor is in the pipeline
-2. Check masking processor order (should be first)
+1. Verify the masking DQL processor (`replacePattern`) is in the pipeline
+2. Check masking processor order (first within the Processing stage)
 3. Test DPL pattern matches the sensitive data format
 4. Ensure masking applies to correct fields
 
@@ -963,12 +966,7 @@ fetch logs, from: now() - 1h
 
 **Diagnosis:**
 
-```dql
-// List log-extracted metrics
-// Note: Use the Dynatrace UI (Observe > Metrics) to browse metrics
-// Or use timeseries to query a specific metric:
-// timeseries avg_value = avg(log.your_metric_name), from: now() - 24h
-```
+**List log-extracted metrics:** browse them in the Dynatrace UI (**Observe > Metrics**), or query a specific metric with `timeseries avg_value = avg(log.your_metric_name), from: now() - 24h`.
 
 **Solution:**
 1. Verify extraction processor configuration
@@ -981,14 +979,14 @@ fetch logs, from: now() - 1h
 <a id="parsing-validation"></a>
 ## Parsing Validation
 
-> 🔍 **Reference queries moved to OPMIG-99.** See [**OPMIG-99 § 11.1 Parsing Validation**](../../opmig/notebooks/-[OPMIG]-99-best-practice-summary.ipynb) for diagnostic queries that check parsing success rates, log-level distribution, and unparsed-source identification. Run them after configuring or modifying parse processors.
+> 🔍 **Reference queries moved to OPMIG-99.** See **OPMIG-99 § 11.1 Parsing Validation** for diagnostic queries that check parsing success rates, log-level distribution, and unparsed-source identification. Run them after configuring or modifying parse processors.
 
 ---
 
 <a id="volume-cost-validation"></a>
 ## Volume & Cost Validation
 
-> 📊 **Reference queries moved to OPMIG-99.** See [**OPMIG-99 § 11.2 Volume & Cost Validation**](../../opmig/notebooks/-[OPMIG]-99-best-practice-summary.ipynb) for queries that check daily log volume by bucket, drop-processor effectiveness, log-level distribution, and top-volume sources. Useful in the first week after cutover.
+> 📊 **Reference queries moved to OPMIG-99.** See **OPMIG-99 § 11.2 Volume & Cost Validation** for queries that check daily log volume by bucket, drop-processor effectiveness, log-level distribution, and top-volume sources. Useful in the first week after cutover.
 
 ---
 
@@ -998,12 +996,14 @@ Tips for optimizing OpenPipeline performance.
 
 ### Processor Ordering
 
-1. **Masking** - Always first (security)
+1. **Masking** - Always first within the Processing stage (security)
 2. **Drop** - Second (reduce volume early)
 3. **Technology Parsers** - Before custom parsing
 4. **Custom Parse** - Before fieldsAdd that uses parsed fields
 5. **fieldsAdd** - After parsing, for computed fields
 6. **fieldsRemove** - Last, to clean up temporary fields
+
+Bucket assignment and metric/event extraction are not part of this list — they are later stages whose order is fixed.
 
 ### Matching Condition Optimization
 
@@ -1222,10 +1222,6 @@ You've completed the OpenPipeline migration notebook series!
 - [DQL Reference](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language)
 - [OpenPipeline Limits](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — Concrete numeric limits
 - [Dynatrace Community](https://community.dynatrace.com/)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

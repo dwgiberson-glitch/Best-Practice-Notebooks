@@ -1,6 +1,6 @@
 # M2S-95 LAB: Terraform for Managed-to-SaaS Migration
 
-> **Series:** M2S — Managed to SaaS Migration | **Reference:** 95 — Terraform Migration LAB | **Created:** July 2026 | **Last Updated:** 07/24/2026
+> **Series:** M2S — Managed to SaaS Migration | **Reference:** 95 — Terraform Migration LAB | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 An appendix LAB for teams migrating Dynatrace Managed to SaaS with the Terraform provider instead of — or alongside — the SaaS Upgrade Assistant.
 
@@ -153,7 +153,7 @@ Two distinct categories of gap exist, and conflating them causes bad planning. S
 | Management zones | See the caveat below |
 | Automatically applied tags | Rule-based tagging |
 | Alerting profiles | |
-| Network zones | `dynatrace_network_zone`; recreate before ActiveGate assignment (M2S-04 §6) |
+| Network zones | `dynatrace_network_zone_v2` (Settings `builtin:networkzones.zones`); recreate before ActiveGate assignment (M2S-04 §6). The older `dynatrace_network_zone` resource is deprecated — if an export emits it, move it to `_v2` |
 | Calculated service metrics | May need rework — see section 6 |
 | Request attributes and naming rules | |
 | SLOs | Requires a classic API token |
@@ -482,7 +482,7 @@ Applying an auto-tag rule is not the same as that rule matching anything. This c
 smartscapeNodes "HOST"
 | fieldsAdd tags = getNodeField(id, "tags")
 | fieldsAdd hasOwner = isNotNull(tags[app.owner])
-| summarize tagged = countIf(hasOwner == true), total = count()
+| summarize {tagged = countIf(hasOwner == true), total = count()}
 ```
 
 > **Interpretation.** `tagged` well below `total` usually means the rule's conditions reference entity properties that differ on SaaS, or that it depends on manually applied tags — which section 3.3 lists as non-migrating. This query is the fastest way to find rules that migrated syntactically but stopped working semantically.

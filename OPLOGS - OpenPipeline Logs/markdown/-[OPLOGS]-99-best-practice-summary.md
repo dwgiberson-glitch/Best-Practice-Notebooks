@@ -1,6 +1,6 @@
 # OPLOGS-99: Best Practice Summary
 
-> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** OPLOGS — OpenPipeline Logs | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 Definitive best practice settings for OpenPipeline log processing. Each entry specifies the exact configuration — no hedging, no options.
 
@@ -28,7 +28,7 @@ Definitive best practice settings for OpenPipeline log processing. Each entry sp
 | Process data at ingestion, not query time | Configure parsing, enrichment, masking, and routing as OpenPipeline processors | Critical |
 | Processor order within the Processing stage | Place masking processors before any processor that copies or parses the sensitive field (e.g., mask `content` before a DQL `parse` that extracts from it); order within a stage is the order you configure — each processor's output is the next one's input | Critical |
 | First-match routing rule order | Most specific rules first, default catch-all last | Critical |
-| Drop health check logs at ingestion | Drop processor: `contains(content, "health") AND loglevel == "INFO"` | Recommended |
+| Drop health check logs at ingestion | Drop record processor: `matchesValue(content, "*health*") AND loglevel == "INFO"` — `contains()` is not enabled in OpenPipeline matchers | Recommended |
 | Drop DEBUG logs in production | Drop processor: `loglevel == "DEBUG"` — or, to keep extraction from DEBUG records, a **No storage assignment** processor in the Bucket assignment stage (there is no log-sampling processor) | Recommended |
 | Parse NONE-level logs | DQL processor with matcher `loglevel == "NONE"`: parse `[LEVEL]` from content and set `loglevel` only when `upper(parsed_level)` is a supported level (EMERGENCY, ALERT, CRITICAL, SEVERE, ERROR, FATAL, WARN, NOTICE, INFO, DEBUG, TRACE) — anything else leaves the record unchanged | Recommended |
 | Add computed environment attribute | `fieldsAdd environment = if(contains(k8s.namespace.name, "prod"), "production", else: "development")` | Recommended |

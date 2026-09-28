@@ -1,6 +1,6 @@
 # FAQ-12: Coming from Another Tool — How Partial Enablement Handicaps Your Dynatrace Coverage
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 12 — Coming from Another Tool: How Partial Enablement Handicaps Your Coverage | **Created:** July 2026 | **Last Updated:** 09/02/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 12 — Coming from Another Tool: How Partial Enablement Handicaps Your Coverage | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -42,7 +42,7 @@ This entry goes **down the list of items that migration customers most commonly 
 
 | The habit you arrive with | The item it leaves off | The handicap |
 |---------------------------|------------------------|--------------|
-| *"We hand-picked which apps got the APM agent"* | **Full-Stack mode** estate-wide on the paths that matter | No tracing, no service detection, no code-level visibility, no AppSec on the un-picked hosts — and Davis RCA degrades everywhere their dependencies reach |
+| *"We hand-picked which apps got the APM agent"* | **Full-Stack mode** estate-wide on the paths that matter | No tracing, no service detection, no code-level visibility, and only limited AppSec vulnerability detection on the un-picked hosts — and Davis RCA degrades everywhere their dependencies reach |
 | *"We disabled the agent on sensitive processes"* | **Deep monitoring** on those process groups | Those PGs vanish from service/code view — traces passing through them lose a hop, even on Full-Stack hosts |
 | *"Our old APM traced per-service, sampled"* | **End-to-end distributed tracing** | The *"which transaction caused this"* answer; cross-service causation; frontend-to-backend correlation |
 | *"Logs live in the log tool — always have"* | **Log ingestion into Dynatrace** | Log evidence never appears in problem context, can't become log-derived metrics, and Davis works with fewer facts |
@@ -50,11 +50,11 @@ This entry goes **down the list of items that migration customers most commonly 
 | *"RUM was a separate product we never bought"* | **Real User Monitoring** | No user-impact statement on any problem; priorities set by loudest host, not most-damaged users |
 | *"We have a separate uptime checker"* | **Synthetic** in the same platform | Availability signal never correlates with the traces/logs that explain it |
 | *"We never tagged; we encoded meaning in hostnames"* | **Tags, host groups, and metadata enrichment** | No ownership routing, no cost allocation, no IAM boundaries, no filtering — every downstream capability queries a naming convention |
-| *"Security has their own scanner"* | **Application Security (RVA/RAP)** | No runtime reachability signal — and it *cannot* be added later without the Full-Stack code modules already in place |
+| *"Security has their own scanner"* | **Application Security (RVA/RAP)** | AppSec still runs in every mode, but outside Full-Stack third-party and code-level vulnerability detection are *limited*, and the risk context that depends on Full-Stack topology is reduced (APPSEC-01 §3) |
 
 **The one-sentence version:** the old tool was a set of separate products, so partial adoption cost you nothing extra — Dynatrace is one correlated system, so partial adoption re-creates the separated tools you just paid to leave.
 
-> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring). **Derived:** the habit→handicap pairings and the one-sentence framing are engagement-level synthesis of the per-capability documentation; the docs describe each capability but not the migration-habit failure mode.</sub>
+> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring), [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — the *Support overview* table marks third-party and code-level vulnerability detection as limited in Infrastructure and Discovery modes, and Runtime Application Protection as available in all three. **Derived:** the habit→handicap pairings and the one-sentence framing are engagement-level synthesis of the per-capability documentation; the docs describe each capability but not the migration-habit failure mode.</sub>
 
 <a id="mode-ladder"></a>
 ## 2. The Monitoring-Mode Ladder
@@ -86,7 +86,7 @@ Three load-bearing details behind the checkmarks:
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Layer withheld | Direct loss | Cascading loss |
 |----------------|-------------|----------------|
-| Code modules / Full-Stack | No PurePath traces | No service detection -> no service Smartscape -> Davis RCA degrades to host-level -> no AppSec -> no RUM backend correlation |
+| Code modules / Full-Stack | No PurePath traces | No service detection -> no service Smartscape -> Davis RCA degrades to host-level -> limited AppSec detection -> no RUM backend correlation |
 | Logs | No log evidence | Davis has fewer signals; investigations end at "metric spiked" |
 | RUM | No user sessions | Problems cannot state user impact; no experience SLOs; no replay forensics |
 | Synthetic | No outside-in baseline | Outage detection depends on real users being present |
@@ -99,13 +99,13 @@ The capabilities are not parallel — they stack. The load-bearing chain:
 2. **Traces produce services.** Automatic service detection works on observed requests. No traces → no service entities, no service-level response time / failure rate / throughput.
 3. **Services complete the topology.** Smartscape's service layer — who calls whom — exists only where services exist. Below it, the map ends at processes.
 4. **Topology powers Davis.** Davis root-cause analysis walks the dependency graph to connect a symptom (slow checkout) to a cause (saturated database on another host). Without the service layer, correlated events collapse to per-host findings: *"CPU is high"* rather than "CPU is high **and here is the transaction chain it is breaking**"
-5. **Code modules also gate Application Security.** Runtime Vulnerability Analytics and Runtime Application Protection analyze loaded libraries and live request execution *inside* the code modules. Infrastructure-only estates cannot run them at all.
+5. **Code modules raise Application Security from limited to full.** Application Security runs in all three modes, but third-party and code-level vulnerability detection are *limited* outside Full-Stack, and Full-Stack topology is what supplies exposure and data-asset context for risk ranking. Runtime Application Protection is available in every mode.
 6. **RUM joins the user to all of it.** Frontend sessions link to backend traces (W3C trace context), which is what lets a problem say *"342 users affected."* No RUM → impact statements stop at the service boundary. No traces → RUM stops at the browser.
 7. **Logs are the evidence layer.** Metrics and traces tell you *where*; logs usually tell you *what exactly*. Davis correlates log anomalies into problems only for logs that are ingested.
 
 The practical consequence: **the marginal value of each layer is higher when the others are on.** Logs on a Full-Stack host land in trace context; the same logs on an infrastructure-only host are just text with a hostname. This is also why the previous tool never punished partial adoption the way Dynatrace's model rewards full adoption: in a modular stack the products were separate anyway, so leaving one off cost exactly that product. Here, leaving one off costs a slice of everything above it in the cascade.
 
-> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — *"end-to-end visibility into requests of all auto-detected server-side services"* ties detection to deep monitoring. **Derived:** the seven-step cascade is engagement-level synthesis of the documented per-capability prerequisites; Dynatrace docs state each dependency separately (injection→traces, traces→services, code-modules→AppSec, W3C→RUM correlation) but do not present the compounding chain in one place.</sub>
+> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — *"end-to-end visibility into requests of all auto-detected server-side services"* ties detection to deep monitoring. **Derived:** the seven-step cascade is engagement-level synthesis of the documented per-capability prerequisites; Dynatrace docs state each dependency separately (injection→traces, traces→services, code-modules→full AppSec detection, W3C→RUM correlation) but do not present the compounding chain in one place.</sub>
 
 <a id="impact-matrix"></a>
 ## 4. Going Down the List — Habit, Gap, Handicap
@@ -122,7 +122,7 @@ The old reflex was risk management against a third-party agent. Dynatrace's cont
 
 ### 4.3 End-to-end tracing (vs. "our old APM traced per-service, sampled")
 
-Per-service traces made cross-service incidents a correlation exercise between screens. PurePath's value is the *unsampled, cross-service* transaction — withhold the code modules (or decline OTel where modules can't go — FAQ-03) and you keep the old workflow: humans joining timestamps across dashboards. **Silently degraded:** MTTR on every multi-service incident, which in microservice estates is most of them.
+Per-service traces made cross-service incidents a correlation exercise between screens. PurePath's value is the *end-to-end, cross-service* transaction (subject to Adaptive Traffic Management at high volume) — withhold the code modules (or decline OTel where modules can't go — FAQ-03) and you keep the old workflow: humans joining timestamps across dashboards. **Silently degraded:** MTTR on every multi-service incident, which in microservice estates is most of them.
 
 ### 4.4 Logs in Dynatrace (vs. "logs live in the log tool — always have")
 
@@ -146,9 +146,9 @@ Naming-convention semantics don't survive contact with Kubernetes, autoscaling, 
 
 ### 4.9 Application Security (vs. "security has their own scanner")
 
-The scanner sees what *could* be vulnerable; RVA sees what is **loaded and reachable in running processes**, RAP blocks attacks in-flight — both ride the Full-Stack code modules. **The prerequisite trap:** an estate that stayed Infrastructure-only "for now" cannot switch AppSec on later without first re-basing coverage and restarting processes. Decide it *inside* the Full-Stack decision (§8), even if activation comes later.
+The scanner sees what *could* be vulnerable; RVA sees what is **loaded and reachable in running processes**, RAP blocks attacks in-flight. Application Security runs in every monitoring mode, but it **degrades** outside Full-Stack: third-party and code-level vulnerability detection are *limited*, and the risk context that comes from Full-Stack topology — public exposure, reachable data assets — is reduced, so the Dynatrace Security Score falls back to the CVSS base score rather than reflecting your environment (APPSEC-01 §3). Runtime Application Protection is available in all three modes. Decide AppSec depth *inside* the Full-Stack decision (§8), because a Full-Stack upgrade needs process restarts before the fuller detection applies.
 
-> <sub>**Sources:** [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — quoted deep-monitoring scope; [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes); [Application Security monitoring modes (DT docs)](https://docs.dynatrace.com/docs/secure/application-security). **Derived:** the habit framing and silent-degradation calls are synthesis over the documented per-capability prerequisites; mechanics defer to ALERT-02 / AIOPS-02</sub>
+> <sub>**Sources:** [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — quoted deep-monitoring scope; [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes); [Application Security monitoring modes (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — *Support overview*: third-party and code-level detection marked limited in Infrastructure and Discovery, Runtime Application Protection in all three; [OpenPipeline processing (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"Sampling might be applied to trace data before it's processed, according to Adaptive Traffic Management for distributed tracing."* **Derived:** the habit framing and silent-degradation calls are synthesis over the documented per-capability prerequisites; mechanics defer to ALERT-02 / AIOPS-02</sub>
 
 <a id="coverage-audit"></a>
 ## 5. Auditing Your Current Coverage with DQL
@@ -174,19 +174,21 @@ fetch logs, from:-24h
 | summarize hosts_reporting_logs = countDistinctExact(host.name), log_records = count()
 ```
 
-**Query 3 — RUM coverage.** Sessions and instrumented applications in the last 24 hours (zero rows = RUM is dark):
+**Query 3 — RUM coverage.** Real-user sessions and instrumented frontends in the last 24 hours (zero sessions = RUM is dark for real users). Filter on `dt.rum.user_type`, because synthetic monitors create sessions too — an unfiltered count can look healthy on an estate with no real-user RUM at all:
 
 ```dql
-// Coverage audit — RUM sessions and instrumented apps, last 24 h
+// Coverage audit — real-user RUM sessions and frontends, last 24 h.
+// Filter to real users: synthetic monitors also create user sessions.
 fetch user.sessions, from:-24h
-| summarize sessions = count(), apps = countDistinctExact(app.short_name)
+| filter dt.rum.user_type == "real_user"
+| summarize sessions = count(), frontends = countDistinctExact(frontend.name)
 ```
 
 For the **cost-side view of the same split**, the pre-aggregated billing series show consumption per mode — `dt.billing.full_stack_monitoring.usage`, `dt.billing.infrastructure_monitoring.usage`, and `dt.billing.foundation_and_discovery.usage` (worked queries in FINOPS-01 §5). A mismatch between what you *pay for* and what you *use* — Full-Stack hosts whose main process group has deep monitoring off — is the first thing to fix, and it costs nothing.
 
 Deep-monitoring exceptions themselves are configuration, not telemetry: review them under **Settings → Processes and containers → Process group monitoring** rather than DQL.
 
-> <sub>**Sources:** Queries 1–2 executed live on a SaaS tenant (07/08/2026 — 10 FULL_STACK hosts; 17 hosts shipping 17.5 M log records/24 h). Query 3 passed the DQL verifier; live execution was blocked by a missing `storage:user.sessions:read` scope on the validation token — verify in your tenant. The classic-vs-Smartscape `monitoringMode` observation is a live finding on one tenant — re-check as Smartscape on Grail evolves. Billing series validated in FINOPS-01 (05/19/2026).</sub>
+> <sub>**Sources:** Queries 1–2 executed live on a SaaS tenant (07/08/2026 — 10 FULL_STACK hosts; 17 hosts shipping 17.5 M log records/24 h). Query 3 executed live 09/28/2026: 0 real-user sessions over 24 h on the validation tenant, whose 32,926 sessions over 7 days were all `synthetic` — the case the filter exists for. An earlier version counted `app.short_name`, which is not a user-session field. The classic-vs-Smartscape `monitoringMode` observation is a live finding on one tenant — re-check as Smartscape on Grail evolves. Billing series validated in FINOPS-01 (05/19/2026).</sub>
 
 <a id="reduced-modes"></a>
 ## 6. When Reduced Modes Are the Right Call
@@ -195,7 +197,7 @@ Reduced coverage is a legitimate tool — the failure mode is applying it to the
 
 | Estate segment | Right mode | Why |
 |----------------|-----------|-----|
-| Business-critical applications | **Full-Stack** | The docs are unambiguous: deploy Full-Stack *"to monitor business-critical applications"* — this is where tracing, Davis RCA, and AppSec earn their keep |
+| Business-critical applications | **Full-Stack** | The docs are unambiguous: deploy Full-Stack *"to monitor business-critical applications"* — this is where tracing, Davis RCA, and full AppSec detection earn their keep |
 | Databases, queues, messaging | **Infrastructure** | These are *backing services* — you need saturation, disk, network, and process health; the transaction context comes from the app tier that calls them |
 | Long-tail / undifferentiated fleet | **Discovery** | *"Deployed across the remainder of your infrastructure for complete visibility, thanks to its relatively low cost"* — inventory plus upgrade signals |
 | Short-lived, frequently-restarting processes | **Deep monitoring off (per-PG rule)** | The docs call this out directly: such processes *"can be overly burdened by the injection overhead"* with *"limited data collection benefits"* — a per-PG exclusion, not a host-mode decision |
@@ -216,11 +218,11 @@ Two rules keep reduced modes honest:
 | *"We've always done it that way."* | That way was designed for the old tool's constraints — per-app agent pricing, modules that didn't correlate, alert rules as the only detection. The constraints didn't migrate; carrying the workarounds anyway means paying for the new platform and operating the old one. Price each habit (§4) and keep the ones that still buy something. |
 | *"Full-Stack everywhere is too expensive."* | Agreed — and it isn't the recommendation. The mode ladder (§2, §6) is the cost control the old tool never had: Full-Stack on revenue paths, Infrastructure on backing services, Discovery on the long tail. The expensive mistake is inverting it — Infra-only on the revenue path to save the delta one outage erases. FINOPS-01/03 put numbers on it. |
 | *"We're worried about injection overhead."* | Legitimate — and managed with per-PG rules rather than blanket abstinence: injection happens at process start, and the documented pathological case (short-lived processes) is precisely what the exclusion rules are for (§6). In community practice steady-state overhead on long-running services is low single-digit percent — measure on a canary host group instead of importing the old tool's folklore. |
-| *"Security won't allow code injection in production."* | The per-PG rules give explicit allow/deny control, and injection state changes only at restart — no hot patching. Worth stating plainly: the same code modules deliver runtime security (RVA/RAP); the no-injection policy is also a no-runtime-security policy (§4.9). |
+| *"Security won't allow code injection in production."* | The per-PG rules give explicit allow/deny control, and injection state changes only at restart — no hot patching. Worth stating plainly: the same code modules deliver the full depth of runtime vulnerability detection (RVA); a no-injection policy leaves AppSec running at its *limited* level (§4.9). |
 | *"Our logs stay in the log tool."* | Then split deliberately instead of by inertia: critical-path logs into Dynatrace for trace-context correlation and Davis signals; bulk/compliance logs wherever they are cheapest (§4.4). The S2D/SL2DT series plan exactly this. What doesn't work is expecting problem investigations to cite evidence the platform never sees. |
 | *"Our alert rules took years to tune — we're porting them."* | Port the intent, not the rules (§4.5). The years of tuning encoded the old tool's blind spots; Davis baselines + problem correlation replace most of that class. Keep genuine contract thresholds as static alerts — they coexist fine. |
 | *"RUM is a privacy problem."* | Masking levels, opt-in mode, and per-app privacy settings exist for exactly this (WEBRUM/MOBL). Running blind on user impact is also a risk posture — it just never gets a compliance review. |
-| *"We'll enable the rest after we've settled in."* | Some of "later" is cheap (logs, RUM: config + snippet). Some is not: AppSec needs the code modules already in place, and baselines/experience SLOs start their history at enablement. Every month of "settled in" is a month of history and runtime security you don't get back. |
+| *"We'll enable the rest after we've settled in."* | Some of "later" is cheap (logs, RUM: config + snippet). Some is not: full AppSec detection needs the code modules already in place, and baselines/experience SLOs start their history at enablement. Every month of "settled in" is a month of history and runtime security you don't get back. |
 
 *In community practice the steady-state overhead lands in the range described above; Dynatrace publishes no universal overhead number, so validate on a canary host group before quoting a figure.*
 
@@ -233,7 +235,7 @@ Two rules keep reduced modes honest:
 2. **Segment the estate** (§6): revenue-path applications → Full-Stack; backing services → Infrastructure; long tail → Discovery; short-lived PGs → per-PG exclusion.
 3. **Turn on logs and RUM for whatever is Full-Stack.** These are the two highest-leverage add-ons because they multiply the value of the tracing you already pay for (§3) — logs land in trace context, sessions link to backend traces.
 4. **Put synthetic on the endpoints that must not fail quietly** — login, checkout, the APIs your customers integrate against.
-5. **Treat AppSec as part of the Full-Stack decision, not a later add-on** — the prerequisite trap in §4 is the most common regret in retrospectives.
+5. **Treat AppSec depth as part of the Full-Stack decision, not a later add-on** — AppSec runs in every mode, but only Full-Stack gives it full detection and exposure/data-asset context (§4.9).
 6. **Re-audit quarterly.** Coverage decays: new hosts land in default modes, exclusion rules outlive the incidents that created them. ADOPT-06 turns this into a staged program with value gates; ADOPT-03 gives you the success metrics to prove the uplift.
 
 The honest framing for the customer conversation: **you can absolutely run Dynatrace the way you ran the old tool — it will work, and it will feel familiar. It will also answer roughly the old tool's questions at the new platform's price. The capabilities you're hesitant to enable are, collectively, the reason to have switched at all.**
@@ -247,7 +249,7 @@ The honest framing for the customer conversation: **you can absolutely run Dynat
 | 2 | Expecting traces from Infrastructure mode's injection | Infra-mode injection covers Java backing-services + runtime metrics only — no PurePaths | Tracing requires Full-Stack (or OTel — FAQ-03) |
 | 3 | Enabling Full-Stack but never restarting processes | Code modules attach at process start — coverage stays dark until restarts | Plan restarts into the enablement change window |
 | 4 | Auditing modes via `smartscapeNodes "HOST"` | `monitoringMode` resolves null there on current tenants | Use `fetch dt.entity.host` for this attribute (§5, verified 07/08/2026) |
-| 5 | Treating AppSec as independently switchable | RVA/RAP ride the Full-Stack code modules | Decide AppSec inside the mode decision, not after it |
+| 5 | Treating AppSec as independent of mode | AppSec runs in all modes, but outside Full-Stack detection is *limited* and exposure/data-asset context is missing | Decide AppSec depth inside the mode decision, not after it |
 | 6 | Discovery mode assumed to include process details | Discovery is inventory only — no process details, disk, network, or memory analysis | That's Infrastructure mode's tier (§2 matrix) |
 | 7 | "We'll add RUM when we need it" | Baselines, experience SLOs, and Davis user-impact history start at zero on enablement day | Enable before you need the history |
 | 8 | Porting the old tool's exclusion lists and alert rules verbatim | Inherited blind spots + the old alert storm, minus its years of tuning | Port the *intent*; re-derive exclusions per-PG (§4.2) and detection via Davis (§4.5) |

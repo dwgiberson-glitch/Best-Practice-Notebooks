@@ -183,7 +183,7 @@ PagerDuty's own integration guidance draws the same boundary — Events API v2 i
 
 **dedup_key (Events API v2):** each Events API payload carries an optional `dedup_key`. PagerDuty correlates subsequent `trigger`, `acknowledge`, and `resolve` events with the same `dedup_key` against the **same open incident**, so a Davis problem can drive the full lifecycle: trigger on `OPEN`, resolve on `CLOSED`, all referencing the same key. WFLOW-05 §6 already recommends `dynatrace-{problem_id}` — keep that pattern: it makes the Dynatrace problem ID the join key on both sides.
 
-> <sub>**PagerDuty docs:** [Services and integrations (PagerDuty Support)](https://support.pagerduty.com/main/docs/services-and-integrations) — *"Events API v2 is designed for machine-generated monitoring and event data...for human-generated events, tickets or incidents...using the REST API, which enables direct, streamlined creation of PagerDuty incidents"*; [Events API v2 overview (PagerDuty Developer)](https://developer.pagerduty.com/docs/events-api-v2-overview).</sub>
+> <sub>**PagerDuty docs:** [Services and integrations (PagerDuty Support)](https://support.pagerduty.com/main/docs/services-and-integrations) — *"Events API v2 is designed for machine-generated monitoring and event data...for human-generated events, tickets or incidents...using the REST API, which enables direct, streamlined creation of PagerDuty incidents"*; [Events API v2 overview (PagerDuty Developer)](https://docs.pagerduty.com/developer/events-api-v2-overview).</sub>
 
 ### 3.3 ServiceNow — OAuth Client vs Basic Auth
 
@@ -868,7 +868,7 @@ You've completed the WFLOW series. You now have the knowledge to:
 - [Slack chat.write scope (docs.slack.dev)](https://docs.slack.dev/reference/scopes/chat.write/)
 - [Slack chat.write.public scope (docs.slack.dev)](https://docs.slack.dev/reference/scopes/chat.write.public/)
 - [PagerDuty Services and integrations (PagerDuty Support)](https://support.pagerduty.com/main/docs/services-and-integrations)
-- [PagerDuty Events API v2 overview (PagerDuty Developer)](https://developer.pagerduty.com/docs/events-api-v2-overview)
+- [PagerDuty Events API v2 overview (PagerDuty Developer)](https://docs.pagerduty.com/developer/events-api-v2-overview)
 - [ServiceNow inbound REST API (ServiceNow Docs)](https://www.servicenow.com/docs/r/yokohama/api-reference/rest-api-explorer/c_RESTAPI.html)
 
 ---

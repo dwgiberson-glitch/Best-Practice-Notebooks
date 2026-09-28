@@ -1,6 +1,6 @@
 # OPMIG-99: Best Practice Summary
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 10 of 10 | **Created:** March 2026 | **Last Updated:** 07/20/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 10 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 Definitive best practice settings for migrating from classic logs to OpenPipeline. Each entry specifies the exact configuration.
 
@@ -26,7 +26,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
 | **Knowledge** | Completion of or familiarity with OPMIG-01 through OPMIG-09 |
 | **Purpose** | This notebook serves as a reference card — no active environment required |
 
@@ -48,14 +48,16 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Practice | Recommended Setting/Value | Priority |
 |----------|---------|----------|
 | One pipeline per use case | Name as `{source}-{purpose}` (e.g., `nginx-access-logs`) | Critical |
-| Max 30 pipelines per scope | Consolidate with conditional processors if approaching limit | Recommended |
-| Max 50 processors per pipeline | Split into multiple pipelines if exceeded | Recommended |
-| Max 10 DQL commands per processor | Break into multiple processors if exceeded | Recommended |
-| Processor order | Masking → Drop → Parse → Enrich → Transform | Critical |
+| Max 100 pipelines per scope | Consolidate with conditional processors if approaching limit | Recommended |
+| Max 1,000 processors per pipeline (100 in a base pipeline) | Split into multiple pipelines if exceeded | Recommended |
+| Max 10 DQL commands per processor (not on the limits page — verify) | Break into multiple processors if exceeded | Recommended |
+| Processor order (Processing stage) | Masking → Drop → Parse → Enrich → Transform; bucket assignment and extraction are later, fixed stages | Critical |
 | Name processors descriptively | `{action}-{target}` format (e.g., `mask-credit-cards`, `drop-debug-logs`) | Recommended |
 | Test every processor with sample data | Use OpenPipeline UI "Sample data" field before saving | Critical |
 | Configure default pipeline for unmatched data | Minimal processing, monitor volume — high counts = missing routing rules | Recommended |
 | Max 5 pipelines per record | After 5, extraction stops but record still persists | Recommended |
+
+> <sub>**Sources:** [OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — per-configuration-scope and per-pipeline tables; *"You can extract data on a single record in a maximum of five different pipelines"*.</sub>
 
 <a id="routing-rules"></a>
 ## 3. Routing Rules
@@ -64,7 +66,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 |----------|---------|----------|
 | Specific routes before general routes | First match wins — compliance routes at highest priority | Critical |
 | Max 100 routes per scope | Combine conditions with AND/OR to stay within limit | Recommended |
-| Max 10 conditions per route | Use broader patterns if exceeded | Recommended |
+| Max 10 conditions per route (not on the limits page — verify) | Use broader patterns if exceeded | Recommended |
 | Route by `log.source` for source-based routing | `log.source == "nginx"` for specific apps | Recommended |
 | Route by `k8s.namespace.name` for environments | `prod` → 35-day bucket, `staging` → 14-day, `dev` → 7-day | Recommended |
 | Do NOT use `dt.entity.*` in routing conditions | Entity fields added AFTER Processing stage — not available during routing | Critical |
@@ -80,8 +82,8 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | 5-tier bucket strategy (enterprise) | Add `compliance_logs` 365d (3-5%) and `security_logs` 180d (2-5%) | Critical |
 | Bucket naming | `<environment>_<purpose>_logs` — max 100 chars, alphanumeric + underscore | Recommended |
 | Drop DEBUG/TRACE before storage | Drop processor: `loglevel == "DEBUG" OR loglevel == "TRACE"` — 30-70% volume reduction | Critical |
-| Drop health check logs | `contains(content, "/health") OR contains(content, "/ready") OR contains(content, "/metrics")` — 5-20% additional reduction | Recommended |
-| Extract metrics then drop raw logs | 1M requests/day as logs = ~$140/mo; as metrics = ~$1/mo (99.3% savings) | Recommended |
+| Drop health check logs | `matchesValue(content, "*/health*") OR matchesValue(content, "*/ready*") OR matchesValue(content, "*/metrics*")` — 5-20% additional reduction (`contains()` is not enabled in matchers) | Recommended |
+| Extract metrics, then don't store the raw logs | Assign the raw logs **No storage assignment** — a Drop record processor runs before Metric extraction and would leave nothing to extract. 1M requests/day as logs = ~$140/mo; as metrics = ~$1/mo (99.3% savings) | Recommended |
 | Staging/dev short retention | Staging: 14 days (60% savings). Dev: 7 days (80% savings) | Recommended |
 | Review bucket strategy quarterly | Usage trends, retention validation, unused buckets, compliance audit | Recommended |
 
@@ -91,7 +93,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Practice | Recommended Setting/Value | Priority |
 |----------|---------|----------|
 | Use built-in Technology Parsers first | JSON parser for JSON logs, Apache parser for access logs, Syslog for RFC 3164/5424 | Recommended |
-| Apache/Nginx DPL pattern | `IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' TIMESTAMP(...):timestamp ']' SPACE '"' LD:method SPACE LD:request_path SPACE LD:protocol '"' SPACE INT:status_code SPACE INT:response_bytes` | Recommended |
+| Apache/Nginx DPL pattern | `IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' TIMESTAMP(...):log_time ']' SPACE '"' LD:method SPACE LD:request_path SPACE LD:protocol '"' SPACE INT:status_code SPACE INT:response_bytes` | Recommended |
 | Java/Log4j DPL pattern | `TIMESTAMP('yyyy-MM-dd HH:mm:ss,SSS'):log_timestamp SPACE '[' LD:thread ']' SPACE LD:level SPACE LD:logger SPACE '-' SPACE DATA:message` | Recommended |
 | Use alternatives for flexible extraction | `('user='\|'userId='\|'user_id=') LD:user_id` matches all variations | Recommended |
 | Grok-to-DPL conversion | `%{IP}` → `IPADDR`, `%{INT}` → `INT`, `%{WORD}` → `WORD`, `%{GREEDYDATA}` → `DATA` | Recommended |
@@ -111,14 +113,14 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Max 5-7 dimensions per metric | Never use `user_id`, `request_id`, `session_id`, `client_ip` as dimensions | Critical |
 | Keep cardinality below 10,000 series | Bucket high-cardinality fields (e.g., duration → fast/normal/slow) | Critical |
 | Normalize API paths in dimensions | `/api/users/12345` → `/api/users/{id}` | Recommended |
-| Max 10 metric extractions per pipeline | Max 5 event extractions, max 3 business event extractions | Recommended |
+| Max 10 metric extractions per pipeline (not on the limits page — verify) | Max 5 event extractions, max 3 business event extractions | Recommended |
 
 <a id="security-masking"></a>
 ## 7. Security & Masking
 
 | Practice | Recommended Setting/Value | Priority |
 |----------|---------|----------|
-| Masking processors FIRST in every pipeline | Sensitive data redacted before parsing, routing, storage | Critical |
+| Masking processors FIRST in the Processing stage | Sensitive data redacted before parsing, extraction and storage. Routing runs before any processor — keep PII out of routing conditions | Critical |
 | Credit cards | Built-in `CREDITCARD` matcher → `[CC_REDACTED]` | Critical |
 | CVV codes | `('cvv='\|'cvc=') [0-9]{3,4}` → `cvv=[REDACTED]` | Critical |
 | Email addresses | `[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+` → `[EMAIL_REDACTED]` (no built-in `EMAIL` matcher exists) | Critical |
@@ -131,7 +133,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Use descriptive placeholders | `[CC_REDACTED]`, `[EMAIL_REDACTED]`, `[PHI_REDACTED]` — enables audit counts by type | Recommended |
 | Chain all masking in single processor | Apply CC, CVV, email, IP, SSN, tokens in sequence — single pass | Recommended |
 | Validate masking weekly | `filter matchesPhrase(content, "4111") OR matchesPhrase(content, "@gmail.com")` must return 0 | Critical |
-| Handle masking failure as critical incident | Disable pipeline, identify exposure window, revoke access, contact support | Critical |
+| Handle masking failure as critical incident | Stop storing the exposed records, identify exposure window, restrict access via IAM, delete exposed records (Grail record deletion API) | Critical |
 
 <a id="compliance"></a>
 ## 8. Compliance
@@ -153,7 +155,7 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 | Post-migration validation checklist | All sources flowing, volumes match, no data loss, timestamps correct, routing correct, masking working, metrics generating | Critical |
 | Monitor pipeline volume hourly | `makeTimeseries count(), by:{dt.openpipeline.pipelines}, interval:1h` — drops = routing failures | Recommended |
 | Check log source health | `summarize last_seen = max(timestamp), by:{log.source}` — sources silent >30 min need investigation | Recommended |
-| Combine regex for performance | Single alternation `(p1\|p2\|p3)` instead of chained `replaceAll` — 50-80% faster | Recommended |
+| Combine DPL alternatives for performance | One `replacePattern` with `('a'\|'b'\|'c')` instead of chained `replacePattern` calls — 50-80% faster | Recommended |
 | Drop processors before parse processors | Reduces volume before expensive parsing — 60-90% reduction for verbose apps | Critical |
 | Never drop ERROR/FATAL in production | Safeguard: `loglevel == "DEBUG" AND NOT (loglevel == "ERROR" OR loglevel == "FATAL")` | Critical |
 | Test changes in staging first | Backup → deploy staging → validate → document → rollback plan → production | Critical |
@@ -163,10 +165,12 @@ Definitive best practice settings for migrating from classic logs to OpenPipelin
 
 | Practice | Recommended Setting/Value | Priority |
 |----------|---------|----------|
-| Max record size | 1 MB before processing, 16 MB after — exceeding = rejected/dropped | Critical |
-| Timestamp window | Logs: 24h past to 10min future. Spans: 2h past. Metrics: 1h past to 1min future | Critical |
-| Max fields per record | 1,000 fields, 10 levels JSON nesting, 32 KB per attribute value, 1,000 array elements | Recommended |
-| Rate limits | Log Ingest API: 500 req/min/token. OTLP: 1,000 req/min. Config API: 100 req/min | Recommended |
+| Max record size | Request payload max 10 MB per configuration scope; record max 16 MB after processing — exceeding = rejected/dropped | Critical |
+| Timestamp window | Logs: 24h past (72h from SaaS 1.348 — pre-release, staged tenant rollout planned from 09/22/2026; verify before relying on it). Metrics: 1h past. Future timestamps >10 min are **adjusted** to ingest time + 10 min, not dropped (spans excepted) | Critical |
+| Max fields per record | 1,000 fields, 10 levels JSON nesting, 1,000 array elements (not on the limits page — verify); 32 KB per log attribute | Recommended |
+| Rate limits | Log Ingest API: 500 req/min/token. OTLP: 1,000 req/min. Config API: 100 req/min (not on the limits page — verify) | Recommended |
+
+> <sub>**Sources:** [OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — *"If the timestamp is more than 10 minutes in the future, it's adjusted to the ingest server time plus 10 minutes."*; *"The request payload size maximum limit is 10 MB per configuration scope."*; [What's new in SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"The log ingestion pipeline now accepts log records with timestamps up to 72 hours in the past, extended from the previous 24-hour limit."*</sub>
 
 ---
 
@@ -262,9 +266,14 @@ fetch logs, from: now() - 24h
 
 ```dql
 // Volume by log level (should see mostly INFO/WARN/ERROR)
+// percentage = share of all logs in the window, computed against the overall total
 fetch logs, from: now() - 24h
 | summarize {log_count = count()}, by: {loglevel}
-| fieldsAdd percentage = round((toDouble(log_count) / 100), decimals: 1)
+| summarize {total = sum(log_count), rows = collectArray(record(loglevel = loglevel, log_count = log_count))}
+| expand rows
+| fieldsAdd loglevel = rows[loglevel], log_count = rows[log_count]
+| fieldsAdd percentage = round(toDouble(log_count) / toDouble(total) * 100, decimals: 1)
+| fields loglevel, log_count, percentage
 | sort log_count desc
 ```
 

@@ -1,6 +1,6 @@
 # S2S-01: Step 1 — Discover: Migration Scenarios and Inventory
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 1 of 9 | **Phase:** Plan | **Step:** Discover | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 1 of 9 | **Phase:** Plan | **Step:** Discover | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 The first step in any SaaS-to-SaaS migration is understanding *why* you are migrating between tenants, inventorying what you have, and confirming what migrates automatically versus what requires manual effort. This notebook guides you through discovery, scenario identification, and tool selection.
 
@@ -207,7 +207,9 @@ fetch dt.entity.service
 smartscapeNodes "FRONTEND"
 | filter frontend.type == "web"
 | summarize app_count = count()
-| append [smartscapeNodes "BROWSER_MONITOR" | summarize synthetic_count = count()]
+| append [smartscapeNodes "BROWSER_MONITOR" | summarize browser_monitor_count = count()]
+| append [smartscapeNodes "HTTP_MONITOR" | summarize http_monitor_count = count()]
+| append [smartscapeNodes "NETWORK_AVAILABILITY_MONITOR" | summarize network_monitor_count = count()]
 
 // Smartscape (preferred, verified 07/2026): dt.entity.application maps to the FRONTEND node,
 // filtered on frontend.type == "web" (mobile apps are the same node with frontend.type ==
@@ -222,6 +224,8 @@ smartscapeNodes "FRONTEND"
 // corrects an earlier note here that claimed no Smartscape equivalent existed. Unlike ActiveGate,
 // `fetch dt.entity.synthetic_test` does still work and remains a genuine fallback — it reads the
 // classic entity store, which can retain entities Smartscape (live topology) no longer lists.
+// Add the three monitor counts together for the "Synthetic Tests" row — browser monitors alone
+// undercount it.
 ```
 
 ### ActiveGate Inventory
@@ -321,21 +325,7 @@ Beyond entities, you need a count of configuration objects to estimate migration
 | OpenPipeline rules | OpenPipeline API | ___ | 1–10 |
 | Grail buckets | Bucket API | ___ | 1–10 |
 | Segments | Segment API | ___ | 1–20 |
-| K8s enrichment rules | Settings API: `builtin:kubernetes.metadata.enrichment` | ___ | 1–20 |
-
-```python
-// detected problem inventory — run on source tenant before migration
-// High active problem counts indicate noise that will carry to the target
-fetch dt.davis.problems, from:-30d
-| summarize
-    total = count(),
-    active = countIf(event.status == "ACTIVE"),
-    frequent = countIf(dt.davis.is_frequent_event == true),
-    duplicate = countIf(dt.davis.is_duplicate == true)
-| fieldsAdd triage_recommendation = if(active > 500,
-    then: "TRIAGE BEFORE MIGRATION — suppress frequent/duplicate events",
-    else: "Manageable — review active problems during parallel period")
-```
+| K8s enrichment rules | Settings API: `builtin:kubernetes.generic.metadata.enrichment` | ___ | 1–20 |
 
 <a id="davis-problem-triage"></a>
 
@@ -367,9 +357,23 @@ Migration is the best time to leave legacy behind. Stale configuration inflates 
 
 > **Lesson from real migrations:** One engagement discovered 366 maintenance windows in the source tenant — all with expired dates. Migrating them would have cluttered the target tenant with useless configuration. Triaging before export saved significant cleanup effort later.
 
+```python
+// detected problem inventory — run on source tenant before migration
+// High active problem counts indicate noise that will carry to the target
+fetch dt.davis.problems, from:-30d
+| summarize
+    total = count(),
+    active = countIf(event.status == "ACTIVE"),
+    frequent = countIf(dt.davis.is_frequent_event == true),
+    duplicate = countIf(dt.davis.is_duplicate == true)
+| fieldsAdd triage_recommendation = if(active > 500,
+    then: "TRIAGE BEFORE MIGRATION — suppress frequent/duplicate events",
+    else: "Manageable — review active problems during parallel period")
+```
+
 <a id="migration-tools-comparison"></a>
 
-## 5. Migration Tools Comparison
+## 6. Migration Tools Comparison
 
 | Tool | Best For | Strengths | Limitations |
 |------|---------|-----------|-------------|
@@ -409,7 +413,7 @@ terraform apply -target=dynatrace_iam_policy.example
 
 <a id="the-90-10-rule"></a>
 
-## 6. The 90/10 Rule
+## 7. The 90/10 Rule
 
 The 90/10 rule is the defining reality of SaaS-to-SaaS migration:
 
@@ -435,7 +439,7 @@ The 90/10 rule is the defining reality of SaaS-to-SaaS migration:
 | Cloud provider credentials | Secrets cannot be exported |
 | SSO/SAML configuration | Identity provider settings are tenant-specific |
 | Synthetic private locations | ActiveGate-bound, environment-specific |
-| Extensions 2.0 | Neither Monaco nor Terraform supports export — reinstall from Hub |
+| Extensions 2.0 | Monaco does not export extension installations; Terraform can install/activate (`dynatrace_hub_extension_active_version`) and configure (`dynatrace_hub_extension_v2_config`) Hub extensions — otherwise reinstall from Hub |
 
 <a id="step-completion-checklist"></a>
 

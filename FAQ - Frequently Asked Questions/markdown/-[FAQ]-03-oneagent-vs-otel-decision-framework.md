@@ -1,6 +1,6 @@
 # FAQ-03: OneAgent vs OpenTelemetry — A Decision Framework
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 03 — OneAgent vs OpenTelemetry — A Decision Framework | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 03 — OneAgent vs OpenTelemetry — A Decision Framework | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -10,11 +10,11 @@ Three related questions show up repeatedly. Teams already running OpenTelemetry 
 
 All three come down to a level-of-effort versus capability-gain trade-off, and all three deserve a frank answer. The answer is the same across every runtime Dynatrace supports — Java, Kotlin, Scala, Groovy, .NET, Node.js, Python, Go, PHP, Ruby — though a handful of runtimes have edge cases (covered in §7 and §14).
 
-**Short answer (effort-vs-conversion):** If an application is already emitting OpenTelemetry data and is not running on serverless, **the most cost-effective path is almost always to keep OTel for application instrumentation and add OneAgent alongside it for host, runtime, and infrastructure coverage** — not to convert. The two are complementary, not competing. A wholesale conversion is usually a *deletion* exercise, not a re-instrumentation exercise — and even then, the gain is rarely worth the disruption unless a specific Dynatrace capability is needed that OTel cannot provide on its own.
+**Short answer (effort-vs-conversion):** If an application is already emitting OpenTelemetry data and runs somewhere OneAgent can reach (long-lived hosts and containers, AWS Lambda through the Dynatrace Lambda layer, and the supported Azure Functions plans — §4), **the most cost-effective path is almost always to keep OTel for application instrumentation and add OneAgent alongside it for host, runtime, and infrastructure coverage** — not to convert. The two are complementary, not competing. A wholesale conversion is usually a *deletion* exercise, not a re-instrumentation exercise — and even then, the gain is rarely worth the disruption unless a specific Dynatrace capability is needed that OTel cannot provide on its own.
 
 **Short answer (is OneAgent required at all):** No, not strictly. OTel alone can fully instrument an application and ship to Dynatrace via OTLP — Davis AI works on that data, traces correlate via W3C `traceparent`, and metrics/logs land in Grail. **But OTel-only leaves real gaps** in host metrics, runtime internals (heap / GC / threads / event loop), Smartscape topology, code-level method tracing, and RUM-to-backend stitching. Whether those gaps matter depends on the workload — see §2 for the side-by-side capability table.
 
-**Short answer (greenfield — which one first?):** For a new deployment on a standard OneAgent-supported runtime (Java / .NET / Node.js / Python / PHP) running on long-lived hosts or containers, **install OneAgent first** — time-to-first-trace is measured in minutes, with zero code change, and Smartscape + Davis + framework auto-instrumentation work at full fidelity from day one. Layer OTel in later (or in parallel) when you need custom business spans or vendor-neutral telemetry; the two are designed to coexist (see §8). The exceptions where OTel comes first: **serverless** workloads (OneAgent can't run there), **Go or Ruby** application code (no OneAgent SDK exists), **async-fragmenting runtimes** like Scala effect systems (otel4s / zio-telemetry are technically required — see §7), and any **vendor-portability or multi-backend mandate** (OTel as source of truth, OneAgent as enrichment).
+**Short answer (greenfield — which one first?):** For a new deployment on a standard OneAgent-supported runtime (Java / .NET / Node.js / Python / PHP / Go) running on long-lived hosts or containers, **install OneAgent first** — time-to-first-trace is measured in minutes, with zero code change, and Smartscape + Davis + framework auto-instrumentation work at full fidelity from day one. Layer OTel in later (or in parallel) when you need custom business spans or vendor-neutral telemetry; the two are designed to coexist (see §8). The exceptions where OTel comes first: **serverless platforms OneAgent does not reach** (GCP Cloud Functions, and Azure Functions plans outside the supported list — §4), **Ruby** application code (OneAgent does not inject it), **async-fragmenting runtimes** like Scala effect systems (otel4s / zio-telemetry are technically required — see §7), and any **vendor-portability or multi-backend mandate** (OTel as source of truth, OneAgent as enrichment).
 
 This FAQ frames the trade-offs, the hidden costs, and the workload-specific edge cases — including **async-fragmenting runtimes** (effect systems, coroutines, async/await without explicit context propagation) where the choice has a clear technical answer rather than a preference.
 
@@ -64,11 +64,11 @@ Re-framed correctly, the question becomes: **"Given we already have OTel, do we 
 <a id="required"></a>
 ## 2. Is OneAgent Required at All?
 
-**Short answer: No, not strictly — but most non-serverless teams are still better off with both.**
+**Short answer: No, not strictly — but most teams on long-lived hosts and containers are still better off with both.**
 
-OpenTelemetry alone can fully instrument an application and ship to Dynatrace via OTLP. Traces correlate via W3C `traceparent`, metrics and logs land in Grail, and Davis AI operates on that data. For serverless workloads, async-fragmenting runtimes that lack agent-side context propagation, or a vendor-portability mandate, **OTel-only is the right answer** — OneAgent adds nothing critical, or in the case of serverless cannot run at all.
+OpenTelemetry alone can fully instrument an application and ship to Dynatrace via OTLP. Traces correlate via W3C `traceparent`, metrics and logs land in Grail, and Davis AI operates on that data. For serverless platforms OneAgent does not reach (GCP Cloud Functions, unsupported Azure Functions plans — §4), async-fragmenting runtimes that lack agent-side context propagation, or a vendor-portability mandate, **OTel-only is the right answer** — OneAgent adds nothing critical, or on those platforms cannot run at all.
 
-**Where OTel-only leaves real gaps** (and why most non-serverless teams add OneAgent anyway):
+**Where OTel-only leaves real gaps** (and why most teams on hosts and containers add OneAgent anyway):
 
 | Capability | OTel-only | Requires OneAgent |
 |------------|-----------|-------------------|
@@ -85,7 +85,7 @@ OpenTelemetry alone can fully instrument an application and ship to Dynatrace vi
 
 **Decision rule in three lines:**
 
-- **Serverless, multi-backend mandate, or async-fragmenting runtime without OTel hooks** → OTel only. OneAgent doesn't help, or can't run.
+- **Serverless platform OneAgent does not reach (§4), multi-backend mandate, or async-fragmenting runtime without OTel hooks** → OTel only. OneAgent doesn't help, or can't run.
 - **Standard workloads on long-lived hosts/containers, and Smartscape + Davis at full fidelity matters** → add OneAgent alongside OTel. The install is a deployment task — no code change — and the two coexist by design (see §8 for the Span Sensor vs OTLP patterns).
 - **Cost-constrained or instrumentation-fatigued, and OTel is working today** → stay OTel-only. No telemetry is missing — only some platform-level conveniences. Re-evaluate if and when those gaps cause real pain.
 
@@ -95,7 +95,7 @@ OpenTelemetry alone can fully instrument an application and ship to Dynatrace vi
 > - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel)</sub>
 > - <sub>[Ingest OpenTelemetry — getting started (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/getting-started)</sub>
 > - <sub>[Technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support)</sub>
-> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — *"not supported on serverless code modules .. Consider using OpenTelemetry instead"*</sub>
+> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — *"not supported on serverless code modules .. Consider using OpenTelemetry instead"* (a statement about the **SDK**, not about OneAgent itself — see §4)</sub>
 
 <a id="what-each-is"></a>
 ## 3. What Each Tool Actually Is
@@ -109,7 +109,7 @@ OpenTelemetry alone can fully instrument an application and ship to Dynatrace vi
 | .NET (C# / F# / VB) | Yes | Yes | Yes | Yes |
 | Node.js | Yes | Yes | Yes | Yes |
 | Python | Yes | Yes | Partial (verify version) | None |
-| Go | Partial — explicit imports | Yes | None | None |
+| Go | Partial — explicit imports | Yes | Yes (1.323+; web requests, database/sql) | None |
 | PHP | Yes | Yes | Yes | None |
 | Ruby | Yes | Yes | Host/process only | None |
 | C / C++ | None | Yes | None | Yes |
@@ -117,7 +117,7 @@ OpenTelemetry alone can fully instrument an application and ship to Dynatrace vi
 Why Path C (rip-and-replace) is impossible for Python, Go, PHP, Ruby: no OneAgent SDK exists for these runtimes.
 -->
 
-**OneAgent** is a Dynatrace-installed binary that runs on the host (or as a container sidecar/initcontainer in Kubernetes via the Dynatrace Operator). When the application runtime starts, OneAgent injects itself and auto-instruments a long list of frameworks and runtimes. It produces *PurePath* traces, host metrics, runtime metrics, log streams, process snapshots, and Smartscape topology — all without code changes. OneAgent's runtime injection covers Java/Kotlin/Scala/Groovy (JVM), .NET (CLR), Node.js (V8), PHP (Zend), and Python; for runtimes it does not inject (Go, Ruby), OneAgent still captures host/process telemetry around them.
+**OneAgent** is a Dynatrace-installed binary that runs on the host (or as a container sidecar/initcontainer in Kubernetes via the Dynatrace Operator). When the application runtime starts, OneAgent injects itself and auto-instruments a long list of frameworks and runtimes. It produces *PurePath* traces, host metrics, runtime metrics, log streams, process snapshots, and Smartscape topology — all without code changes. OneAgent's runtime injection covers Java/Kotlin/Scala/Groovy (JVM), .NET (CLR), Node.js (V8), PHP (Zend), Python, and Go (64-bit Go executables on x86 from OneAgent 1.323, and on AArch64 — incoming and outgoing web requests and `database/sql`); for Ruby, which it does not inject, OneAgent still captures host/process telemetry around it.
 
 **OpenTelemetry (OTel)** is a CNCF specification with a per-runtime delivery model. The two main consumption modes vary slightly per runtime:
 
@@ -143,7 +143,7 @@ These OTel modes are independent — you can use any combination, or none. "Alre
 
 **Recommended for production: Option 3 (dynamic attach).** Option 2 places the OTel agent on the critical path of JVM startup — a failed agent load can prevent the JVM from starting and take the workload offline. Option 3 attaches *after* the JVM is live, so a failed instrumentation phase leaves the application running unaffected. The trade-off is operational complexity: you need a sidecar, init container, or platform mechanism that performs the attach.
 
-This is the same model **Dynatrace OneAgent** uses by design — OneAgent's Java code module injects via JVMTI and platform-level hooks against an already-running JVM, never via boot-time `-javaagent`. It is also why OneAgent updates do not require application redeploys: a new agent version attaches at the next workload restart (or via runtime hot-attach in some configurations) without touching the application's start command.
+OneAgent takes a different route from all three: its Java code module is loaded as a native JVMTI agent **at process start, through automatic process injection** — no `-javaagent` flag in your start command, but also no attach to a JVM that is already running. That is why a new code-module version, or a change to OneAgent's connection settings, takes effect only when the monitored process restarts. It is also why OneAgent updates do not require application redeploys: the start command never references the agent, so a new agent version is picked up at the next workload restart without touching it.
 
 **Dynatrace OneAgent SDKs** (separate, narrow libraries — *not* OneAgent itself) exist per language for adding custom traces inside an application that is *already running under OneAgent*. With no OneAgent attached, the SDK calls become no-ops.
 
@@ -154,7 +154,7 @@ This is the same model **Dynatrace OneAgent** uses by design — OneAgent's Java
 | Node.js | [OneAgent-SDK-for-NodeJs](https://github.com/Dynatrace/OneAgent-SDK-for-NodeJs) | Active |
 | C / C++ | [OneAgent-SDK-for-C](https://github.com/Dynatrace/OneAgent-SDK-for-C) | Active |
 | Python | None (OneAgent injects automatically; OTel SDK recommended for custom spans) | — |
-| Go | None (OneAgent observes Go via host/process; OTel SDK recommended for custom spans) | — |
+| Go | None (OneAgent auto-injects Go executables; the Span Sensor captures OTel Go spans; OTel SDK recommended for custom spans) | — |
 | PHP | None (OneAgent's PHP code module covers auto-instrumentation; OTel SDK recommended for custom spans) | — |
 | Ruby | None (Dynatrace recommends the Ruby OpenTelemetry stack for code-level traces) | — |
 
@@ -166,6 +166,8 @@ This is the same model **Dynatrace OneAgent** uses by design — OneAgent's Java
 > - <sub>[OneAgent SDK for Node.js (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-NodeJs)</sub>
 > - <sub>[OneAgent SDK for C/C++ (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-C)</sub>
 > - <sub>[Java technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/java)</sub>
+> - <sub>[Go technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/go) — *"Automatic injection and instrumentation of 64-bit Go executables on x86"*; *"Incoming and outgoing web request monitoring"*</sub>
+> - <sub>[oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl) — connection-parameter changes require *"restart of all the applications monitored with deep code modules"*, because the code module is loaded when the process starts</sub>
 > - <sub>[VirtualMachine (Oracle JDK 21)](https://docs.oracle.com/en/java/javase/21/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html) — `loadAgent()` API for dynamic JVM attach</sub>
 > - <sub>[opentelemetry-java-instrumentation (OTel GitHub)](https://github.com/open-telemetry/opentelemetry-java-instrumentation)</sub>
 > - <sub>[@opentelemetry/auto-instrumentations-node (OTel JS contrib)](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/auto-instrumentations-node)</sub>
@@ -181,14 +183,15 @@ This is the same model **Dynatrace OneAgent** uses by design — OneAgent's Java
 |-----------|----------|---------------------------------------------|
 | **Owner** | Dynatrace (vendor) | CNCF / OpenTelemetry community (vendor-neutral) |
 | **Backend** | Locked to Dynatrace | Any OTLP-compatible backend (Dynatrace, Jaeger, Tempo, Datadog, New Relic, Splunk, Honeycomb, Grafana Cloud, etc.) |
-| **Runtime model** | Native binary on host or in container; injects into supported runtimes at startup | Per-runtime: javaagent, .NET injector, Node `--require`, Python `opentelemetry-instrument`, explicit Go imports, PECL extension, Ruby gem |
+| **Runtime model** | Native binary on host or in container; injects into supported runtimes (including Go) at startup | Per-runtime: javaagent, .NET injector, Node `--require`, Python `opentelemetry-instrument`, explicit Go imports, PECL extension, Ruby gem |
 | **Signals captured** | Traces, runtime metrics, host metrics, process metrics, log streams, topology, real-user, deep code-level (PurePath) | Traces, metrics, logs, baggage, context (signals you choose to emit) |
-| **Auto-instrumented frameworks** | Hundreds across JVM, .NET, Node.js, PHP, Python — Spring / ASP.NET / Express / Laravel / Django, plus all major SQL drivers, message brokers, web servers, app containers | Per-runtime list — Spring / ASP.NET / Express / Django / Gin / Rails / Laravel etc.; vary in completeness across runtimes (JVM and .NET have the broadest OTel coverage; Go requires explicit imports; Ruby and PHP are still maturing) |
+| **Auto-instrumented frameworks** | Hundreds across JVM, .NET, Node.js, PHP, Python, plus Go web requests and `database/sql` — Spring / ASP.NET / Express / Laravel / Django, plus all major SQL drivers, message brokers, web servers, app containers | Per-runtime list — Spring / ASP.NET / Express / Django / Gin / Rails / Laravel etc.; vary in completeness across runtimes (JVM and .NET have the broadest OTel coverage; Go requires explicit imports; Ruby and PHP are still maturing) |
 | **Host / runtime / process metrics** | Yes — included automatically | Only if you add the host-metrics or runtime-metrics receiver via an OTel Collector / node-exporter; not part of basic SDK |
 | **Smartscape / topology / dependency map** | Yes — automatic | Not provided by OTel; can be approximated from spans but no real-time topology graph |
 | **Davis AI / problem detection / RCA** | Yes — built into Dynatrace platform on OneAgent telemetry | Available when OTel data is ingested into Dynatrace; quality depends on attribute completeness |
-| **Serverless — AWS Lambda, GCP Cloud Functions** | Not supported (OneAgent SDK README + per-runtime guidance) | Fully supported across all runtimes |
-| **Serverless — Azure Functions** | **Plan- and runtime-dependent — not a blanket no.** OneAgent 1.343 (released 07/28/2026) adds Azure Functions support for **Python on the Flex Consumption Plan (Linux)** and for **Java and Node.js on Windows plans**, across multiple trigger types. Outside those plan/runtime combinations, still unsupported. Verify the OneAgent version actually deployed on the Function. | Fully supported across all runtimes |
+| **Serverless — AWS Lambda** | **Supported through the Dynatrace AWS Lambda layer** (the OneAgent Lambda extension): tracing for Python, Node.js, Java and .NET; Go is listed as log monitoring only, though OneAgent 1.345 adds monitoring of statically linked Go applications on Lambda. The **OneAgent SDK** is not supported on Lambda — use OTel for custom spans there | Fully supported across all runtimes |
+| **Serverless — GCP Cloud Functions** | Not supported | Fully supported across all runtimes |
+| **Serverless — Azure Functions** | **Plan- and runtime-dependent — not a blanket no.** OneAgent 1.343 (released 07/28/2026) adds Azure Functions support for **Python on the Flex Consumption Plan (Linux)** and for **Java and Node.js on Consumption, Premium and Dedicated plans for Windows**; OneAgent 1.345 adds Python triggers (Cosmos DB, Kafka, Queue storage, IoTHub); OneAgent 1.347 (pre-release, rollout planned from 09/22/2026) adds **Python on the Premium Plan for Linux**. Outside those combinations, still unsupported. Verify the OneAgent version actually deployed on the Function. | Fully supported across all runtimes |
 | **Update model** | Centrally managed by Dynatrace; no app redeploy | Application redeploy required for SDK; auto-instrumentation update requires process restart |
 | **Runtime version floor** | Per-runtime; e.g. JVM 8+, .NET Framework 4.5+ / .NET Core 2.1+ / .NET 5+, Node 20+, PHP 7.1+, Python 3.8+ — see Dynatrace supported-technologies matrix for current detail | Per-runtime; e.g. Java 8+, .NET 6+ (most current), Node 14+, Python 3.8+, Go 1.21+ (current OTel Go), PHP 8.0+, Ruby 3.0+ |
 | **Code change required** | None for auto-coverage | None for auto-instrumentation; explicit imports for custom spans/metrics |
@@ -197,20 +200,25 @@ This is the same model **Dynatrace OneAgent** uses by design — OneAgent's Java
 
 ### The serverless rule is no longer one rule
 
-"OneAgent does not run on serverless" was accurate as a single statement until OneAgent 1.343. It now has to be split by platform — and this matters more here than it would in a reference table, because §9's decision tree treats serverless as a first-question gate, and a wrong answer at a gate misroutes a reader for the life of the project.
+"OneAgent does not run on serverless" was never accurate for AWS Lambda, and since OneAgent 1.343 it is not accurate for Azure Functions either. It has to be split by platform — and this matters more here than it would in a reference table, because §9's decision tree treats serverless as a first-question gate, and a wrong answer at a gate misroutes a reader for the life of the project.
 
-- **AWS Lambda and GCP Cloud Functions** — unchanged. OTel is the answer, and the per-runtime OneAgent SDK READMEs direct serverless users there explicitly.
-- **Azure Functions** — now depends on the **hosting plan** and the **runtime**, not on "is it serverless". OneAgent 1.343 covers Python on the Flex Consumption Plan (Linux), and Java and Node.js on Windows plans. Any other plan tier or runtime remains OTel-only.
+- **AWS Lambda** — OneAgent reaches it through the **Dynatrace AWS Lambda layer**, which auto-instruments Python, Node.js, Java and .NET functions without code changes (Go: log monitoring, with statically linked Go monitoring added in OneAgent 1.345). What is *not* supported on Lambda is the **OneAgent SDK** — the per-runtime SDK READMEs send serverless users to OpenTelemetry for custom spans, and those OTel spans reach Dynatrace through OTel ingest alongside the layer's traces. That README statement is about the SDK, not the agent, and it is the source of the common misreading that Lambda is OTel-only.
+- **GCP Cloud Functions** — OTel is the answer.
+- **Azure Functions** — now depends on the **hosting plan** and the **runtime**, not on "is it serverless". OneAgent 1.343 covers Python on the Flex Consumption Plan (Linux), and Java and Node.js on the Consumption, Premium and Dedicated plans for Windows; 1.347 (pre-release) adds Python on the Premium Plan for Linux. Any other plan tier or runtime remains OTel-only.
+- **Breaking change in 1.343 — set `DT_WEBSITE_COMPUTE_MODE` where Azure does not.** From 1.343, OneAgent reads `DT_WEBSITE_COMPUTE_MODE` as a fallback when Azure's native `WEBSITE_COMPUTE_MODE` is absent — for example on the Flex Consumption plan or self-deployed Functions — and without it auto-instrumentation may not work. Set it on those Functions before relying on the agent.
 - **And still OTel until the agent is actually there.** On the covered Azure combinations, OTel remains the working answer until the OneAgent version deployed on the Function reaches 1.343. **Tenant version is not agent version** — verify the deployed agent rather than inferring support from your tenant's sprint.
 
-The same release also adds OneAgent auto-tracing for **Azure Service Bus, Event Hub, and Cosmos DB** (Java, Node.js, Python). That bears on this decision for a second-order reason: a Function is often thin, and the spans worth having are the messaging and database calls it makes. Where those dependencies were the reason a team reached for OTel, 1.343 changes the calculus even on Function runtimes it does not cover.
+The same release also adds OneAgent Azure SDK tracing for **Service Bus** (Java, Node.js, Python), **Event Hub** (Java, Node.js) and **Cosmos DB** (Python); OneAgent 1.347 (pre-release) adds the Cosmos DB client for Node.js. That bears on this decision for a second-order reason: a Function is often thin, and the spans worth having are the messaging and database calls it makes. Where those dependencies were the reason a team reached for OTel, 1.343 changes the calculus even on Function runtimes it does not cover.
 
 > <sub>**Sources:**</sub>
-> - <sub>[OneAgent 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-343) — released 07/28/2026; Azure Functions support for Python on the Flex Consumption Plan (Linux) and Java / Node.js on Windows plans, multiple trigger types; auto-tracing for Azure Service Bus, Event Hub, and Cosmos DB (Java, Node.js, Python)</sub>
+> - <sub>[OneAgent 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-343) — released 07/28/2026; Azure Functions for Python on the Flex Consumption Plan (Linux) and for Java and Node.js on Consumption, Premium, and Dedicated plans for Windows; Azure SDK tracing for Service Bus, Event Hub and Cosmos DB; breaking change: *"OneAgent reads DT_WEBSITE_COMPUTE_MODE as a fallback when Azure's native WEBSITE_COMPUTE_MODE is absent. Without this fallback variable set, auto-instrumentation may not work in affected setups."*</sub>
+> - <sub>[OneAgent 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-345) — *"OneAgent now supports monitoring of statically linked Go applications on AWS Lambda."*; new Python Azure Function triggers (Cosmos DB, Kafka, Queue storage, IoTHub)</sub>
+> - <sub>[OneAgent 1.347 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-347) — pre-release, rollout planned from 09/22/2026; *"Extended instrumentation for Azure Function"* for Premium Plan for Linux for Python</sub>
+> - <sub>[AWS Lambda integration (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-into-aws/aws-lambda-integration) — *"using auto-instrumentation without code changes"*; *"The OneAgent AWS Lambda extension collects logs directly from Lambda functions"*; per-runtime table lists Python, Node.js, Java and .NET with Lambda layer support and Go as log monitoring only</sub>
 > - <sub>[OpenTelemetry Java SDK (OpenTelemetry GitHub)](https://github.com/open-telemetry/opentelemetry-java) — monthly minor releases; Java 8+ floor; current stable 1.62.0</sub>
 > - <sub>[OpenTelemetry main site (opentelemetry.io)](https://opentelemetry.io/)</sub>
 > - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel)</sub>
-> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — serverless-not-supported; the basis for the AWS Lambda / GCP Cloud Functions row</sub>
+> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — *"The OneAgent SDK is not supported on serverless code modules, including those for AWS Lambda."* — the SDK, not the agent</sub>
 > - <sub>**Derived:** the "verify the deployed agent, not the tenant sprint" qualifier follows from agent fleets upgrading independently of tenant version</sub>
 
 <a id="convert-meaning"></a>
@@ -221,7 +229,7 @@ When customers say "convert from OTel to OneAgent", they often imagine a 1:1 re-
 **For workloads where OneAgent's automatic coverage is sufficient** (the common case — REST/gRPC services on Spring, ASP.NET Core, Express, Django, Rails, plain thread pools or default async runtime), "converting" looks like this:
 
 1. **Install OneAgent** on the host or via the Dynatrace Operator on Kubernetes. Restart the processes. Done — instrumentation is live.
-2. **Optionally remove the OTel auto-instrumentation** (the `-javaagent:`, the .NET injector, the Node `--require`, the Python `opentelemetry-instrument`, the explicit Go middleware imports). This step is *deletion*, not authoring.
+2. **Optionally remove the OTel auto-instrumentation** (the `-javaagent:`, the .NET injector, the Node `--require`, the Python `opentelemetry-instrument`, the explicit Go middleware imports — OneAgent auto-injects Go web requests and `database/sql`). This step is *deletion*, not authoring.
 3. **Decide what to do with custom OTel spans/metrics/logs** in code:
    - **Easiest path:** leave them in place — Dynatrace ingests OTel data via OTLP, and OneAgent's *OpenTelemetry Span Sensor* (where supported) stitches them into the same trace as OneAgent's auto-instrumented spans. (Caveat: do not enable both Span Sensor and OTLP export simultaneously, or you will get duplicate spans.)
    - **Replacement path:** rewrite each `Tracer` / `Meter` / `Logger` call against the OneAgent SDK for your runtime — *if one exists* (Java, .NET, Node.js, C/C++ only). For Python, Go, PHP, and Ruby, no OneAgent SDK exists, so this path is not available; OTel is the supported way to emit custom application telemetry. And even where the OneAgent SDK exists, it is intentionally narrow (incoming/outgoing remote calls, custom services, web requests, messaging, SQL, custom request attributes) and **does not cover metrics or logs at all** — replacing OTel with the OneAgent SDK necessarily *loses* the metrics/logs surface unless you separately ingest them via Dynatrace metrics ingest APIs.
@@ -243,7 +251,7 @@ Coverage is the single biggest factor in whether *adding* OneAgent gets you what
 | **.NET** (C#, F#, VB.NET — CLR + .NET 6 / 7 / 8+) | OneAgent: ASP.NET Framework, ASP.NET Core (Kestrel + IIS), WCF, gRPC, HttpClient, named-pipe / TCP / MSMQ services. OTel: ASP.NET Core, HttpClient, gRPC, SignalR via `OpenTelemetry.Instrumentation.*` packages | Both: ADO.NET (SQL Server, Oracle, MySQL, Postgres, SQLite), Entity Framework Core, RabbitMQ, Azure Service Bus, Redis (StackExchange.Redis; **ServiceStack.Redis** added in OneAgent 1.343 — verify the agent version deployed), MongoDB | OneAgent auto-instruments classical ASP.NET Framework; OTel coverage of ASP.NET Framework is narrower (mostly ASP.NET Core onwards) |
 | **Node.js** (JavaScript / TypeScript — V8) | OneAgent: Express, Koa, Hapi, Fastify (newer), NestJS, native HTTP/HTTPS, gRPC. OTel: same list via `@opentelemetry/auto-instrumentations-node` (Express, Koa, Hapi, Fastify, Restify, Connect, GraphQL, gRPC, Apollo) | Both: pg, mysql / mysql2, mongodb, redis, ioredis, kafkajs, amqplib, aws-sdk, elasticsearch | OneAgent and OTel both rely on patching `require()` — module versions outside the supported range are skipped silently |
 | **Python** (CPython — async-aware) | OneAgent: Django, Flask, FastAPI (recent versions), Tornado, Starlette, ASGI, gunicorn, uWSGI. OTel: similar list via `opentelemetry-instrumentation-django` / `flask` / `fastapi` / `aiohttp` / `tornado` / `pyramid` etc. | Both: psycopg / psycopg2 / asyncpg, PyMySQL / mysqlclient / mysql-connector, MongoDB (pymongo), Redis (redis-py), Kafka (kafka-python / confluent-kafka), Celery, SQLAlchemy | OneAgent's Python module is more conservative on async frameworks; OTel covers asyncio-native coverage more aggressively |
-| **Go** (compiled — no runtime injection) | OneAgent: observes Go binaries via host/process telemetry; **does not auto-instrument Go application code**. OTel: explicit imports — `otelhttp` (net/http), `otelgin`, `otelmux`, `otelchi`, `otelfiber`, `otelgrpc`, `otelecho` | OneAgent: none for Go libraries. OTel: `otelsql` (database/sql wrapper), `otelpgx`, `otelgorm`, `otelmongo`, `otelredis`, `otelkafka`, `otelsarama` | **Go is OTel-first by design** — no `-javaagent`-equivalent and no Go OneAgent SDK. OneAgent still adds value via host/process/Smartscape, but application spans must come from OTel |
+| **Go** (compiled — OneAgent auto-injects 64-bit executables, 1.323+) | OneAgent: incoming and outgoing web requests, custom services, and Go runtime metrics, with no code change; the Span Sensor captures OTel Go spans. OTel: explicit imports — `otelhttp` (net/http), `otelgin`, `otelmux`, `otelchi`, `otelfiber`, `otelgrpc`, `otelecho` | OneAgent: `database/sql` service tracing. OTel: `otelsql` (database/sql wrapper), `otelpgx`, `otelgorm`, `otelmongo`, `otelredis`, `otelkafka`, `otelsarama` | OneAgent covers the web and `database/sql` layers; libraries beyond those (gRPC, message clients, most ORMs) need OTel. There is no Go OneAgent SDK, so custom spans come from OTel — captured by the Span Sensor or sent over OTLP. See the Go known-limitations page before relying on injection |
 | **PHP** (Zend Engine 7 / 8) | OneAgent: Apache mod_php / php-fpm, Laravel, Symfony, CodeIgniter, WordPress (with the PHP code module). OTel: `open-telemetry/opentelemetry-auto-instrumentation` Composer packages — Laravel, Symfony, Slim, WordPress, CakePHP | Both: PDO, mysqli, mongodb, Redis, Memcached. OTel additionally: Guzzle HTTP client | OneAgent's PHP coverage is mature; OTel PHP auto-instrumentation is newer and library-by-library |
 | **Ruby** (MRI, JRuby) | OneAgent: limited Ruby support — primarily host/process telemetry. OTel: `opentelemetry-instrumentation-rails`, `sinatra`, `rack`, `grape` | Both: ActiveRecord, mysql2, pg, redis, mongo. OTel: also `opentelemetry-instrumentation-net_http`, `faraday` | **Ruby is OTel-first** — Dynatrace's recommended path for code-level Ruby tracing is OpenTelemetry, with OneAgent supplying host/process/Smartscape |
 
@@ -251,12 +259,13 @@ Coverage is the single biggest factor in whether *adding* OneAgent gets you what
 
 - **Overlap zone** (most teams gain immediate value from OneAgent) — Java, .NET, Node.js, Python, PHP web stacks: standard frameworks + standard SQL drivers + standard message brokers. OneAgent + OTel duplicates effort here, which is why the §8 Span Sensor / OTLP coexistence pattern exists.
 - **OneAgent-only coverage** — Smartscape topology, RUM-to-backend stitching, on-demand PurePath capture, host/runtime metrics without a Collector. These are platform constructs, not signals OTel emits.
-- **OTel-only coverage** — Go application code, Ruby application code, async-fragmenting runtimes (effect systems, certain coroutine layouts — see §7), most serverless platforms.
+- **OTel-only coverage** — Ruby application code, Go libraries beyond web requests and `database/sql`, async-fragmenting runtimes (effect systems, certain coroutine layouts — see §7), GCP Cloud Functions and unsupported Azure Functions plans.
 - **Coverage gaps in both** — exotic frameworks (http4s, Tapir, niche message brokers, custom RPC layers). These need either a community OTel instrumentation library, manual instrumentation, or both.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Java technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/java) — OneAgent JVM framework coverage (Spring, Servlet/JAX-RS, Akka HTTP 10.1+, Play 2.6+, Tomcat/Jetty/WebLogic/WebSphere/JBoss, gRPC)</sub>
 > - <sub>[Technology support matrix (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support)</sub>
+> - <sub>[Go technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/go) — *"Automatic injection and instrumentation of 64-bit Go executables on x86"*; *"Incoming and outgoing web request monitoring"*</sub>
 > - <sub>[supported-libraries (opentelemetry-java-instrumentation)](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/docs/supported-libraries.md) — kotlinx.coroutines 1.0+, Akka HTTP 10.0+, Akka Actors 2.3+, Finatra 2.9+, Scala ForkJoinPool 2.8+</sub>
 > - <sub>[@opentelemetry/auto-instrumentations-node (OTel JS contrib)](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/auto-instrumentations-node)</sub>
 > - <sub>[opentelemetry-python-contrib (OTel GitHub)](https://github.com/open-telemetry/opentelemetry-python-contrib)</sub>
@@ -278,7 +287,7 @@ Coverage is the single biggest factor in whether *adding* OneAgent gets you what
 | .NET (async/await) | AsyncLocal<T> | Yes | Yes |
 | Node.js | AsyncLocalStorage / async_hooks | Yes | Yes |
 | Python (asyncio) | contextvars.ContextVar | Yes | Yes |
-| Go | context.Context (function arg) | N/A — no Go injection | Yes |
+| Go | context.Context (function arg) | Injected — verify async propagation | Yes |
 | PHP | request-scoped globals | Yes | Yes |
 | Ruby | fiber-local state | N/A — no Ruby app injection | Yes |
 
@@ -302,7 +311,7 @@ Fragmenting cells are where tracing breaks unless you switch to a runtime-aware 
 | Node.js | Single-threaded event loop with callback / Promise chains | `AsyncLocalStorage` (built on `async_hooks`) | Yes — OneAgent's Node module hooks `async_hooks` | Yes — `@opentelemetry/context-async-hooks` |
 | Python (asyncio) | Cooperative coroutines on an event loop | `contextvars.ContextVar` | Yes (recent Python code module) | Yes — `opentelemetry-api` uses `contextvars` |
 | Python (greenlet / gevent / eventlet) | Cooperative greenlets monkey-patching the stdlib | Library-specific | Mixed | Mixed — OTel has per-library shims |
-| Go | Goroutines with explicit `context.Context` plumbing | `context.Context` (passed as a function argument by convention) | N/A (OneAgent does not inject Go) | Yes — every OTel Go library takes a `context.Context` |
+| Go | Goroutines with explicit `context.Context` plumbing | `context.Context` (passed as a function argument by convention) | OneAgent injects Go (web requests, `database/sql`); verify propagation across your goroutine layout | Yes — every OTel Go library takes a `context.Context` |
 | PHP | Synchronous request-per-process model (mostly) | Request-scoped globals | Yes — OneAgent's PHP module covers it | Yes — OTel PHP covers it |
 | Ruby | OS threads + (in newer Rubies) fibers; `Async` gem and ractors are evolving | Fiber-local state | N/A in code (Dynatrace recommends OTel for Ruby app code) | Yes — `OpenTelemetry::Context` |
 
@@ -324,9 +333,10 @@ Fragmenting cells are where tracing breaks unless you switch to a runtime-aware 
 | Scala — ZIO + zio-http / sttp on ZIO | **zio-telemetry (OTel)** — OneAgent fragments; SDK has no `FiberRef` model | OneAgent for host/runtime |
 | Scala — Cats Effect + http4s + fs2 | **otel4s (OTel)** — OneAgent fragments; SDK has no `IOLocal` model | OneAgent for host/runtime |
 | Mixed Scala estate (some Akka, some ZIO) | Per-service: OneAgent for Akka/Play, OTel for effect systems | OneAgent everywhere |
-| Go | **OTel only** at app level — no Go OneAgent SDK exists | OneAgent for host/process/Smartscape |
+| Go | OneAgent auto-injection for web requests and `database/sql`; **OTel** for other libraries and custom spans (no Go OneAgent SDK) | OneAgent |
 | Ruby | **OTel only** at app level — Dynatrace's documented recommendation | OneAgent for host/process |
-| Serverless any runtime | **OTel only** — OneAgent does not run on Lambda / Functions / Cloud Functions | — |
+| AWS Lambda | Dynatrace Lambda layer (Python, Node.js, Java, .NET); **OTel** for custom spans — the OneAgent SDK is not supported there | — |
+| GCP Cloud Functions, unsupported Azure Functions plans | **OTel only** | — |
 
 **The principle:** if the runtime has an async model that fragments thread-local storage (effect systems, certain coroutine layouts, or any runtime where context is fiber-scoped or scope-of-task), use the OTel library that targets that runtime's context primitive. The OneAgent SDK has a thread-local-style context model in every language where it exists, and will fragment in the same way unless the agent itself has been updated to hook the runtime's async primitives.
 
@@ -365,12 +375,12 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 1. **Span Sensor only** — OTel API calls in code, no OTLP exporter configured. OneAgent picks them up locally, ships them inside its native channel.
 2. **OTLP only** — Span Sensor disabled, OTel exporter configured to send to a Dynatrace OTLP endpoint (or to an OTel Collector forwarding to Dynatrace). OneAgent traces and OTel traces correlate via standard W3C `traceparent` propagation.
 
-**Either pattern produces a single, correlated trace in Dynatrace.** Customers regularly run both OneAgent and OTel in the same process precisely because the platform was built to merge them. For runtimes where OneAgent does not inject (Go, Ruby) or for serverless workloads, Pattern 2 (OTLP) is the only option.
+**Either pattern produces a single, correlated trace in Dynatrace.** Customers regularly run both OneAgent and OTel in the same process precisely because the platform was built to merge them. For runtimes without Span Sensor support (Python, Ruby), for platforms OneAgent does not reach (GCP Cloud Functions, unsupported Azure Functions plans), and for any process without OneAgent, Pattern 2 (OTLP) is the only option.
 
-**Span Sensor runtime support:** the Dynatrace coexistence docs document Span Sensor support for **Java, Go, Node.js, PHP, and .NET** code modules.
+**Span Sensor runtime support:** the Dynatrace coexistence docs document Span Sensor support for **Java, Go, Node.js, PHP, and .NET** code modules — so Go is a Span Sensor runtime, not an OTLP-only one.
 
 > <sub>**Sources:**</sub>
-> - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel) — Span Sensor mechanism, *"woven together .. single trace"*, duplicate-spans warning, supported on Java/Go/Node.js/PHP/.NET</sub>
+> - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel) — Span Sensor mechanism, *"woven together .. single trace"*, duplicate-spans warning, *"OpenTelemetry span data can be captured for Java, Go, Node.js, PHP, and .NET"*</sub>
 > - <sub>[Extend Dynatrace with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry) — *"adopting the open standards of OpenTelemetry where openness matters most"*</sub>
 > - <sub>[Ingest OpenTelemetry — getting started (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/getting-started) — OTLP endpoints, Collector, Istio/Envoy paths</sub>
 > - <sub>[W3C Trace Context (opentelemetry-specification)](https://github.com/open-telemetry/opentelemetry-specification) — `traceparent` propagation</sub>
@@ -383,35 +393,38 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Question | Yes path | No path |
 |----------|----------|---------|
-| Is the service on AWS Lambda or GCP Cloud Functions? | OTel only — OneAgent does not run there | Continue |
+| Is the service on GCP Cloud Functions? | OTel only — OneAgent does not run there | Continue |
+| Is it an AWS Lambda function? | Dynatrace Lambda layer for Python / Node.js / Java / .NET; OTel for custom spans (OneAgent SDK not supported on Lambda) | Continue |
 | Is it an Azure Function? | Check plan + runtime: Python on Flex Consumption (Linux) or Java/Node.js on Windows plans are covered from OneAgent 1.343; anything else is OTel only | Continue |
 | Is the runtime async-fragmenting (effect systems / coroutines without OTel hooks / runtime where thread-local doesn't propagate)? | OTel via runtime-aware library + OneAgent for host/runtime | Continue |
 | Do you need vendor-neutral instrumentation (multi-backend, exit ramp)? | OTel as the source of truth + OneAgent as enrichment | Continue |
-| Is the runtime Go or Ruby (no OneAgent SDK; OneAgent doesn't inject application code)? | OTel for app spans + OneAgent for host/process/Smartscape | Continue |
+| Is the runtime Ruby (OneAgent doesn't inject application code)? | OTel for app spans + OneAgent for host/process/Smartscape | Continue |
+| Is the runtime Go? | OneAgent auto-injection (web requests, database/sql) + OTel for other libraries and custom spans (no Go OneAgent SDK) | Continue |
 | Are you on Spring / ASP.NET Core / Express / Django / Rails / Laravel / standard web stacks? | OneAgent covers it automatically — keep OTel only for custom business spans | Continue |
 | Do you have working OTel instrumentation today? | Keep it. Add OneAgent alongside. Do not convert. | Install whichever is easier; OneAgent has lower code-change cost |
 -->
 
 **Plain-language flow:**
 
-1. **AWS Lambda or GCP Cloud Functions?** → OTel only. OneAgent does not run there, and the per-runtime OneAgent SDK READMEs explicitly direct serverless users to OpenTelemetry.
-2. **Azure Functions?** → **Ask two more questions, not one.** As of **OneAgent 1.343 (released 07/28/2026)** Azure Functions is no longer a blanket no: **Python on the Flex Consumption Plan (Linux)** and **Java and Node.js on Windows plans** are supported, across multiple trigger types. So the gate is *plan* and *runtime*, not "is it serverless."
+1. **AWS Lambda or GCP Cloud Functions?** → Split them. **GCP Cloud Functions:** OTel only. **AWS Lambda:** the Dynatrace Lambda layer auto-instruments Python, Node.js, Java and .NET functions; use OTel for custom spans, because the *OneAgent SDK* — not OneAgent — is unsupported on Lambda (the per-runtime SDK READMEs direct serverless users to OpenTelemetry for that reason). Go on Lambda is log monitoring, with statically linked Go monitoring added in OneAgent 1.345.
+2. **Azure Functions?** → **Ask two more questions, not one.** As of **OneAgent 1.343 (released 07/28/2026)** Azure Functions is no longer a blanket no: **Python on the Flex Consumption Plan (Linux)** and **Java and Node.js on Consumption, Premium and Dedicated plans for Windows** are supported, across multiple trigger types — and 1.347 (pre-release) adds **Python on the Premium Plan for Linux**. So the gate is *plan* and *runtime*, not "is it serverless."
    - Outside those combinations → OTel, as before.
-   - Inside them → OneAgent is an option, **once the OneAgent version deployed on the Function actually reaches 1.343.** Tenant version is not agent version; verify the deployed agent. Until it does, OTel remains the working path.
-   - Either way, note that 1.343 also adds OneAgent auto-tracing for **Azure Service Bus, Event Hub, and Cosmos DB** (Java, Node.js, Python). If the reason you wanted tracing was the Function's *dependencies* rather than the Function itself, that may be the more consequential half of the release for you.
-3. **Async-fragmenting runtime?** (effect systems, coroutines without agent hooks, async without explicit context propagation) → OTel via the runtime-aware library — *otel4s* / *zio-telemetry* (Scala effect systems), `kotlinx.coroutines` OTel instrumentation (Kotlin), `contextvars` (Python asyncio), `AsyncLocal` (.NET — handled natively), `AsyncLocalStorage` (Node.js — handled natively), `context.Context` (Go — handled natively). Add OneAgent for host/runtime signals if the workload runs on long-lived hosts or containers.
+   - Inside them → OneAgent is an option, **once the OneAgent version deployed on the Function actually reaches 1.343.** Tenant version is not agent version; verify the deployed agent. Until it does, OTel remains the working path. Where Azure does not set `WEBSITE_COMPUTE_MODE` (Flex Consumption, self-deployed Functions), set `DT_WEBSITE_COMPUTE_MODE`, or auto-instrumentation may not work (§4).
+   - Either way, note that 1.343 also adds OneAgent Azure SDK tracing for **Service Bus** (Java, Node.js, Python), **Event Hub** (Java, Node.js) and **Cosmos DB** (Python). If the reason you wanted tracing was the Function's *dependencies* rather than the Function itself, that may be the more consequential half of the release for you.
+3. **Async-fragmenting runtime?** (effect systems, coroutines without agent hooks, async without explicit context propagation) → OTel via the runtime-aware library — *otel4s* / *zio-telemetry* (Scala effect systems), `kotlinx.coroutines` OTel instrumentation (Kotlin), `contextvars` (Python asyncio), `AsyncLocal` (.NET — handled natively), `AsyncLocalStorage` (Node.js — handled natively), `context.Context` (Go — handled natively by the OTel Go libraries). Add OneAgent for host/runtime signals if the workload runs on long-lived hosts or containers.
 4. **Multi-backend mandate, regulatory portability, or active exit-ramp planning?** → OTel as your primary instrumentation. OneAgent becomes value-add, not the source of truth.
-5. **Runtime is Go or Ruby?** → OTel for application spans (no OneAgent SDK exists for these runtimes). OneAgent still adds value through host/process telemetry and Smartscape.
+5. **Runtime is Ruby?** → OTel for application spans; OneAgent adds host/process telemetry and Smartscape. **Runtime is Go?** → OneAgent auto-injects web requests and `database/sql`; OTel covers other libraries and custom spans (no Go OneAgent SDK), captured by the Span Sensor or sent over OTLP.
 6. **Standard web stack?** (Spring, ASP.NET Core, Express, Fastify, Django, FastAPI, Rails, Laravel, etc.) → OneAgent's auto-instrumentation gives you the fastest time-to-value. If you already have OTel, keep it for custom spans; if not, you may not need it at all.
 7. **Already instrumented with OTel and it's working?** → Add OneAgent alongside. Do *not* rip out OTel. The combined cost is lower than the conversion cost, and you keep your portability.
 
-> **Note on the diagram.** The SVG above still shows serverless as a single gate. Read steps 1 and 2 as the authoritative form of that branch until the graphic is redrawn.
+> **Note on the diagram.** The SVG compresses the serverless branch into one gate for platforms OneAgent does not reach. Read steps 1 and 2 as the authoritative form of that branch.
 
 > <sub>**Sources:**</sub>
 > - <sub>[OneAgent 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-343) — released 07/28/2026; Azure Functions support for Python on the Flex Consumption Plan (Linux) and Java / Node.js on Windows plans; Azure Service Bus / Event Hub / Cosmos DB auto-tracing</sub>
 > - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — *"not supported on serverless code modules .. Consider using OpenTelemetry instead"*</sub>
 > - <sub>[OneAgent SDK for Node.js (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-NodeJs)</sub>
 > - <sub>[OpenTelemetry on AWS Lambda (DT docs)](https://docs.dynatrace.com/docs/shortlink/opentel-lambda) — Lambda extension + OTel; Python, Node, Java</sub>
+> - <sub>[AWS Lambda integration (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-into-aws/aws-lambda-integration) — *"using auto-instrumentation without code changes"*</sub>
 > - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel)</sub>
 > - <sub>[otel4s (Typelevel GitHub)](https://github.com/typelevel/otel4s), [zio-telemetry (ZIO GitHub)](https://github.com/zio/zio-telemetry)</sub>
 
@@ -468,7 +481,7 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 
 **OneAgent — pros**
 
-- Zero-code instrumentation for hundreds of frameworks across Java, .NET, Node.js, Python, PHP
+- Zero-code instrumentation for hundreds of frameworks across Java, .NET, Node.js, Python, PHP, plus Go web requests and `database/sql`
 - Host, runtime, process, network, and topology coverage out of the box
 - Smartscape dependency map and Davis AI tuned to its data model
 - RUM-to-backend trace correlation
@@ -478,8 +491,8 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 **OneAgent — cons**
 
 - Locked to Dynatrace as a backend
-- Does not run on serverless functions
-- Does not inject Go or Ruby application code (still adds host/process value)
+- Does not run on GCP Cloud Functions or unsupported Azure Functions plans; on AWS Lambda it runs as the Dynatrace Lambda layer, but the OneAgent SDK does not
+- Does not inject Ruby application code (still adds host/process value); Go coverage is web requests and `database/sql`
 - Default thread-local-style context model fragments under some async runtimes (effect systems, certain coroutine layouts)
 - Custom-span surface (OneAgent SDK) is intentionally narrow — no metrics or log signals; not available for Python, Go, PHP, Ruby
 - Framework support is broad but not exhaustive (e.g., http4s, Tapir, niche message brokers, exotic RPC layers)
@@ -490,7 +503,7 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 - Full signal coverage — traces, metrics, logs, baggage
 - Per-runtime context-aware libraries (otel4s, zio-telemetry, kotlinx-coroutines, contextvars, context.Context, AsyncLocal, AsyncLocalStorage) handle each runtime's async model correctly
 - First-class on serverless across every major runtime
-- First-class on Go and Ruby where OneAgent doesn't inject application code
+- First-class on Ruby, where OneAgent doesn't inject application code, and on Go libraries beyond OneAgent's web and `database/sql` coverage
 - Strong community ecosystem, monthly releases, broad plugin coverage
 - Code-level control of sampling, attributes, and span structure
 
@@ -505,7 +518,8 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 
 > <sub>**Sources:**</sub>
 > - <sub>[Technology support matrix (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support) — OneAgent framework, host, runtime coverage</sub>
-> - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel) — Smartscape/PurePath/Davis as OneAgent-only platform features</sub>
+> - <sub>[Use OneAgent with OpenTelemetry (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-and-opentelemetry/oneagent-otel) </sub>
+> - <sub>**Derived:** Smartscape, PurePath and Davis-on-OneAgent-data as OneAgent-dependent capabilities combines the §2 capability table with the technology-support matrix; the coexistence page does not state it</sub>
 > - <sub>[OpenTelemetry main site (opentelemetry.io)](https://opentelemetry.io/) — vendor neutrality, signal coverage, ecosystem</sub>
 > - <sub>[OpenTelemetry Java SDK (OpenTelemetry GitHub)](https://github.com/open-telemetry/opentelemetry-java) — monthly minor releases</sub>
 
@@ -519,8 +533,8 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 1. **Does my OTel data already land in Dynatrace via OTLP?** If yes, you already have most of what "converting" would give you for traces.
 2. **Am I missing host, runtime, or topology signals?** If yes, *adding* OneAgent solves that — *removing* OTel does not.
 3. **Am I on an async-fragmenting runtime?** (Scala effect systems, certain coroutine layouts.) If yes, removing the runtime-aware OTel layer will *break* tracing — there is no OneAgent equivalent.
-4. **Am I on Go or Ruby?** If yes, there is no OneAgent SDK to replace OTel with. Conversion is not technically possible at the application-span level.
-5. **Do I have any serverless workloads?** If yes, OneAgent cannot run there; you will need OTel anyway, and a hybrid is unavoidable.
+4. **Am I on Go or Ruby?** If yes, there is no OneAgent SDK to replace OTel with. Conversion is not technically possible at the application-span level (OneAgent does auto-inject Go web requests and `database/sql`, so Go keeps that layer either way).
+5. **Do I have serverless workloads OneAgent does not reach?** GCP Cloud Functions and unsupported Azure Functions plans need OTel, and on AWS Lambda custom spans need OTel because the OneAgent SDK is unsupported there — so a hybrid is unavoidable.
 6. **Is there an organizational mandate for vendor portability or multi-backend support?** If yes, OTel is a requirement, not a choice.
 7. **What is the cost of a coordinated multi-service rewrite of custom spans, metrics, and logs?** Compare honestly against the cost of running both for the foreseeable future.
 8. **Is anyone on the team going to maintain a parallel internal instrumentation library against the OneAgent SDK?** If not, even partial Path C is a slow walk into instrumentation rot.
@@ -543,12 +557,12 @@ Dynatrace is explicit that the two are designed to coexist. From the Dynatrace O
 **Default recommendation for any backend already instrumented with OpenTelemetry:**
 
 1. **Keep your OpenTelemetry instrumentation in place.** Do not start a conversion project.
-2. **Install OneAgent** on the hosts (or via the Dynatrace Operator on Kubernetes) where the services run. Restart the processes. (For Go or Ruby workloads, OneAgent still adds host/process/Smartscape value even though it doesn't inject application code.)
+2. **Install OneAgent** on the hosts (or via the Dynatrace Operator on Kubernetes) where the services run. Restart the processes. (For Ruby workloads, OneAgent still adds host/process/Smartscape value even though it doesn't inject application code. For Go, it also auto-instruments web requests and `database/sql`.)
 3. **Pick one of the two supported coexistence patterns** to avoid duplicate spans:
    - *Pattern 1 — Span Sensor:* enable the OpenTelemetry Span Sensor in the OneAgent code module for your runtime; **disable** any OTLP exporter in the application. OneAgent picks up the OTel API calls in-process. (Available where the OneAgent code module supports it — check per-runtime docs.)
-   - *Pattern 2 — OTLP:* keep the OTel exporter pointed at Dynatrace's OTLP endpoint (or an OTel Collector forwarding to Dynatrace); **disable** the Span Sensor. Spans correlate via W3C `traceparent`. This is the only option for Go, Ruby, and serverless.
+   - *Pattern 2 — OTLP:* keep the OTel exporter pointed at Dynatrace's OTLP endpoint (or an OTel Collector forwarding to Dynatrace); **disable** the Span Sensor. Spans correlate via W3C `traceparent`. This is the only option for Python and Ruby (no Span Sensor), GCP Cloud Functions, and any process without OneAgent.
 4. **For async-fragmenting runtimes** (Scala effect systems, certain coroutine layouts), ensure the OTel layer is the runtime-aware library (otel4s, zio-telemetry, kotlinx-coroutines instrumentation) rather than the raw default SDK. Do not attempt to replace this layer with the OneAgent SDK — even where the SDK exists, it has no equivalent of the runtime's async-context primitive.
-5. **For serverless workloads**, OTel only. OneAgent does not run there.
+5. **For serverless workloads**, split by platform: AWS Lambda — the Dynatrace Lambda layer plus OTel for custom spans; supported Azure Functions plans — OneAgent once the deployed agent reaches 1.343; GCP Cloud Functions and anything else — OTel only.
 6. **Do not rewrite custom OTel spans, metrics, or logs against the OneAgent SDK** unless you have a specific Dynatrace capability that the SDK uniquely enables (in practice, this is rarely the case — and the SDK doesn't exist for Python, Go, PHP, or Ruby).
 7. **Re-evaluate annually** — if Dynatrace adds new async-aware tracing or richer SDK coverage in your runtime, the calculus may shift. Today, layering is the right answer.
 
@@ -679,7 +693,7 @@ Container monitoring on Windows is **host-based, not in-cluster-injected**. The 
 | Python (sync — Django, Flask) | Yes | Both have mature coverage |
 | Python (asyncio — FastAPI, Starlette, Tornado) | Yes | Both use `contextvars` |
 | Python (greenlet / gevent / eventlet monkey-patched) | Modified | Mixed coverage in both; verify per-library; OTel often the more reliable path |
-| Go | OTel-only at app level | No Go OneAgent SDK; OTel uses explicit `context.Context`. OneAgent provides host/process/Smartscape only |
+| Go | Yes, for web requests and `database/sql` | OneAgent auto-injects 64-bit Go executables (1.323+); the Span Sensor captures OTel Go spans; no Go OneAgent SDK, so custom spans and other libraries come from OTel |
 | PHP | Yes | OneAgent's PHP module is mature; OTel is newer but sufficient |
 | Ruby | OTel-only at app level | Dynatrace's documented recommendation; OneAgent supplies host/process |
 | Mobile native (iOS / Android) | Out of scope | Use Dynatrace Mobile Agent or OTel mobile SDKs — covered in the MOBL series |
@@ -717,9 +731,11 @@ Container monitoring on Windows is **host-based, not in-cluster-injected**. The 
 > <sub>**Sources:**</sub>
 > - <sub>[Technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support)</sub>
 > - <sub>[Java technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/java) — JVM detail (Akka/Pekko, Play, Loom)</sub>
-> - <sub>[Go OpenTelemetry walkthrough (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/walkthroughs/go) — the documented Go path is OpenTelemetry instrumentation; the page describes no OneAgent code-level injection for Go</sub>
-> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — serverless-not-supported</sub>
+> - <sub>[Go OpenTelemetry walkthrough (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/walkthroughs/go) — the OpenTelemetry path for Go custom spans</sub>
+> - <sub>[Go technology support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/technology-support/application-software/go) — *"Automatic injection and instrumentation of 64-bit Go executables on x86"*</sub>
+> - <sub>[OneAgent SDK for Java (Dynatrace GitHub)](https://github.com/Dynatrace/OneAgent-SDK-for-Java) — *"The OneAgent SDK is not supported on serverless code modules, including those for AWS Lambda."* (the SDK, not OneAgent)</sub>
 > - <sub>[OpenTelemetry on AWS Lambda (DT docs)](https://docs.dynatrace.com/docs/shortlink/opentel-lambda) — Lambda extension covers Python/Node/Java</sub>
+> - <sub>[AWS Lambda integration (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-into-aws/aws-lambda-integration) — the Dynatrace Lambda layer's per-runtime support</sub>
 > - <sub>[otel4s (Typelevel GitHub)](https://github.com/typelevel/otel4s), [zio-telemetry (ZIO GitHub)](https://github.com/zio/zio-telemetry) — basis for *"Modified"* applicability rating on Scala effect systems</sub>
 >
 > <sub>The Clojure `core.async` note is **community guidance**, not vendor-documented.</sub>
@@ -727,8 +743,10 @@ Container monitoring on Windows is **host-based, not in-cluster-injected**. The 
 > **A signal worth tracking for Rust (Dynatrace API 1.346, released 08/25/2026).** The API changelog adds **`RUST` and `TOKIO`** as `serviceTechnology` values on the Request Attributes endpoints and as technology values on `GET /extensions/{technology}/availableHosts` (Early Access).
 >
 > Read this carefully, because it is a **configuration-surface** change, not an announcement of OneAgent auto-instrumentation for Rust. What it establishes is that Dynatrace now models Rust and Tokio as first-class technology values — which is a prerequisite for deeper support, and useful today if you are naming or attributing Rust services. For the decision this entry frames, **Rust remains an OpenTelemetry-instrumented runtime**: it is absent from the auto-instrumentation coverage in §6 and the async-context-propagation matrix in §7, and nothing in 1.346 changes that. Treat this as a reason to re-check the supported-technologies page over the next few sprints, not as a reason to revisit an OTel decision for Rust today.
+>
+> **OneAgent 1.347 (pre-release, rollout planned from 09/22/2026) adds Rust and Tokio process technology detection** — OneAgent will recognise Rust and Tokio processes. That is detection, not tracing: the OTel conclusion for Rust application spans stands.
 
-> <sub>**Sources:** [Dynatrace API changelog version 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-346) — `RUST` and `TOKIO` added to the serviceTechnology and extension-technology enums, read 08/28/2026.</sub>
+> <sub>**Sources:** [Dynatrace API changelog version 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-346) — `RUST` and `TOKIO` added to the serviceTechnology and extension-technology enums, read 08/28/2026. [OneAgent 1.347 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-347) — *"Implemented Rust and Tokio process technology detection."* (pre-release, read 09/28/2026)</sub>
 
 ---
 

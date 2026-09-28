@@ -1,6 +1,6 @@
 # FAQ-01: Why you need a good Host Group naming strategy
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 01 — Host Group Naming Strategy | **Created:** May 2026 | **Last Updated:** 09/02/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 01 — Host Group Naming Strategy | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -163,11 +163,14 @@ Alerting effectiveness depends on correctly scoping **who owns what**.
 
 **With a strong naming strategy:**
 
-- Alerts can be routed to responsible teams via management zones built on top of the host-group structure
+- Alerts can be routed to responsible teams on the host-group structure — through a problem-triggered workflow on Latest Dynatrace, or through management zones and alerting profiles on Dynatrace Classic
 - Notification logic is simpler and more reliable
 - Alert fatigue is reduced
 
-**Mechanic clarification:** Alerting profiles scope on management zone filters and severity-rule tag matching, *not* directly on host groups. Per-host-group routing is achieved by building management zones on top of the host-group structure — the host group provides the boundary; the management zone exposes it to alerting profiles, dashboards, and IAM policies.
+**Mechanic clarification:** neither routing surface filters on the host group directly — the host group provides the boundary, and something else exposes it to routing.
+
+- **Latest Dynatrace:** problem notifications are sent by **problem-triggered workflows**. The trigger filters on affected-entity tags (and severity, and a DQL matcher), so expose the host group as an entity tag or an ownership tag and route on that. FAQ-21 covers the routing design; ALERT-03 covers destinations.
+- **Dynatrace Classic:** alerting profiles scope on management zone filters and severity-rule tag matching. Per-host-group routing is achieved by building management zones on top of the host-group structure. MZ2POL-09 covers moving that alerting job to workflows.
 
 **Impact:** Better signal-to-noise ratio and faster response times.
 
@@ -181,7 +184,7 @@ Alerting effectiveness depends on correctly scoping **who owns what**.
 For environments where SVG doesn't render
 -->
 
-> <sub>**Sources:** [Alerting profiles (DT docs)](https://docs.dynatrace.com/docs/shortlink/alerting-profiles) — alerting profile scope is management-zone filter + severity-rule tag matching, [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups).</sub>
+> <sub>**Sources:** [Alerting profiles (DT docs)](https://docs.dynatrace.com/docs/shortlink/alerting-profiles) — *"Problem notification is a Dynatrace Classic concept. Use simple workflows to send notifications about problems."*; alerting profile scope is management-zone filter + severity-rule tag matching, [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups).</sub>
 
 <a id="operations"></a>
 ## 5. Consideration #4: Operational Efficiency and Troubleshooting
@@ -336,7 +339,7 @@ Exact naming conventions are less critical than **consistency and intent**. A fe
 - **Naming by datacenter/region only** — usually too coarse for ownership; combine with env or app
 - **Naming by individual or short-lived team name** — tied to org churn, not to the workload
 - **Names starting with `dt.`** — reserved for Dynatrace-internal properties; explicitly forbidden by the host-groups documentation
-- **Names exceeding 100 characters** — exceeds the documented host-name maximum
+- **Names exceeding 100 characters** — exceeds the documented host-group name maximum (*"Maximum length is 100 characters."*)
 
 > <sub>**Sources:** [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups) — naming constraints (alphanumeric, hyphens, underscores, periods; cannot start with `dt.`; 100-character maximum); assignment via `oneagentctl --set-host-group=<name>`.</sub>
 
