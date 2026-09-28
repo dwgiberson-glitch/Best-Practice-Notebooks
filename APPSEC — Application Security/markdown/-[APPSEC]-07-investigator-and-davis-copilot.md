@@ -1,6 +1,6 @@
 # APPSEC-07: Security Investigator and Davis CoPilot for Security
 
-> **Series:** APPSEC — Application Security | **Notebook:** 7 of 10 | **Created:** June 2026 | **Last Updated:** 09/18/2026
+> **Series:** APPSEC — Application Security | **Notebook:** 7 of 10 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -94,14 +94,14 @@ fetch security.events, from:-7d
 <a id="audit"></a>
 ## 4. Investigation Log as Audit Artifact
 
-For regulated environments, the investigation itself is an audit artifact. Two practices:
+In community practice in regulated environments, the investigation itself is treated as an audit artifact, with two habits:
 
 1. **Open each investigation in a notebook**, not just the Investigator UI. The notebook captures the queries, the reasoning, and the conclusion as a durable record.
 2. **Attach the notebook to the ticketing system** (Jira/ServiceNow link) so the security-problem record links to the investigation record. APPSEC-08 covers the workflow patterns.
 
 This is more discipline than tooling. Both surfaces support it; the question is whether the team commits to using them this way.
 
-> <sub>**Sources:** [Investigations (DT docs)](https://docs.dynatrace.com/docs/secure/investigations) for the investigation surface and its evidence and history features. **Derived:** the *investigation-as-audit-artifact* discipline is community practice in regulated environments.</sub>
+> <sub>**Sources:** [Investigations (DT docs)](https://docs.dynatrace.com/docs/secure/investigations) — *"Attach relevant findings as evidence, while preserving the investigation context."* and *"view your investigation history"* (re-read 09/28/2026).</sub>
 
 <a id="next"></a>
 ## 5. Next Steps

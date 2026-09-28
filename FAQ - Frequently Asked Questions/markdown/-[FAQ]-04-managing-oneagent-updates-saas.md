@@ -148,7 +148,7 @@ For environments where SVG doesn't render
 
 The "No automatic updates" mode is often picked defensively at tenant standup ("we'll turn it on later") and then forgotten. If you adopt this mode, pair it with a recurring calendar reminder to evaluate available versions, or you will discover that the fleet is six months behind a year later.
 
-> **Breaking (OneAgent 1.345): disabling auto-update now also means versioned directories are never cleaned up.** Verbatim: *"Due to security concerns, versioned directories will no longer be removed automatically on hosts where auto-updates and process auto-injection are disabled."* This lands directly on the mode above. Previously, a host on **No automatic updates** still had old versioned directories reclaimed by a legacy migration mechanism; from 1.345 that mechanism is gone, so on hosts where auto-update **and** process auto-injection are both disabled, each retained version's directory persists until someone removes it. The cost is disk, and it accrues quietly on exactly the fleet this mode creates — long-lived hosts that update rarely and are rarely looked at. **If you run "No automatic updates" at any scale, add OneAgent installation-directory growth to what you monitor, and give the cleanup an owner.** OneAgent 1.345 began its **staged rollout on 08/25/2026**, and OneAgent fleets lag tenant version — check the version your hosts are actually on before assuming either behavior. The mode itself is unchanged and remains a legitimate choice; only its housekeeping side effect changed.
+> **Breaking (OneAgent 1.345): on hosts where auto-update *and* process auto-injection are both disabled, versioned directories are no longer cleaned up.** Verbatim: *"Due to security concerns, versioned directories will no longer be removed automatically on hosts where auto-updates and process auto-injection are disabled."* This lands directly on the mode above. Previously, a host on **No automatic updates** still had old versioned directories reclaimed by a legacy migration mechanism; from 1.345 that mechanism is gone, so on hosts where auto-update **and** process auto-injection are both disabled, each retained version's directory persists until someone removes it. The cost is disk, and it accrues quietly on exactly the fleet this mode creates — long-lived hosts that update rarely and are rarely looked at. **If you run "No automatic updates" at any scale, add OneAgent installation-directory growth to what you monitor, and give the cleanup an owner.** OneAgent 1.345 began its **staged rollout on 08/25/2026**, and OneAgent fleets lag tenant version — check the version your hosts are actually on before assuming either behavior. The mode itself is unchanged and remains a legitimate choice; only its housekeeping side effect changed.
 
 > <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update) — *"Automatic updates at earliest convenience"*, *"Automatic updates during update windows"*, and *"No automatic updates"* are the three documented modes; "Update now" and environment-wide "Update now to target version" are the manual triggers when auto-update is disabled, [OneAgent 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/oneagent/sprint-345) — *"Removed legacy migration mechanism of versioned directories"*, quoted above. **Derived:** the disk-growth consequence for long-lived manually-updated hosts follows from the removal applying precisely to hosts with auto-update disabled.</sub>
 
@@ -221,7 +221,7 @@ In community practice, mixed-version environments (AGs lagging behind OneAgents)
 
 For most fleets on `Automatic updates at earliest convenience`, post-update validation is implicit — the platform itself reports OneAgent health, version, and process injection status. The check usually doesn't need a separate workflow.
 
-For change-controlled fleets, the explicit validation set is:
+For change-controlled fleets, in community practice the validation set looks like the list below — no Dynatrace page enumerates it, so adapt it to your own change process:
 
 1. **Version reported.** Confirm the OneAgent is reporting the target version (Deployment status page; or DQL: `fetch dt.entity.host | fields entity.name, osVersion, installerVersion`).
 2. **Deep monitoring re-injected.** Process Groups and PGIs for the host show the new agent version. New process starts after the update inherit the new agent.
@@ -231,7 +231,7 @@ For change-controlled fleets, the explicit validation set is:
 
 For fleets running `Automatic updates during update windows`, build this checklist into the post-window review so any anomalies get caught before the next window's batch.
 
-> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update). **Derived:** the validation list combines the documented update mechanism with general observability hygiene — no single page enumerates this checklist, which is community / engagement practice.</sub>
+> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update).</sub>
 
 <a id="rollback"></a>
 ## 9. Rollback Considerations
@@ -240,14 +240,14 @@ Rollback of a OneAgent version is uncommon on SaaS, but it does happen — most 
 
 The operating reality:
 
-- **Rollback = install older version.** There is no in-place downgrade. The flow is `Uninstall current OneAgent → install older installer → confirm host re-registers on the older version`. The host re-keys to its existing entity ID.
+- **Rollback = install older version.** There is no in-place downgrade — selecting an older target version does not downgrade an installed OneAgent. The flow is `Uninstall current OneAgent → install older installer → confirm host re-registers on the older version`. In community practice the reinstalled host re-registers under its existing host entity — verify this on one host before relying on entity continuity.
 - **Pinning the tenant to an older version stops the auto-update flow from reverting your rollback.** Without pinning, the host will auto-update back to current on its next cycle.
 - **For Kubernetes**, pin the OneAgent version on the tenant (or set `version` / `image` on the DynaKube CR). The Operator will rotate the OneAgent pods to the pinned version.
 - **Capture configuration before rollback.** Host group assignment, host tags, host properties — `oneagentctl --get-host-group`, `oneagentctl --get-host-tag`, etc. — survive reinstall if you reapply on the new install. Document them first.
 
-In community practice, the right time to plan rollback is *before* enabling a broad rollout — pick a canary host group, validate there, then expand. Rollback as a routine response to a fleet-wide issue is expensive and rarely the best answer; rollback as a contained response within a canary is cheap.
+The playbook above is community practice built on the documented uninstall/reinstall mechanic, not a single documented procedure. In community practice, the right time to plan rollback is *before* enabling a broad rollout — pick a canary host group, validate there, then expand. Rollback as a routine response to a fleet-wide issue is expensive and rarely the best answer; rollback as a contained response within a canary is cheap.
 
-> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update), [oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl). **Derived:** the rollback playbook combines the documented uninstall/reinstall mechanic with general observability change-management practice — community guidance, not a single documented procedure.</sub>
+> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update) — *"If you select an older version than a currently deployed version, you won't be able to downgrade OneAgent."*, [oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl).</sub>
 
 <a id="pitfalls"></a>
 ## 10. Common Pitfalls

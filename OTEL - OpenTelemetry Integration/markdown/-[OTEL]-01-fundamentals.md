@@ -1,6 +1,6 @@
 # OTEL-01: OpenTelemetry Fundamentals
 
-> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 1 of 8 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 1 of 8 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Introduction to OpenTelemetry and Dynatrace
 OpenTelemetry (OTel) is the industry-standard framework for collecting telemetry data. Dynatrace fully supports OpenTelemetry through native OTLP ingestion, allowing you to leverage OTel instrumentation while benefiting from Dynatrace's AI-powered analytics.
@@ -266,9 +266,9 @@ OpenTelemetry data is billed exactly like any other ingested data under the Dyna
 | Metrics | per 100k data points | GiB-days (15 months @ 1-min granularity included) | included with Ingest & Process |
 | Logs | per GiB ingested | GiB-days | per GiB scanned |
 
-**OneAgent vs. OTel:** Full-Stack Monitoring includes defined OneAgent trace/metric volumes — you're charged only for OneAgent data *above* the included volume. OpenTelemetry data has no included allowance; it bills on the rate card from the first byte. Practical consequence: high-volume OTel traces/metrics are a direct cost line — size and (if needed) sample them deliberately (see OTEL-04 §7 and the FINOPS series).
+**Included volume follows the source, not the protocol:** Full-Stack Monitoring includes a defined trace volume *"for traces that are sent via the OneAgent Trace API or from a Full-Stack monitored host"*, and *"Metrics originating from Full-Stack-monitored hosts or containers include a defined amount of metric data points"* — you are charged only for data above the included amount. OTel telemetry from sources outside Full-Stack Monitoring (for example, a workload on a host with no OneAgent) has no included volume to draw on and bills on the rate card as ingested. Practical consequence: high-volume OTel traces/metrics from such sources are a direct cost line — size and (if needed) sample them deliberately (see OTEL-04 §7 and the FINOPS series).
 
-> <sub>**Sources:** [OpenTelemetry licensing (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/opentelemetry-licensing) — DPS treats OTel data like any ingested data; per-signal capabilities; OneAgent included-volume vs. OTel rate-card.</sub>
+> <sub>**Sources:** [OpenTelemetry licensing (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/opentelemetry-licensing) — *"With Dynatrace, OpenTelemetry data is treated like any other ingested data."* **Derived:** OTel data from sources outside Full-Stack Monitoring has no included volume, because the page scopes the allowance to trace and metric data from those sources.</sub>
 
 ```dql
 // View OpenTelemetry traces in Dynatrace

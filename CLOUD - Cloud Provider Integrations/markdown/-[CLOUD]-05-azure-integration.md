@@ -1,6 +1,6 @@
 # CLOUD-05: Azure Integration
 
-> **Series:** CLOUD — Cloud Provider Integrations | **Notebook:** 5 of 8 | **Created:** March 2026 | **Last Updated:** 09/25/2026
+> **Series:** CLOUD — Cloud Provider Integrations | **Notebook:** 5 of 8 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -395,12 +395,12 @@ Write new DynaKube manifests against **`dynatrace.com/v1beta6`**. The Operator C
 | AKS node type | Dynatrace coverage |
 |---|---|
 | **Linux node pools — Ubuntu or Azure Linux** | Full coverage (`cloudNativeFullStack`, `applicationMonitoring`, `hostMonitoring`); Azure Linux is a supported container host |
-| **Windows Server node pools** | Not supported: Dynatrace's technology-support matrix lists AKS with the footnote *"Windows Pods and Nodes unsupported."* The one documented exception is manual **pod runtime injection** of the .NET code module into Windows containers — application-only, outside the Operator, and without full workload linking |
+| **Windows Server node pools** | Not supported: Dynatrace's technology-support matrix lists AKS with the footnote *"Windows Pods and Nodes unsupported."* The one documented exception is manual **pod runtime injection** of the .NET code module into Windows containers — application-only, outside the Operator, and it *"may not fully link Kubernetes workloads with monitored containers/processes"* |
 | **Virtual nodes (ACI)** | No host agent: Microsoft states *"DaemonSets won't deploy pods to the virtual nodes."* Host-level and cloud-native full-stack coverage cannot reach pods scheduled there |
 
 ### AKS Guardrails That Affect the Operator
 
-**AKS Automatic and Deployment Safeguards.** On AKS Automatic, *"Deployment Safeguards and baseline Pod Security Standards are enabled by default in `Enforce` mode. You can exclude namespaces, but you can't switch the cluster-wide safeguard level to `Warn`."* The baseline standard rejects privileged containers and `hostPath` volumes — both of which host-level OneAgent and the CSI driver rely on. Exclude the `dynatrace` namespace from Deployment Safeguards before you install, and verify that injected application pods are admitted in a non-production cluster first.
+**AKS Automatic and Deployment Safeguards.** On AKS Automatic, *"Deployment Safeguards and baseline Pod Security Standards are enabled by default in `Enforce` mode. You can exclude namespaces, but you can't switch the cluster-wide safeguard level to `Warn`."* The baseline standard rejects host namespaces (`hostNetwork`, `hostPID`), privileged containers and added capabilities — and the Operator's OneAgent DaemonSet runs with `HostNetwork`, `HostPID` and capabilities such as `SYS_ADMIN`. Exclude the `dynatrace` namespace from Deployment Safeguards before you install, and verify that injected application pods are admitted in a non-production cluster first.
 
 **Network.** The Operator's webhook listens on TCP 8443, and the Kubernetes API server must be able to reach it for injection to work — check this path on private clusters and clusters with restrictive network policies. Operator components also need outbound HTTPS (443) to your Dynatrace environment.
 
@@ -454,10 +454,11 @@ timeseries nsMem = sum(dt.kubernetes.container.memory_working_set, rollup: avg),
 > - <sub>[DynaKube CRD (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-operator/blob/main/config/crd/bases/dynatrace.com_dynakubes.yaml) — *"This dynakube API version is deprecated and will be removed in a future operator version."*</sub>
 > - <sub>[Operator network requirements (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-operator/blob/main/doc/network.md)</sub>
 > - <sub>[Virtual nodes (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) — *"DaemonSets won't deploy pods to the virtual nodes."*</sub>
-> - <sub>[Deployment Safeguards (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/deployment-safeguards)</sub>
+> - <sub>[Deployment Safeguards (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/deployment-safeguards) — *"Host network namespaces are disallowed"*</sub>
+> - <sub>[Dynatrace Operator security (DT docs)](https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s/reference/security) — OneAgent DaemonSet policy settings: *"Allows HostNetwork"*, HostPID, and capabilities including `SYS_ADMIN`</sub>
 > - <sub>[CNI overview (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/concepts-network-cni-overview) — *"Retires on March 31, 2028"*</sub>
 > - <sub>[Control plane metrics (Microsoft Learn)](https://learn.microsoft.com/en-us/azure/aks/control-plane-metrics-monitor) — *"The control plane metrics feature supports only the managed service for Prometheus in Azure Monitor."*</sub>
-> - <sub>**Derived:** excluding the `dynatrace` namespace follows from the baseline standard's privileged/`hostPath` rules and the Operator's host components.</sub>
+> - <sub>**Derived:** excluding the `dynatrace` namespace follows from the baseline host-namespace and capability rules (Deployment Safeguards) combined with the OneAgent DaemonSet's policy settings (Operator security).</sub>
 
 <a id="resource-group-mapping"></a>
 

@@ -107,7 +107,7 @@ The workflow defaults to **safe**: a first run changes nothing. Read the dry-run
 
 Two *Run JavaScript* tasks wired with a loop. **All configuration lives in workflow inputs** (runtime variables) — task 1 reads them with `ex.input` and passes the values task 2 needs onto each host object, so the loop task needs no input wiring of its own.
 
-> **UI labels vary between Workflows app versions.** Where you define workflow inputs and the loop differs by version; the authoritative shape is the exported YAML (see the [import skeleton](#import-skeleton), which includes the `input:` block verbatim).
+> **UI labels vary between Workflows app versions.** Where you define workflow inputs and the loop differs by version; the authoritative shape is the exported YAML (see the [import skeleton](#import-skeleton), which includes the `input:` block verbatim). The workflow is adapted from a working deployment, with its tenant URL and names genericized, rather than from a Dynatrace-published example — keep `DRY_RUN = true` for the first run in your tenant.
 
 **Step 0 — Prerequisites (once):**
 
@@ -424,7 +424,7 @@ workflow:
 - [Run JavaScript action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action)
 - [OneAgent tag setup — primary tags / fields (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent)
 
-> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — documents the `hostTag` `set` operation, the `dt.cost.costcenter=<value>` form, and the `oneAgents.write` scope, [Build workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data), [OneAgent tag setup (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent). **Derived:** the GUI step ordering and the safety-model table synthesize the cited API/lookup/build pages with the WFLOW-08 §2–§7 mechanics — exact editor labels vary by app version; verify with `DRY_RUN = true` before applying. This workflow is derived from a working deployment; the tenant URL and customer name have been genericized.</sub>
+> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — documents the `hostTag` `set` operation, the `dt.cost.costcenter=<value>` form, and the `oneAgents.write` scope, [Build workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data), [OneAgent tag setup (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent).</sub>
 
 <a id="bonus-seed-lookups"></a>
 ## Appendix — Bonus: Seed Sample Lookup Tables (Testing Only)

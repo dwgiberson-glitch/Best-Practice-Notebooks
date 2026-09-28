@@ -1,6 +1,6 @@
 # WFLOW-09: Security, Governance & Monitoring
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 9 of 10 | **Created:** January 2026 | **Last Updated:** 09/24/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Notebook:** 9 of 10 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Production Best Practices
 This final notebook covers workflow security, governance, observability, and operational best practices for running workflows in production.
@@ -183,7 +183,7 @@ PagerDuty's own integration guidance draws the same boundary — Events API v2 i
 
 **dedup_key (Events API v2):** each Events API payload carries an optional `dedup_key`. PagerDuty correlates subsequent `trigger`, `acknowledge`, and `resolve` events with the same `dedup_key` against the **same open incident**, so a Davis problem can drive the full lifecycle: trigger on `OPEN`, resolve on `CLOSED`, all referencing the same key. WFLOW-05 §6 already recommends `dynatrace-{problem_id}` — keep that pattern: it makes the Dynatrace problem ID the join key on both sides.
 
-> <sub>**PagerDuty docs:** [Services and integrations (PagerDuty Support)](https://support.pagerduty.com/main/docs/services-and-integrations) — *"Events API v2 is designed for machine-generated monitoring and event data...for human-generated events, tickets or incidents...using the REST API, which enables direct, streamlined creation of PagerDuty incidents"*; [Events API v2 overview (PagerDuty Developer)](https://docs.pagerduty.com/developer/events-api-v2-overview).</sub>
+> <sub>**PagerDuty docs:** [Services and integrations (PagerDuty Support)](https://support.pagerduty.com/main/docs/services-and-integrations) — *"Events API v2 is designed to handle machine-generated monitoring and event data"* and *"For human-generated events, tickets, or incidents, such as those from ServiceNow or JIRA, use the REST API to enable direct, streamlined creation of PagerDuty incidents."*; [Events API v2 overview (PagerDuty Developer)](https://docs.pagerduty.com/developer/events-api-v2-overview).</sub>
 
 ### 3.3 ServiceNow — OAuth Client vs Basic Auth
 

@@ -1,6 +1,6 @@
 # OTEL-04: Trace Instrumentation
 
-> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 4 of 8 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 4 of 8 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Instrumenting Applications for Distributed Tracing
 Traces provide visibility into request flows across services. This notebook covers automatic and manual instrumentation techniques for popular languages with OpenTelemetry.
@@ -441,7 +441,7 @@ processors:
         probabilistic: {sampling_percentage: 20}
 ```
 
-Tail sampling is **stateful** — all of a trace's spans must reach the **same** collector instance for the decision to see the whole trace. In a tiered deployment (OTEL-03 §5) that means routing by trace ID to the gateway tier; never shard one trace across gateways.
+Tail sampling is **stateful** — *"All spans for a given trace MUST be received by the same collector instance for effective sampling decisions."* At scale that means two layers of collectors: a `loadbalancing` exporter in front — its default routing key for traces is `traceID` — and the tail-sampling tier behind it (the same two-tier shape OTEL-03 §5 uses for metrics, keyed by trace instead of resource). Never shard one trace across gateways.
 
 ### The trap: sampling biases trace-derived metrics
 
@@ -469,14 +469,16 @@ service:
 
 (Representative wiring — see the Dynatrace sampling docs demo for the full pipeline.)
 
-### Dynatrace guidance
+### Guidance
 
 - **Do not mix sampling modes on one trace.** Combining OTel sampling and OneAgent sampling on the same distributed trace yields inconsistent, partial traces — pick one owner per trace (see OTEL-07 §9 signal routing).
-- Sampling is a **cost lever, not a default** — start by keeping everything, measure ingest, and sample only if trace volume is the cost driver. OTel trace volume bills directly under DPS (see OTEL-01 §6 and the FINOPS series).
+- Sampling is a **cost lever, not a default** — in community practice, teams start by keeping everything, measure ingest, and sample only if trace volume turns out to be the cost driver. OTel trace volume is billed as Traces – Ingest & Process under DPS; only traces from a Full-Stack monitored host or the OneAgent Trace API draw on an included volume (see OTEL-01 §6 and the FINOPS series).
 
 > <sub>**Sources:**</sub>
 > - <sub>[Sampling with the OTel Collector (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/use-cases/sampling) — `tail_sampling` policies (`status_code`/`latency`/`probabilistic`, `decision_wait`), `span_metrics`-before-sampling to avoid metric bias, and the no-mixed-mode warning</sub>
-> - <sub>**Derived:** the "route by trace ID to one gateway" requirement combines tail-sampling statefulness with the tiered topology in OTEL-03 §5; the cost-lever framing combines the docs with the DPS trace model (OTEL-01 §6 / FINOPS)</sub>
+> - <sub>[Tail Sampling Processor (OpenTelemetry Collector Contrib GitHub)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/tailsamplingprocessor) — *"All spans for a given trace MUST be received by the same collector instance for effective sampling decisions."*</sub>
+> - <sub>[Load Balancing Exporter (OpenTelemetry Collector Contrib GitHub)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/loadbalancingexporter) — *"If no `routing_key` is configured, the default routing mechanism is `traceID` for traces"*</sub>
+> - <sub>[OpenTelemetry licensing (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/opentelemetry-licensing) — *"OpenTelemetry trace data is billed by the ingested volume."*</sub>
 
 <a id="best-practices"></a>
 ## 8. Best Practices

@@ -430,7 +430,7 @@ data record(x = "x")
 > - <sub>[Key-value pairs (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-key-value-pairs)</sub>
 > - <sub>[Positional matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-positional-matchers)</sub>
 > - <sub>[XML matchers (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/dpl-xml) — absent from the grammar table; reachable only by direct link</sub>
-> - <sub>**Derived:** the "does not exist" list is a live-tenant finding (07/20/2026), not a documented statement</sub>
+> - <sub>**Tenant observation (07/20/2026; spot-checked 09/28/2026):** each name on the "does not exist" list was rejected with `Named pattern element '<name>' is not valid` when parsed against a live tenant (09/28 re-check: `URI`, `HEXNUM`, `DATETIME` rejected; `LD` as control parsed); no documentation page states the list</sub>
 
 ---
 
@@ -508,7 +508,7 @@ No error, no warning. When every record comes back `null`, suspect a literal tha
 
 The documented default quantifier is `{1,4096}`. On long lines — stack traces, embedded payloads, verbose access logs — a pattern that works on your samples can fail on production records simply because the text ran past the cap. Widen it explicitly: `DATA{1,20000}:body`.
 
-> <sub>**Sources:** [Lines and strings (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-lines-strings) — documents the `{1,4096}` defaults, the line-vs-pattern scope distinction, and the rule that `LD`/`DATA` "must always be followed by a non-optional matcher expression". **Derived:** the minimal-vs-greedy framing and the silent-wrong-value failure mode are live-tenant findings (07/20/2026); the documentation states the constraint but does not describe what happens when it is violated.</sub>
+> <sub>**Sources:** [Lines and strings (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/log-processing-lines-strings) — documents the `{1,4096}` defaults, the line-vs-pattern scope distinction, and the rule that `LD`/`DATA` "must always be followed by a non-optional matcher expression". **Tenant observation (07/20/2026):** the minimal-vs-greedy behavior and the silent-wrong-value failure mode were reproduced by executing the patterns in this section against a live tenant; the documentation states the constraint but does not describe what happens when it is violated.</sub>
 
 ---
 

@@ -52,9 +52,11 @@ This entry goes **down the list of items that migration customers most commonly 
 | *"We never tagged; we encoded meaning in hostnames"* | **Tags, host groups, and metadata enrichment** | No ownership routing, no cost allocation, no IAM boundaries, no filtering — every downstream capability queries a naming convention |
 | *"Security has their own scanner"* | **Application Security (RVA/RAP)** | AppSec still runs in every mode, but outside Full-Stack third-party and code-level vulnerability detection are *limited*, and the risk context that depends on Full-Stack topology is reduced (APPSEC-01 §3) |
 
+The habits in the left column are the ones migration teams commonly arrive with, in community practice; each handicap is documented per capability and sourced in §§ 2–4.
+
 **The one-sentence version:** the old tool was a set of separate products, so partial adoption cost you nothing extra — Dynatrace is one correlated system, so partial adoption re-creates the separated tools you just paid to leave.
 
-> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring), [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — the *Support overview* table marks third-party and code-level vulnerability detection as limited in Infrastructure and Discovery modes, and Runtime Application Protection as available in all three. **Derived:** the habit→handicap pairings and the one-sentence framing are engagement-level synthesis of the per-capability documentation; the docs describe each capability but not the migration-habit failure mode.</sub>
+> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring), [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — the *Support overview* table marks third-party and code-level vulnerability detection as limited in Infrastructure and Discovery modes, and Runtime Application Protection as available in all three.</sub>
 
 <a id="mode-ladder"></a>
 ## 2. The Monitoring-Mode Ladder
@@ -93,7 +95,7 @@ Three load-bearing details behind the checkmarks:
 For environments where SVG doesn't render
 -->
 
-The capabilities are not parallel — they stack. The load-bearing chain:
+The capabilities are not parallel — they stack. Dynatrace documents each link below on its own; reading them as one compounding chain is community practice. The load-bearing chain:
 
 1. **Code modules produce traces.** Full-Stack injection is what generates PurePath distributed traces from your processes. No injection → no traces (unless you bring OpenTelemetry — see FAQ-03).
 2. **Traces produce services.** Automatic service detection works on observed requests. No traces → no service entities, no service-level response time / failure rate / throughput.
@@ -105,7 +107,7 @@ The capabilities are not parallel — they stack. The load-bearing chain:
 
 The practical consequence: **the marginal value of each layer is higher when the others are on.** Logs on a Full-Stack host land in trace context; the same logs on an infrastructure-only host are just text with a hostname. This is also why the previous tool never punished partial adoption the way Dynatrace's model rewards full adoption: in a modular stack the products were separate anyway, so leaving one off cost exactly that product. Here, leaving one off costs a slice of everything above it in the cascade.
 
-> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — *"end-to-end visibility into requests of all auto-detected server-side services"* ties detection to deep monitoring. **Derived:** the seven-step cascade is engagement-level synthesis of the documented per-capability prerequisites; Dynatrace docs state each dependency separately (injection→traces, traces→services, code-modules→full AppSec detection, W3C→RUM correlation) but do not present the compounding chain in one place.</sub>
+> <sub>**Sources:** [OneAgent monitoring modes (DT docs)](https://docs.dynatrace.com/docs/platform/oneagent/monitoring-modes/monitoring-modes), [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — *"end-to-end visibility into requests of all auto-detected server-side services"* ties detection to deep monitoring.</sub>
 
 <a id="impact-matrix"></a>
 ## 4. Going Down the List — Habit, Gap, Handicap
@@ -213,6 +215,8 @@ Two rules keep reduced modes honest:
 <a id="objections"></a>
 ## 7. "We've Always Done It That Way" — Objections and Honest Responses
 
+In community practice, these objections arrive in almost every migration. The responses are this entry's framing of the trade-offs, not Dynatrace positions; the mechanics each one relies on are sourced in the section it points to.
+
 | Objection (as it arrives) | Honest response |
 |---------------------------|-----------------|
 | *"We've always done it that way."* | That way was designed for the old tool's constraints — per-app agent pricing, modules that didn't correlate, alert rules as the only detection. The constraints didn't migrate; carrying the workarounds anyway means paying for the new platform and operating the old one. Price each habit (§4) and keep the ones that still buy something. |
@@ -226,7 +230,7 @@ Two rules keep reduced modes honest:
 
 *In community practice the steady-state overhead lands in the range described above; Dynatrace publishes no universal overhead number, so validate on a canary host group before quoting a figure.*
 
-> <sub>**Sources:** [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — injection-at-start and per-PG rule mechanics. **Derived:** the objection/response table is engagement-level synthesis from migration engagements (NR2DT/S2D/SL2DT patterns).</sub>
+> <sub>**Sources:** [Process deep monitoring (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/process-groups/configuration/pg-monitoring) — injection-at-start and per-PG rule mechanics.</sub>
 
 <a id="recommendation"></a>
 ## 8. Recommended Approach

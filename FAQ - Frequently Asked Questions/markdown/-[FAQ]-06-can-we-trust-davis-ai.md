@@ -46,7 +46,7 @@ The goal is to give a platform team, a security review, or an executive briefing
 <a id="short-answer"></a>
 ## 1. Short Answer
 
-Dynatrace Intelligence is **not one AI** — it is four distinct surfaces with very different risk profiles:
+Dynatrace Intelligence is **not one AI** — for a risk review, it is best read as four distinct surfaces with very different risk profiles. The four-surface split and the risk ratings below are community practice for structuring that review, not a Dynatrace-published risk classification:
 
 | Surface | What it is | Risk profile | One-line posture |
 |---------|------------|--------------|------------------|
@@ -57,7 +57,7 @@ Dynatrace Intelligence is **not one AI** — it is four distinct surfaces with v
 
 **The headline:** the surfaces customers worry about most (data residency, model training, hallucination, runaway autonomy) all map primarily to the Generative AI surface — and that is also the surface where Dynatrace has applied the most explicit controls. The other three surfaces inherit the general platform posture (tenant isolation, IAM, audit) and add little incremental AI-specific risk.
 
-> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai). **Derived:** the four-surface taxonomy and risk-profile table is community / engagement framing — Dynatrace docs describe each capability individually but do not present this consolidated risk table.</sub>
+> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai).</sub>
 
 <a id="surface-map"></a>
 ## 2. The Four Davis AI Surfaces
@@ -76,7 +76,7 @@ For environments where SVG doesn't render
 
 ### Why this split matters for risk review
 
-A blanket "we use AI" statement collapses very different risk profiles into one scary phrase. A precise statement does the opposite:
+In community practice, a blanket "we use AI" statement collapses very different risk profiles into one scary phrase. A precise statement does the opposite:
 
 - **Causal AI** has the lowest incremental risk of anything Dynatrace ships — it is deterministic graph analysis over data that's already in the tenant, with no foundation-model call and no external data flow. The "AI" label is technically correct but historically loaded.
 - **Predictive AI** runs statistical models (forecasting, anomaly detection, baselining) on tenant data. The outputs are bounded numeric predictions with confidence intervals. The risk is *acting on a forecast* — which is an operator decision, not the model's.
@@ -85,7 +85,7 @@ A blanket "we use AI" statement collapses very different risk profiles into one 
 
 In community practice, the most productive framing in a security review is to walk the four surfaces explicitly and let the reviewer apply different scrutiny to each. Treating "Davis AI" as one thing usually leads to over-broad concerns about the low-risk surfaces and under-precise questions about the high-risk one.
 
-> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [Dynatrace AI Observability (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability). **Derived:** the four-surface model and the "different risk per surface" framing is community / engagement-derived.</sub>
+> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [Dynatrace AI Observability (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability).</sub>
 
 <a id="residency"></a>
 ## 3. Data Residency and Tenant Isolation
@@ -158,7 +158,7 @@ Subject to forecast error, not hallucination. Forecasts come with confidence ban
 
 ### Generative AI (Davis CoPilot)
 
-This is the surface where hallucination is a real concern. Controls applied:
+This is the surface where hallucination is a real concern. The table groups the controls that apply — the grouping is community practice for a review conversation; Dynatrace documents each control on its own:
 
 | Control | What it does |
 |---------|--------------|
@@ -172,7 +172,7 @@ This is the surface where hallucination is a real concern. Controls applied:
 
 The most reliable hallucination control is the *operator habit* of treating generative answers as drafts. In community practice, the teams that get the most value out of CoPilot use it for "first draft of a DQL query," "first pass at interpreting a problem," "first explanation of an unfamiliar feature" — and then verify. This is the same posture that applies to GenAI in software development generally and is not Dynatrace-specific.
 
-> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [DQL verify-dql (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language). **Derived:** the explicit hallucination-control table is community / engagement framing; the individual controls are documented but the consolidated set is not.</sub>
+> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [DQL verify-dql (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language).</sub>
 
 <a id="autonomy"></a>
 ## 6. Autonomy Boundaries — Human-in-the-Loop
@@ -200,11 +200,11 @@ None of these write to your infrastructure or change tenant configuration. They 
 
 ### The principle
 
-The platform's autonomy posture is: **AI surfaces produce findings and suggestions; humans (or explicitly configured, scoped automation) apply changes.** This is a deliberate design choice — and it is the choice that most enterprise risk reviewers want to hear, because the alternative ("the AI made the change unattended") is the one that triggers regulatory and operational concerns.
+In community practice, the platform's autonomy posture is summarized as: **AI surfaces produce findings and suggestions; humans (or explicitly configured, scoped automation) apply changes.** The summary is this entry's reading of the documented mechanics above, not a Dynatrace policy statement — and it is the choice that most enterprise risk reviewers want to hear, because the alternative ("the AI made the change unattended") is the one that triggers regulatory and operational concerns.
 
 In community practice, the agentic-workflow conversation often comes up here: *can Davis act autonomously through Workflows?* The honest answer is *yes, if the customer configures it that way, and within the scopes the customer grants*. Davis CoPilot suggesting a workflow that, when executed, takes an automatic remediation is the same as any other workflow in the platform — governed by the workflow's own credentials, IAM scope, and configured triggers. The autonomy lives in the *customer's workflow configuration*, not in the AI.
 
-> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai) — *"is capable of auto-executing generated DQL queries."*, [SaaS 1.348 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"Dynatrace Intelligence can now run agentic workflows for problem root cause analysis."* (pre-release, read 09/28/2026), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the "AI proposes, humans/workflows dispose" framing is community / engagement guidance — the underlying mechanics are documented; the explicit autonomy boundary is the synthesis.</sub>
+> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai) — *"is capable of auto-executing generated DQL queries."*, [SaaS 1.348 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"Dynatrace Intelligence can now run agentic workflows for problem root cause analysis."* (pre-release, read 09/28/2026), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows).</sub>
 
 <a id="audit"></a>
 ## 7. Audit Trail and Explainability
@@ -328,14 +328,14 @@ Dynatrace's AI Observability is compatible with the OpenTelemetry GenAI semantic
 
 ### Why this is a risk *reducer*
 
-A common board-level concern: *we're shipping a customer-facing LLM app — what could go wrong?* The honest answer is: cost, latency, hallucination, prompt injection, drift. AI Observability turns each of those from an unknown into a metric you can SLO against. For a security review that asks "are you taking AI risk in production?", the response is *yes, and here is the instrumentation that gives us the same posture for the AI workload that we have for the rest of the stack.*
+In community practice, the framing that lands is AI Observability as a risk *reducer*. A common board-level concern: *we're shipping a customer-facing LLM app — what could go wrong?* The honest answer is: cost, latency, hallucination, prompt injection, drift. AI Observability turns each of those from an unknown into a metric you can SLO against. For a security review that asks "are you taking AI risk in production?", the response is *yes, and here is the instrumentation that gives us the same posture for the AI workload that we have for the rest of the stack.*
 
-> <sub>**Sources:** [Dynatrace AI Observability (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability), [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). **Derived:** the "risk-reducer for the customer's GenAI stack" framing is community / engagement positioning — the underlying signal list is documented; the consolidated framing is the synthesis.</sub>
+> <sub>**Sources:** [Dynatrace AI Observability (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability), [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/).</sub>
 
 <a id="decision-framework"></a>
 ## 11. Decision Framework — When to Lean In vs Hold Back
 
-Not every team should adopt every surface on day one. A rough maturity curve:
+Not every team should adopt every surface on day one. The maturity curve below is community practice, not Dynatrace's own recommendation:
 
 | Davis surface | Adopt immediately | Adopt after pilot | Hold pending governance |
 |---------------|------------------|-------------------|------------------------|
@@ -361,7 +361,7 @@ Not every team should adopt every surface on day one. A rough maturity curve:
 
 In community practice, the pattern that produces the best outcomes is: **Causal AI + Predictive AI + read-only CoPilot adopted immediately; CoPilot-driven write actions through Workflows treated as an explicit governance decision per workflow.** This separates the value (which is mostly in the read surfaces) from the risk (which is mostly in autonomous writes) and lets each be evaluated on its own terms.
 
-> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the adopt/pilot/hold table is community / engagement framing — not Dynatrace's own recommendation.</sub>
+> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows).</sub>
 
 <a id="objections"></a>
 ## 12. Common Objections and Responses

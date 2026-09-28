@@ -1,6 +1,6 @@
 # DBMON-01: Database Monitoring Fundamentals
 
-> **Series:** DBMON — Database Monitoring | **Notebook:** 1 of 7 | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** DBMON — Database Monitoring | **Notebook:** 1 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -225,7 +225,7 @@ fetch spans, from:-24h
 
 While OneAgent captures database calls from the application side (client spans), ActiveGate extensions monitor the database server itself. This provides internal metrics that are invisible from the application perspective.
 
-> **Recommendation for new customers:** build on **Extensions 2.0** — the current extensions framework. Extensions Framework 1.0 reached end of support on 2025-03-31 (Python EF1.0: 2024-10-31); JMX and PMI EF1.0 are deprecated but supported past that date on request. Note that recent Dynatrace doc pages say simply "Extensions" and mean Extensions 2.0.
+> **Recommendation for new customers:** build on **Extensions 2.0** — the current extensions framework. Extensions Framework 1.0 reached end of support on 2025-03-31 (Python EF1.0: 2024-10-31). JMX and PMI EF1.0 extensions were the exception, supported past March 2025 as deprecated; they now have their own end-of-support date of **July 1, 2027** for SaaS environments. Note that recent Dynatrace doc pages say simply "Extensions" and mean Extensions 2.0.
 
 ### Extension Architecture
 
@@ -254,7 +254,7 @@ While OneAgent captures database calls from the application side (client spans),
 - **ORGNZ-02** — Bucket strategy (including `default_database_monitoring`)
 - **IAM-04 / IAM-05** — Policy design that scopes extension log access by bucket
 
-> <sub>**Sources:** [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — the Extensions 2.0 framework and the EEC execution model; note recent pages say simply *"Extensions"* and mean 2.0, [Extension data sources (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/supported-extensions/data-sources) — the built-in SQL / Prometheus / SNMP data sources and the optional Python data source, [Run SQL extensions on Kubernetes (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/kubernetes) — *"The following database types are supported, both as official Dynatrace Hub extensions and as custom extensions"*; prerequisites Dynatrace 1.346+, SQL Extension Executor 1.345+, Extension Execution Controller 1.345+, [Enable Dynatrace SQL database extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s/extend-observability-k8s/sql-database-extensions) — *"SQL Extension Executor pods query your databases and collect metrics. The EEC coordinates task distribution across SQL Extension Executor pods and forwards collected data to the ActiveGate, which enriches and routes it to the Dynatrace backend."* **Derived:** the EF 1.0 end-of-support dates are carried from the extensions lifecycle announcements rather than from a single page — re-confirm before planning a migration around them.</sub>
+> <sub>**Sources:** [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — the Extensions 2.0 framework and the EEC execution model; note recent pages say simply *"Extensions"* and mean 2.0, [Extension data sources (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/supported-extensions/data-sources) — the built-in SQL / Prometheus / SNMP data sources and the optional Python data source, [Run SQL extensions on Kubernetes (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/kubernetes) — *"The following database types are supported, both as official Dynatrace Hub extensions and as custom extensions"*; prerequisites Dynatrace 1.346+, SQL Extension Executor 1.345+, Extension Execution Controller 1.345+, [Enable Dynatrace SQL database extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s/extend-observability-k8s/sql-database-extensions) — *"SQL Extension Executor pods query your databases and collect metrics. The EEC coordinates task distribution across SQL Extension Executor pods and forwards collected data to the ActiveGate, which enriches and routes it to the Dynatrace backend."*, [End-of-support announcements (DT docs)](https://docs.dynatrace.com/docs/whats-new/technology/end-of-support-news) — lists *"Dynatrace Extension Framework 1.0"* under the 2025-03-31 end-of-support date and *"Dynatrace Extension Framework 1.0 (Python 3.8)"* under 2024-10-31, with the note *"Note that JMX and PMI Extensions Framework 1.0 are supported past March 2025 but are deprecated"*, re-read 09/28/2026, [EF1 JMX and PMI extensions end of support (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/end-of-support/jmx-pmi-ef1-deprecation) — *"As of July 1, 2027, all Extension Framework 1.0 JMX and PMI extensions will be out of support for SaaS Environments"*.</sub>
 
 > **New (SaaS 1.346 — staged rollout from 08/25/2026): a `definity` extension for data-pipeline observability.** Verbatim: *"The new definity extension is introduced. It ingests pipeline health, performance, and cost data into Dynatrace, giving you visibility into your lakehouse and Spark pipeline ecosystem."*
 >
@@ -264,18 +264,23 @@ While OneAgent captures database calls from the application side (client spans),
 
 ### Where Extension Logs Land in Grail
 
-Logs emitted by official Dynatrace database extensions are routed to a dedicated Grail bucket: **`default_database_monitoring`** (introduced in Dynatrace SaaS 1.337). Querying this bucket directly improves filter performance vs. scanning `default_logs`, and lets you scope IAM policies tightly to database-monitoring data.
+Monitoring logs generated by the official Dynatrace database extensions are stored in a dedicated Grail bucket: **`default_database_monitoring`** (introduced in Dynatrace SaaS 1.337, through a default bucket-assignment rule that is applied first and cannot be overwritten). The Databases app itself now filters via this bucket for performance; filtering your own queries on the bucket narrows the scan the same way, and lets you scope IAM policies tightly to database-monitoring data.
 
 ```dql
 fetch logs, from:-1h
 | filter dt.system.bucket == "default_database_monitoring"
-| filter dt.extension.name == "com.dynatrace.extension.postgresql"
+| filter dt.extension.name == "com.dynatrace.extension.postgres"
 | limit 50
 ```
 
-Grant `storage:bucket.default_database_monitoring:read` to roles that need to query this bucket.
+Grant access to this bucket with a bucket-scoped policy — both the bucket permission and the `logs` table permission are needed:
 
-> <sub>**Sources:** [What's new in Dynatrace SaaS 1.337 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-337) — introduces the `default_database_monitoring` bucket, [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — extension log routing. **Derived:** the bucket-scoped IAM recommendation applies ORGNZ-02's per-bucket permission model to this bucket.</sub>
+```text
+ALLOW storage:buckets:read WHERE storage:bucket-name = "default_database_monitoring";
+ALLOW storage:logs:read WHERE storage:bucket-name = "default_database_monitoring";
+```
+
+> <sub>**Sources:** [What's new in Dynatrace SaaS 1.337 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-337) — introduces the `default_database_monitoring` bucket, [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — extension log routing, [Assign permissions in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data/assign-permissions-in-grail) — *"All bucket permissions need to start with storage:buckets:read"* and the table-permission form *"ALLOW storage:logs:read WHERE storage:bucket-name="default_logs";"*. The extension IDs on this bucket (including `com.dynatrace.extension.postgres`) are listed in the SaaS 1.337 entry above, alongside *"The new default rule is always applied first and cannot be overwritten"*.</sub>
 
 ### Dynatrace Database App — Analysis-First Observability
 

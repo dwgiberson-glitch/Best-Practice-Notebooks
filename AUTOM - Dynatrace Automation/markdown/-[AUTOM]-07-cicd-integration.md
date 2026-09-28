@@ -1291,7 +1291,7 @@ Bamboo's **Plan Branches** feature creates a child plan per Bitbucket branch aut
 
 **Gating the Apply stage to main only:**
 
-The cleanest approach is **branch-aware stage conditions**. Bamboo Specs lets you mark a stage with a `final: true` flag or use plan-branch overrides. In practice for this pattern:
+In community practice, the usual approach is **branch-aware stage conditions**. Bamboo Specs lets you mark a stage with a `final: true` flag or use plan-branch overrides. In practice for this pattern:
 
 - Define the Apply stage with `manual: true` in the YAML (as above).
 - In the Bamboo UI under the plan's *Branches* tab, set the **Branch overrides** to disable the Apply stage on plan branches — only the main-branch plan executes Apply.
@@ -1435,7 +1435,7 @@ stages:
 > - <sub>[Bamboo Specs reference (Atlassian)](https://docs.atlassian.com/bamboo-specs-docs/9.6.0/specs.html) — `manual: true` stage syntax, `repositories` Bitbucket linked repo block, `variables` with `BAMSCRT@...` encrypted form, `branches` plan-branches configuration.</sub>
 > - <sub>[Plan branches (Atlassian)](https://confluence.atlassian.com/bamboo/using-plan-branches-289276872.html) — per-Bitbucket-branch child plans and lifecycle.</sub>
 > - <sub>[Terraform S3 backend (HashiCorp)](https://developer.hashicorp.com/terraform/language/backend/s3) — backend configuration referenced from `envs/<env>/backend.tf`.</sub>
-> - <sub>**Derived:** the IAM policy snippet combines the documented Terraform S3-backend requirements with standard AWS least-privilege practice for the `dynatrace/` key prefix; the branch-overrides approach to gating Apply on plan branches is community guidance grounded in Bamboo's branch-overrides feature documented in the Specs reference.</sub>
+> - <sub>**Derived:** the IAM policy snippet narrows the documented Terraform S3-backend permissions to the `dynatrace/` key prefix.</sub>
 
 ---
 
@@ -2008,7 +2008,7 @@ For environments where SVG doesn't render
 
 The four layers, reading left-to-right in the diagram:
 
-**Layer 1 — CI Runner with OAuth Client.** A persistent OAuth client_id+secret pair lives in a secret manager (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager). The OAuth client carries **exactly one OAuth scope: `platform-token:tokens:write`** — narrow enough that compromise yields only the ability to mint Platform Tokens, not to modify users/groups/policies or to perform Settings/Synthetics/SLO operations directly.
+**Layer 1 — CI Runner with OAuth Client.** A persistent OAuth client_id+secret pair lives in a secret manager (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager). The OAuth client carries **exactly one OAuth scope: `platform-token:tokens:manage`** — the scope the mint endpoint requires. It grants no user/group/policy changes and no Settings/Synthetics/SLO operations, but it is not minimal: the IAM reference describes `platform-token:tokens:manage` as *"admin-level access to list, update, and delete any platform token within an account regardless of owner"*, so treat this client's secret as an account-level credential.
 
 **Layer 2 — Dynatrace IAM, holding one or more Service Users.** Each Service User (provisioned per AUTOM-95 §4) carries the actual IAM policies for the work the pipeline performs — `settings:objects:write` for the settings pipeline, `synthetic:write` for the synthetics pipeline, etc. The Service User is what the per-job Platform Token will be *on behalf of*.
 
@@ -2018,16 +2018,16 @@ The four layers, reading left-to-right in the diagram:
 
 **The load-bearing handoff is the amber arrow** — Platform Token returned from the IAM API to the CI runner. That's where the token crosses a trust boundary as a short-lived secret. Everything else in the diagram is routine API surface.
 
-> <sub>**Sources:** [POST /iam/v1/accounts/{accountUuid}/platform-tokens (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token), [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens) for the intersection model. **Derived:** the four-layer composition is a synthesis — Dynatrace docs describe each layer separately but do not endorse this composition as a named pattern. The required OAuth scope is `platform-token:tokens:write` per the Swagger at `api.dynatrace.com/spec`; the linked docs page lists the older `account-idm-write` value (stale per the verify-at-source discipline).</sub>
+> <sub>**Sources:** [POST /iam/v1/accounts/{accountUuid}/platform-tokens (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token), [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens) for the intersection model. [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — *"Grants admin-level access to list, update, and delete any platform token within an account regardless of owner."* The mint endpoint page states the scope: *"you need an OAuth client with the platform-token:tokens:manage scope assigned"* (re-read 09/28/2026; the endpoint's `x-token-scopes` in the Account Management API spec at `api.dynatrace.com/spec` agrees). **Derived:** the four-layer composition is a synthesis — Dynatrace docs describe each layer separately but do not endorse this composition as a named pattern.</sub>
 
 <a id="eptm-prerequisites"></a>
 ### 11.2 Prerequisites — OAuth Client + Service Users + IAM Policies
 
 Before any CI job can mint a token, the IAM scaffolding must exist:
 
-**1. A dedicated OAuth client for minting only.** Create an OAuth client in `myaccount.dynatrace.com` with **exactly one scope: `platform-token:tokens:write`**. Do not give this OAuth client other scopes — every additional scope expands its blast radius if compromised. Store the `client_id` + `secret` in your secret manager (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager).
+**1. A dedicated OAuth client for minting only.** Create an OAuth client in `myaccount.dynatrace.com` with **exactly one scope: `platform-token:tokens:manage`**. Do not give this OAuth client other scopes — every additional scope expands its blast radius if compromised. Store the `client_id` + `secret` in your secret manager (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager).
 
-**Note on scope source-of-truth:** the [Platform Token mint endpoint docs page](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token) lists `account-idm-write` as the required scope. The Swagger at `api.dynatrace.com/spec` (authoritative — per *verify at source* discipline) says `platform-token:tokens:write`. Use the narrower Swagger-documented scope; if your account doesn't accept it, fall back to `account-idm-write` and flag the docs/Swagger discrepancy to your DT account team.
+**Note on scope source-of-truth (corrected 09/28/2026):** the [Platform Token mint endpoint docs page](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token) and the endpoint's `x-token-scopes` in the Account Management API spec at `api.dynatrace.com/spec` now agree on `platform-token:tokens:manage` — the same scope the list, delete, expiration and status endpoints used in §11.3 declare. Earlier revisions of this section used `platform-token:tokens:write` and noted `account-idm-write`; neither source lists either one for this endpoint any more. The IAM reference defines `platform-token:tokens:write` as access to *the caller's own* platform tokens only, which does not cover minting for a Service User. If your account rejects `platform-token:tokens:manage`, re-read the spec before reaching for a broader scope.
 
 **2. Domain-scoped Service Users via Terraform.** Create Service Users by domain, not one mega-user. The pattern in AUTOM-95 §4 (`svc-tf-settings`, `svc-tf-iam`, `svc-tf-synth`, `svc-tf-slo`, optionally `svc-tf-grail` and `svc-tf-workflows`). Each Service User holds **only the IAM policies appropriate to its domain** via group bindings (AUTOM-95 §10). Compromise of a per-job Platform Token gives the attacker exactly that domain's permissions, no more.
 
@@ -2058,7 +2058,7 @@ OAUTH_BEARER=$(curl -sS -X POST "https://sso.dynatrace.com/sso/oauth2/token" \
   --data-urlencode "grant_type=client_credentials" \
   --data-urlencode "client_id=${DT_OAUTH_CLIENT_ID}" \
   --data-urlencode "client_secret=${DT_OAUTH_CLIENT_SECRET}" \
-  --data-urlencode "scope=platform-token:tokens:write" |
+  --data-urlencode "scope=platform-token:tokens:manage" |
   jq -r '.access_token')
 
 API="https://api.dynatrace.com"
@@ -2109,13 +2109,13 @@ terraform apply -auto-approve   # the actual work
 
 Key points the script encodes:
 
-- **Pre-mint sweep deletes only expired tokens.** Active tokens (`expirationDate > now`) are never touched, so a parallel CI job's in-flight token cannot be revoked mid-apply. The naive *delete-oldest-N* approach has a race condition under concurrency.
+- **Pre-mint sweep deletes only expired tokens.** Active tokens (`expirationDate > now`) are never touched, so a parallel CI job's in-flight token cannot be revoked mid-apply. In community practice, the naive *delete-oldest-N* approach is avoided: under concurrent jobs it can revoke another job's in-flight token.
 - **Short TTL (1h).** Orphaned tokens from crashed CI runners expire into eligibility for the next job's sweep — self-healing capacity.
 - **`trap ... EXIT` cleanup.** Deletes the per-job token on success OR failure OR signal interruption. The `|| true` ensures cleanup failures (e.g. token already deleted) don't cascade into job-failure noise.
 - **`REQUESTED_SCOPES` narrower than Service User policies.** Take the intersection-model behaviour seriously — pass the narrowest scope set the job actually needs in the mint body, not the maximum the Service User could grant.
 - **Error code for cap-exceeded is undocumented.** The mint endpoint docs document only the 200 response. If the cap is exceeded, the actual HTTP code (likely 400/403/429) is not stated at source. Treat any non-200 from mint as "sweep + retry once" — empirically verify the code against your tenant before adding finer error handling.
 
-> <sub>**Sources:** [POST /iam/v1/accounts/{accountUuid}/platform-tokens (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token), [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens). **Derived:** the pre-mint sweep + short-TTL + `trap EXIT` pattern is a synthesis — Dynatrace docs document the individual mint/list/delete endpoints but do not endorse this lifecycle as a named pattern. The race-condition analysis (why "delete oldest" fails under concurrency) is community-reasoned, not from a primary source.</sub>
+> <sub>**Sources:** [POST /iam/v1/accounts/{accountUuid}/platform-tokens (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/account-management-api/platform-tokens-api/post-platform-token), [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens). **Derived:** the pre-mint sweep + short-TTL + `trap EXIT` pattern is a synthesis — Dynatrace docs document the individual mint/list/delete endpoints but do not endorse this lifecycle as a named pattern.</sub>
 
 <a id="eptm-capacity"></a>
 ### 11.4 Capacity Planning Under the Per-User Cap
@@ -2124,7 +2124,7 @@ Key points the script encodes:
 
 The arithmetic: with **N Service Users × 100 tokens** = N×100 capacity. A typical Terraform-driven CI shop with the AUTOM-95 §4 starter set (`svc-tf-settings`, `svc-tf-iam`, `svc-tf-synth`, `svc-tf-slo`) gets 400 token-slots of capacity. With short TTLs and the pre-mint sweep, steady-state utilization should rarely exceed concurrent-job count per domain — at the current cap, capacity is rarely the reason to add Service Users; attribution is.
 
-**Mitigation patterns by concurrency tier:**
+**Mitigation patterns by concurrency tier:** the tier boundaries follow from the 100-token cap; the recommendations are community practice rather than Dynatrace guidance — tune them to your own pipeline.
 
 | Concurrent applies per domain | Recommendation | Why |
 |---|---|---|
@@ -2157,19 +2157,21 @@ INDEX=$(( $(echo "${JOB_ID}" | cksum | awk '{print $1}') % ${#SVC_USER_IDS[@]} )
 SVC_USER_ID="${SVC_USER_IDS[${INDEX}]}"
 ```
 
-**Add fleet replicas reactively, not preemptively.** Provision the second replica when dashboards show sustained pressure (cap-utilization >70% during business hours). Provisioning a 5-node fleet up front for a domain that turns out to handle 2 concurrent applies is overengineering and dilutes audit attribution.
+**Add fleet replicas reactively, not preemptively.** In community practice, provision the second replica when dashboards show sustained pressure (cap-utilization >70% during business hours). Provisioning a 5-node fleet up front for a domain that turns out to handle 2 concurrent applies is overengineering and dilutes audit attribution.
 
 **Critical reminder — the cap is on the Service User, not the OAuth client.** Shops with multiple CI systems (one OAuth client per platform — GitHub Actions + Azure DevOps + Bamboo, etc.) all minting for the same Service User share its 100-token cap. Capacity planning must aggregate across all minting sources, not per OAuth client.
 
-> <sub>**Sources:** [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens) for the cap verbatim. **Derived:** the concurrency-tier recommendations, fleet-extension `hash mod N` pattern, and reactive-not-preemptive guidance are syntheses combining the cap with operational experience from cloud-IAM concurrent-credential patterns. Empirically verify the exact HTTP error code for cap-exceeded against your tenant before tuning automated retry logic.</sub>
+> <sub>**Sources:** [Platform tokens (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens) for the cap verbatim. **Derived:** the tier boundaries in the concurrency table follow from the 100-per-service-user cap. Empirically verify the exact HTTP error code for cap-exceeded against your tenant before tuning automated retry logic.</sub>
 
 <a id="eptm-justified"></a>
 ### 11.5 When This Pattern Is Justified
 
+In community practice, the pattern earns its operational overhead in the cases below and not in the ones after them — weigh both lists against your own audit and blast-radius requirements.
+
 **Use it for:**
 
 - **High-blast-radius applies** — production IAM changes (AUTOM-95), security configurations, audit-relevant Settings 2.0 changes. The per-job attribution + no-state-leakage justifies the operational complexity.
-- **High-frequency CI** — more than ~10 applies per day per pipeline. The compound benefit of "no long-lived token in any runner" compounds across runs.
+- **High-frequency CI** — roughly ten or more applies per day per pipeline (a community rule of thumb — verify the break-even against your own overhead). The compound benefit of "no long-lived token in any runner" compounds across runs.
 - **Multi-team shared platform** — multiple teams contributing to Dynatrace config via the same pipeline. Per-domain Service Users give clean audit attribution that a shared admin token cannot.
 - **Regulatory environments** — SOX, SOC2, FedRAMP audits care about "every administrative action attributable to a named identity". This pattern delivers that natively; long-lived shared admin tokens do not.
 
@@ -2195,7 +2197,7 @@ SVC_USER_ID="${SVC_USER_IDS[${INDEX}]}"
 - AUTOM-96 LAB — GitHub Actions worked example using long-lived Platform Tokens (simpler pattern this section upgrades)
 - AUTOM-09 §3 + §8 — secrets handling and state-at-rest encryption (orthogonal but related concerns)
 
-> <sub>**Sources:** No primary-source endorsement of "this composition is best practice". **Derived:** the when-to-use / when-not-to-use guidance is community-reasoned, weighted toward the regulatory-environment and high-blast-radius cases where the audit-attribution win is concrete. The classic-API-Token exception (`dynatrace_api_token` resource cannot use Platform Tokens) is cited in AUTOM-04 §3 against the [Platform Tokens service catalog (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens) which does not include `apiTokens`.</sub>
+> <sub>**Sources:** [dynatrace_api_token resource (Dynatrace GitHub)](https://github.com/dynatrace-oss/terraform-provider-dynatrace/blob/main/docs/resources/api_token.md) — *"This resource requires the API token scopes"* `apiTokens.read` and `apiTokens.write`: the classic-API-Token exception above.</sub>
 
 <a id="best-practices"></a>
 ## 12. Best Practices

@@ -52,7 +52,7 @@ This FAQ unpacks the model: the three layers (tenant default → group override 
 
 **Headline:** the mechanism is first-class — admins bind Launchpads to IAM groups (or "Everyone") and users can override personally. The harder problem is **content discipline** — deciding what to put on each persona's Launchpad. That part is community practice, not a feature.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/). **Derived:** the four-question short-answer framing is community / engagement structuring — the underlying mechanism is documented, the consolidated FAQ shape is the synthesis.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/).</sub>
 
 <a id="what-launchpad-is"></a>
 ## 2. What a Launchpad Actually Is
@@ -71,7 +71,7 @@ A Launchpad is composed of three content types:
 
 ### What a Launchpad is *not*
 
-A common source of confusion in the first few days of adoption:
+In community practice, this is a common source of confusion in the first few days of adoption — the three building blocks above are the whole content model, so everything else a Launchpad is sometimes mistaken for falls outside it:
 
 - **Not a dashboard.** A Launchpad has no chart-rendering capability. Dashboards live in the Dashboards app; a Launchpad references a dashboard by **deep-linking** to it.
 - **Not a notebook.** Same pattern — a notebook is a Documents-app object; a Launchpad deep-links to it.
@@ -82,7 +82,7 @@ A common source of confusion in the first few days of adoption:
 
 Launchpads persist via the Dynatrace **Document Service** with `type='launchpad'` — the same storage layer that holds dashboards and notebooks. This is load-bearing for two downstream concerns: (1) sharing and access scoping work the same way as for dashboards and notebooks, and (2) export/import is available through the Documents app and Document Service API.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — defines the three building blocks (Links, Markdown, Cards) and documents persistence via the Document Service API (`type='launchpad'`). [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/) — verbatim on capabilities: *"consolidating relevant resources to a single page"*, *"providing shortcuts to Dynatrace® Apps—including deep links to dashboards, notebooks"*. **Derived:** the explicit "not a dashboard / not a notebook / not the Apps menu" framing is community guidance — the underlying capabilities are documented; the negative-space framing is the synthesis.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — defines the three building blocks (Links, Markdown, Cards) and documents persistence via the Document Service API (`type='launchpad'`). [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/) — verbatim on capabilities: *"consolidating relevant resources to a single page"*, *"providing shortcuts to Dynatrace® Apps—including deep links to dashboards, notebooks"*.</sub>
 
 <a id="three-layer-model"></a>
 ## 3. The Three-Layer Model — Default, Group, Personal
@@ -152,13 +152,13 @@ Repeat steps 2 and 4–7 for each group that should have its own Home Launchpad.
 
 ### Sequencing implication
 
-This is the trap most new tenants hit: the admin tries to bind a Launchpad before there is content to bind. **Build the content scaffold first** — at minimum the "Everyone" Launchpad, ideally a thin draft for each high-value persona — then do the bindings as a batch.
+In community practice, this is the trap most new tenants hit: the admin tries to bind a Launchpad before there is content to bind. **Build the content scaffold first** — at minimum the "Everyone" Launchpad, ideally a thin draft for each high-value persona — then do the bindings as a batch.
 
 ### What changes when you save
 
 The binding takes effect immediately for new sessions. Users with an active session may need to refresh or re-navigate to the home page to see the change. Users who already have a personal Home Launchpad set will continue to see their personal one — the admin's binding lands in their "Suggested" list.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents the admin path *"Settings → General → Launcher → Home launchpad"*, the **Add home launchpad** action, and the *Everyone / user group* selection. **Derived:** the "share with the group" step follows from launchpads being shared documents (*"For details on sharing Dynatrace documents (including launchpads), see Share documents"*) and from the fail-to-load rule quoted in § 3; the "build the content scaffold first" sequencing guidance is community practice — the docs describe each step but do not call out the dependency between content existence and binding.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents the admin path *"Settings → General → Launcher → Home launchpad"*, the **Add home launchpad** action, and the *Everyone / user group* selection. **Derived:** the "share with the group" step follows from launchpads being shared documents (*"For details on sharing Dynatrace documents (including launchpads), see Share documents"*) and from the fail-to-load rule quoted in § 3.</sub>
 
 <a id="persona-examples"></a>
 ## 5. Persona Worked Examples
@@ -195,7 +195,7 @@ Treat this as a starting point, not a final spec. The persona content discipline
 - **Persona Launchpads with no content owner.** A Launchpad with no team owner goes stale within a quarter. Assign each persona's Launchpad to a named maintainer.
 - **Confusing the Launchpad with a dashboard.** Don't try to show data on the Launchpad. Cards can *deep-link* to a dashboard, and that's the right pattern — but the Launchpad itself doesn't render charts.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/) — confirms team-level customization scenarios (onboarding, developer-team daily routine). **Derived:** the seven-persona matrix, the "why each shape works" rationale, and the anti-patterns list are community / engagement framing — Dynatrace docs describe the mechanism but do not prescribe persona-specific content.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/) — confirms team-level customization scenarios (onboarding, developer-team daily routine).</sub>
 
 <a id="iam-binding"></a>
 ## 6. The IAM Binding and Document Service Backing
@@ -232,7 +232,7 @@ What is **not** explicitly documented (as of May 2026):
 - A Launchpad-specific IAM service / verb catalog. There is no published `launchpad:*` policy statement family analogous to `davis-copilot:*` or `document:documents:*`.
 - The exact IAM scopes required to (a) create a Launchpad, (b) share a Launchpad, (c) set a Home Launchpad in Settings.
 
-Practical guidance: treat Launchpad access scoping as a **Document Service concern** — the same `document:documents:*` policy statements that govern dashboard and notebook access are the most likely controls in effect. For tightly-governed tenants, test the actual behavior in a non-production tenant before relying on a specific scoping model.
+Practical guidance, from community practice rather than documentation: treat Launchpad access scoping as a **Document Service concern** — the same `document:documents:*` policy statements that govern dashboard and notebook access are the most likely controls in effect. For tightly-governed tenants, test the actual behavior in a non-production tenant before relying on a specific scoping model.
 
 ### Why this matters
 
@@ -240,7 +240,7 @@ For most customers, the implicit Document Service IAM model is sufficient — La
 
 *The absence of a published `launchpad:*` policy-statement family is a current-state observation rather than a documented guarantee — the IAM catalog evolves, and a future SaaS release may add explicit Launchpad scopes.*
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents Document Service persistence with `type='launchpad'` and the API surface. [IAM policy reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — does not enumerate a Launchpad-specific service as of May 2026; verify when authoring policies. **Derived:** the "treat as a Document Service concern" guidance is community / engagement synthesis — the underlying primitives are documented; the explicit access-scope guidance is the connecting framing.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents Document Service persistence with `type='launchpad'` and the API surface. [IAM policy reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — does not enumerate a Launchpad-specific service as of May 2026; verify when authoring policies.</sub>
 
 <a id="recommended-approach"></a>
 ## 7. Recommended Approach
@@ -262,7 +262,7 @@ An adoption order that produces good results in community practice:
 - **Skipping the "Everyone" Launchpad.** Building only persona Launchpads means new users, contractors, and anyone outside your persona groups land on the platform default — *Getting started with Dynatrace* — with no team context.
 - **Owner-less Launchpads.** Every persona Launchpad needs a named maintainer. Otherwise it goes stale and you end up with the worst of both worlds: the binding exists, but the content is wrong.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/). **Derived:** the seven-step adoption order and the anti-pattern list are community / engagement guidance — Dynatrace docs describe the mechanism but do not prescribe an adoption sequence.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/).</sub>
 
 <a id="evolving"></a>
 ## 8. What's Still Evolving

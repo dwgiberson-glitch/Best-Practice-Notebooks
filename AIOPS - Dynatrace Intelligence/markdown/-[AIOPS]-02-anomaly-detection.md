@@ -1,6 +1,6 @@
 # AIOPS-02: Anomaly Detection
 
-> **Series:** AIOPS — Dynatrace Intelligence | **Notebook:** 2 of 8 | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** AIOPS — Dynatrace Intelligence | **Notebook:** 2 of 8 | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -209,7 +209,7 @@ Those properties are the metadata a downstream workflow filters on. **Enrich her
 
 **Attribute the event to a real entity, or it correlates against the wrong one.** Alongside name, description, type and properties, a Davis event carries `dt.smartscape_source.id` — the Smartscape entity ID of whatever the signal is *about*. Davis's universal correlation rule merges every event naming the same entity into a single problem (AIOPS-03 §1). Set it to an actual host, service, or workload ID, normally interpolated from a `by:{}` dimension the query already groups on.
 
-A detector that leaves this unset does not produce an unattributed event — it produces an event attributed to the **environment**. The ingest API states that when no entity is selected, "the event is associated with the environment (`dt.entity.environment`) entity", and the event still carries `affected_entity_ids` naming it. Every such event across the whole tenant therefore shares one entity, and the correlation rule welds them into the same problem: **the failure is over-merge, not a problem per firing.** On a validation tenant over 7 days on 08/11/2026, environment-fallback events ran at **583 firings per correlation against a single entity**, versus **1.1** for events naming a real entity. No amount of threshold tuning fixes that, because the fault is structural rather than sensitivity-related — what you lose is the ability to tell which service the alert was ever about. Section 8 has a query that finds these in your own tenant.
+The documentation asks for this field to be set "to an existing Smartscape entity ID, like a host or service entity ID rather than an arbitrary string" — it does not say where a detector's event lands when the field is left unset. The one documented fallback belongs to the Events API v2: an event posted without an `entitySelector` "is associated with the environment" entity. For detector events the answer is a tenant observation, not a documented contract: on a validation tenant, events without a `dt.smartscape_source.id` were mostly **not** unattributed — they carried `affected_entity_ids` naming the **environment** entity (re-checked 09/28/2026 over 1 day: 3,940 such events named the environment; 691 named no entity at all). Events that share that one entity are welded into the same problem by the correlation rule, so **the failure observed was over-merge, not a problem per firing.** On the same tenant over 7 days on 08/11/2026, environment-fallback events ran at **583 firings per correlation against a single entity**, versus **1.1** for events naming a real entity. No amount of threshold tuning fixes that, because the fault is structural rather than sensitivity-related — what you lose is the ability to tell which service the alert was ever about. Section 8 has a query that finds these in your own tenant.
 
 **Two event types that never open a problem.** `CUSTOM_INFO` and `WARNING` are both severity SEV-5: they are stored in Grail, are fully queryable, and can trigger workflows, but they do not raise problems. That makes them useful for chronic issues already tracked elsewhere, for routing an observation to Slack or Jira without cluttering the Problems app, and — most valuably — for calibration:
 
@@ -233,12 +233,17 @@ Three checks, run before a detector leaves the notebook-as-scratchpad stage — 
   | summarize distinct_entities = countDistinct(dt.entity.cloud_application_instance)
   ```
 
-- **Attribution.** Does the event template set `dt.smartscape_source.id` to a real entity ID (Step 3)? Unset, the detector correlates against the environment entity instead — Section 8 shows what that looks like once it's already in production, with unrelated alerts sharing a problem and no usable root cause.
+- **Attribution.** Does the event template set `dt.smartscape_source.id` to a real entity ID (Step 3)? Unset, on the tenant measured above the detector's events correlated against the environment entity instead — Section 8 shows what that looks like once it's already in production, with unrelated alerts sharing a problem and no usable root cause.
 - **Cost.** Was the query prototyped in a notebook first (Step 1), and — for a records-based detector — is the aggregation window wide enough to avoid a per-minute scan of raw data (Step 1a)? A detector that scans expensively on every evaluation compounds the cost of every firing, noisy or not.
 
 None of these three are analyzer tuning — they're structural, and a mistuned analyzer sitting on a structurally broken detector still fires wrong.
 
-> <sub>**Sources:** [Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration), [Set up anomaly detectors via API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/set-up-anomaly-detectors-via-api), [Ingest an event — POST /api/v2/events/ingest (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/events-v2/post-event), [What's new in Dynatrace SaaS 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344).</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration)</sub>
+> - <sub>[Set up anomaly detectors via API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/set-up-anomaly-detectors-via-api)</sub>
+> - <sub>[Avoid overalerting (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/use-cases/avoid-overalerting) — *"make sure to set the dt.smartscape_source.id field to an existing Smartscape entity ID, like a host or service entity ID rather than an arbitrary string"*</sub>
+> - <sub>[Ingest an event — POST /api/v2/events/ingest (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/events-v2/post-event) — *"If not set, the event is associated with the environment"* (scoped to events posted through this API)</sub>
+> - <sub>[What's new in Dynatrace SaaS 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344)</sub>
 
 <a id="dql-alerts"></a>
 ## 5. Custom Alerts via DQL
@@ -277,15 +282,19 @@ Not every alert needs the DQL-based detector. **Metric events** are the classic 
 | Mechanism | Settings 2.0 schema | Upgrade status | Reach for it when |
 |-----------|---------------------|----------------|-------------------|
 | DQL-based Davis anomaly detector | `builtin:davis.anomaly-detectors` | Carries forward | The signal needs a query — joins, derived fields, multi-metric logic. Also the migration target for metric events |
-| Metric event | `builtin:anomaly-detection.metric-events` | **Blocked at upgrade** | Only where you already have one; do not author new ones |
+| Metric event | `builtin:anomaly-detection.metric-events` | **Removed in Latest Dynatrace** | Only where you already have one; do not author new ones |
 
-**Prefer the Davis anomaly detector for anything new.** `builtin:anomaly-detection.metric-events` is flagged **Blocked at upgrade** by the ready-made *Check your upgrade readiness* dashboard — it stops answering once the tenant moves to the latest Dynatrace, and every metric event has to be recreated as a DQL-based detector. Dynatrace publishes a transformation path, with the important limitation that **only metric *selectors* can be transformed**: metric *key* events, which put a static threshold on a single metric, have no automated conversion. The transformer also cannot tell whether the metric's data or its tags actually exist in the target, so every converted detector needs validating by hand afterwards.
+**Prefer the Davis anomaly detector for anything new.** `builtin:anomaly-detection.metric-events` is on Dynatrace's list of Settings 2.0 schemas removed in Latest Dynatrace, and none of the schemas on that list are visible there — so once the tenant moves to the latest Dynatrace, every metric event has to be recreated as a DQL-based detector, and any configuration-as-code that references the schema by ID has to be updated first. (On a tenant observed 07/31/2026, the ready-made *Check your upgrade readiness* dashboard flagged the same schema **Blocked at upgrade**.) Dynatrace publishes a transformation path, with the important limitation that **only metric *selectors* can be transformed**: metric *key* events, which put a static threshold on a single metric, have no automated conversion. The transformer also cannot tell whether the metric's data or its tags actually exist in the target, so every converted detector needs validating by hand afterwards.
 
 That reverses the older advice in this section. A metric event is still the lighter-weight mechanism, and one you already own is fine to leave running for now — but it is a construct with an expiry, so new work should not be authored against it, and a static threshold ported as-is is in any case the main source of Gen3 alert noise (ALERT-02).
 
 The Davis detector remains a first-class config-as-code target: provision it with Monaco or Terraform exactly as in **AUTOM-03 (Monaco) / AUTOM-04 (Terraform)**, with the schema name as the `--settings-schema` / resource selector. Check any schema's status in AUTOM-02's catalog before building a long-lived project around it.
 
-> <sub>**Sources:** [Metric events (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/metric-events), [Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration), [Upgrade metric alerting (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/keep-problems-and-alerting-working/metric-alerting) — states that only metric selectors can be transformed, that metric key events cannot, and that automated verification cannot confirm the metric's data or tags are present. **Derived:** the blocked-at-upgrade status is read from the ready-made *Check your upgrade readiness* dashboard, observed 07/31/2026; public documentation does not currently publish it as a breaking change.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Metric events (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/metric-events)</sub>
+> - <sub>[Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration)</sub>
+> - <sub>[Upgrade metric alerting (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/keep-problems-and-alerting-working/metric-alerting) — *"Only metric selectors are available to transform."* and *"the check can't detect whether the data from the metric is available or the necessary tags are present"*</sub>
+> - <sub>[Settings 2.0 schemas removed in Latest Dynatrace (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/removed-schemas) — lists `builtin:anomaly-detection.metric-events`; *"None of the schemas on this page are visible in Latest Dynatrace."*</sub>
 
 <a id="analyzers"></a>
 ## 7. Testing Detectors with Davis Analyzers (MCP)
@@ -350,16 +359,16 @@ Real output from a demonstration tenant over seven days, **measured 07/30/2026**
 | `DYNATRACE USER LOGIN` | 285 | `builtin:davis.anomaly-detectors` … | *null* |
 | `Backoff event` | 254 | `builtin:anomaly-detection.kubernetes.workload` … | `K8S_DEPLOYMENT-79081F0B98463CC2` |
 
-**Read the top row first.** A custom detector firing 5,378 times in seven days with **no `dt.smartscape_source.id`** is the anti-pattern from Section 4 in its natural habitat. What it is *not* is one problem per firing — that reading is wrong, and it sends you hunting the wrong symptom. These events are still attributed; the attribution has simply fallen back to whatever entity the platform could reach, and where that is the environment entity they all merge together. Re-measured on the same tenant over 7 days on 08/11/2026, this detector's firings collapsed to roughly **11 firings per correlation**, and the tenant's environment-fallback events collapsed at **583 firings per correlation onto one entity**. The damage is unrelated alerts sharing a problem and no usable root cause — not problem-count inflation. Re-tuning the threshold would not help either way. The event template has to name a real entity.
+**Read the top row first.** A custom detector firing 5,378 times in seven days with **no `dt.smartscape_source.id`** is the anti-pattern from Section 4 in its natural habitat. What it is *not* is one problem per firing — that reading is wrong, and it sends you hunting the wrong symptom. On this tenant these events were still attributed — the attribution fell back to another entity, and where that was the environment entity they all merged together (a tenant observation; no page documents where a detector's event lands when the field is unset — see Section 4, Step 3). Re-measured on the same tenant over 7 days on 08/11/2026, this detector's firings collapsed to roughly **11 firings per correlation**, and the tenant's environment-fallback events collapsed at **583 firings per correlation onto one entity**. The damage is unrelated alerts sharing a problem and no usable root cause — not problem-count inflation. Re-tuning the threshold would not help either way. The event template has to name a real entity.
 
 **Then read the two ID columns, which answer different questions:**
 
 | Column | Question it answers | Null means |
 |--------|--------------------|------------|
-| `dt.smartscape_source.id` | Is this alert attributed to the entity it is about? | No — it falls back to a platform-chosen entity, commonly the environment, so it merges with unrelated alerts |
+| `dt.smartscape_source.id` | Is this alert attributed to the entity it is about? | No — on the tenant measured here it fell back to another entity, commonly the environment, and merged with unrelated alerts |
 | `dt.settings.object_id` | Can I navigate to the configuration behind it? | No settings object; identify it by `event.name` instead |
 
-`dt.settings.object_id` is the Settings API `objectId`, so a populated value leads straight to the detector's configuration. A useful property: it encodes both the settings **schema** and the **scope**. The values abbreviated above resolve to `builtin:davis.anomaly-detectors` scoped to the tenant, and `builtin:anomaly-detection.kubernetes.workload` scoped to one specific `KUBERNETES_CLUSTER`. That scoping is why a single event name legitimately appears under several distinct object IDs — one per cluster — rather than indicating duplicated configuration.
+`dt.settings.object_id` identifies the configuration that produced the event, so a populated value leads straight to the detector's configuration. A useful property, observed in the values returned on 07/30/2026 rather than a documented contract: it encodes both the settings **schema** and the **scope**. The values abbreviated above resolve to `builtin:davis.anomaly-detectors` scoped to the tenant, and `builtin:anomaly-detection.kubernetes.workload` scoped to one specific `KUBERNETES_CLUSTER`. That scoping is why a single event name legitimately appears under several distinct object IDs — one per cluster — rather than indicating duplicated configuration.
 
 > **Two caveats.** `dt.settings.object_id` is marked **experimental** in the semantic dictionary (`dt.smartscape_source.id` is `stable`) — fine for triage, not something to hard-code an integration against. And a seven-day unfiltered scan of `dt.davis.events` is not cheap: the run above scanned 12.9 GB and the 30-day version below 52.6 GB on 07/30/2026; the same 7-day scan read about 5.9 GB on 09/24/2026 — scan cost moves with event volume. Narrow the window for routine checks (FAQ-09, FINOPS-03).
 
@@ -386,7 +395,7 @@ Measured 07/30/2026: run against a ported static threshold held in observation m
 
 That is the whole value of the shadow deploy. Promoted straight to `CUSTOM_ALERT`, the same rule would have paged someone several hundred times a day before anyone discovered the threshold was wrong; held at `CUSTOM_INFO`, it cost nothing to learn the same thing.
 
-> <sub>**Sources:** [Avoid overalerting (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/use-cases/avoid-overalerting), [Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration). **Derived:** the promote/retune verdict applies the 0.1% yardstick to the measured firing counts; the `dt.settings.object_id` schema-and-scope property is an observation from the returned values, not a documented contract.</sub>
+> <sub>**Sources:** [Avoid overalerting (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/use-cases/avoid-overalerting), [Anomaly detection configuration (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/anomaly-detection-configuration). **Derived:** the promote/retune verdict applies the page's 0.1%-of-observed-time rule to the daily counts measured 07/30/2026.</sub>
 
 <a id="cross"></a>
 ## 9. Cross-Series Pointers

@@ -1,6 +1,6 @@
 # ORGNZ-10: Advanced Segment Definitions
 
-> **Series:** ORGNZ — Organize Data: Buckets, Segments, Security | **Notebook:** 10 of 10 | **Created:** February 2026 | **Last Updated:** 09/24/2026
+> **Series:** ORGNZ — Organize Data: Buckets, Segments, Security | **Notebook:** 10 of 10 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -563,15 +563,22 @@ Create a segment by sending a body of that shape with `POST` to the collection p
 
 ### Manage via Terraform
 
-The `dynatrace-oss/dynatrace` Terraform provider exposes segments through the `dynatrace_segment` resource. The structural shape mirrors the API body above. Required scopes on the credential:
+The `dynatrace-oss/dynatrace` Terraform provider exposes segments through the `dynatrace_segment` resource, whose top-level attributes (`name`, `description`, `is_public`, `includes`, `variables`) mirror the API body above. The resource documentation asks for an **OAuth client** — *"please define the environment variables `DT_CLIENT_ID`, `DT_CLIENT_SECRET`, `DT_ACCOUNT_ID` with an OAuth client"* — carrying these permissions:
 
 - `storage:filter-segments:read` and `storage:filter-segments:write` for create/update
 - `storage:filter-segments:share` if the segment's visibility is set beyond the owner (there is no share-with-specific-group mechanism — see §6)
 - `storage:filter-segments:delete` if `terraform destroy` should remove segments
+- `storage:filter-segments:admin` (*"Maintain all Filter-Segments on the environment"*) when the provider must manage segments it does not own
 
-See AUTOM-04 §6 for the resource-table-driven catalog (including which auth scheme each Terraform resource requires) and AUTOM-09 for the broader GitOps repo layout and state-backend recommendations. The `dynatrace_segment` resource is Platform-Token-friendly; combined auth (`DYNATRACE_HTTP_OAUTH_PREFERENCE=true`) is the recommended default so the segment carries the calling service user as `owner` for IAM filtering downstream.
+It adds that *"Depending on the segment configuration, additional **storage permissions** may be required for DQL-related access"* — for example `storage:logs:read` or `storage:entities:read` for a segment whose variable DQL reads those data objects.
+
+See AUTOM-04 §6 for the resource-table-driven catalog (including which auth scheme each Terraform resource requires) and AUTOM-09 for the broader GitOps repo layout and state-backend recommendations.
+
+**Platform tokens.** The provider accepts `DYNATRACE_PLATFORM_TOKEN` and documents that *"Platform tokens can't be used for IAM (Account Management) or classic resources"* — `dynatrace_segment` is neither. But the segment resource page documents only the OAuth-client path, so treat a platform token as untested for this resource and confirm it in a non-production plan/apply before relying on it. If the same configuration also holds classic API-token resources, setting `DYNATRACE_HTTP_OAUTH_PREFERENCE` to `true` means *"the provider will favor platform or OAuth tokens over API tokens."*
 
 ### When IaC is worth the overhead
+
+No Dynatrace documentation prescribes when a segment should move from the UI to code. In community practice, teams draw the line roughly as follows — adapt it to your own review process.
 
 | Scenario | Author in UI | Manage as code |
 |----------|-------------|----------------|
@@ -581,7 +588,7 @@ See AUTOM-04 §6 for the resource-table-driven catalog (including which auth sch
 | Segments enforcing a compliance scope (segment + bucket + policy triplet) | No | Yes |
 | Segments whose `variables` block contains DQL the team is iterating on | Yes (then promote) | Yes |
 
-The pragmatic split most tenants converge on: **exploration in the UI, promotion to code** the moment a segment becomes load-bearing for someone else's workflow.
+The split this adds up to: **exploration in the UI, promotion to code** the moment a segment becomes load-bearing for someone else's workflow.
 
 ### Drift between UI and code
 
@@ -590,7 +597,7 @@ When a segment is managed in code but someone edits it through the UI, the next 
 1. **Document ownership** — add a `description` like `Managed in Terraform repo X — open a PR, do not edit here`.
 2. **Restrict write scope** in production: only the IaC service user holds `storage:filter-segments:write` for public segments; everyone else gets `read` + private-segment authoring.
 
-> <sub>**Sources:** [Get started with segments — analyze monitoring data (DT docs)](https://docs.dynatrace.com/docs/manage/segments/getting-started/segments-getting-started-analyze-monitoring-data), [Grail storage filter-segments SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-filter-segment-management/). Endpoint paths read from the validation tenant 09/24/2026. **Derived:** the UI-vs-code split table is a synthesis of community IaC practice — there is no Dynatrace doc that prescribes when to promote a segment from UI to code.</sub>
+> <sub>**Sources:** [Get started with segments — analyze monitoring data (DT docs)](https://docs.dynatrace.com/docs/manage/segments/getting-started/segments-getting-started-analyze-monitoring-data), [Grail storage filter-segments SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-filter-segment-management/). [dynatrace_segment resource (Dynatrace GitHub)](https://github.com/dynatrace-oss/terraform-provider-dynatrace/blob/main/docs/resources/segment.md), [Terraform provider authentication (Dynatrace GitHub)](https://github.com/dynatrace-oss/terraform-provider-dynatrace/blob/main/docs/index.md). Endpoint paths read from the validation tenant 09/24/2026.</sub>
 
 <a id="consuming-segments-via-the-query-api"></a>
 
@@ -634,7 +641,7 @@ You almost never invoke the Query API directly. The Dynatrace surfaces that read
 
 ### Implication for custom integrations
 
-If you are writing a script that queries Grail through the API — for example, a Workflow JavaScript task using `@dynatrace-sdk/client-query`, a CI/CD job emitting a Site Reliability Guardian-style check, or a custom Dynatrace app — and you want it to honor a saved segment, **you must pass the `filterSegments` array yourself**. The DQL string alone will not pick up "the currently active segment in the app" — there is no such thing outside a UI session.
+If you are writing a script that queries Grail through the API — for example, a Workflow JavaScript task using `@dynatrace-sdk/client-query`, a CI/CD job emitting a Site Reliability Guardian-style check, or a custom Dynatrace app — and you want it to honor a saved segment, **you must pass the `filterSegments` array yourself**. The DQL string alone will not pick up "the currently active segment in the app" — there is no such thing outside a UI session. In community practice, the most common cause of "my segment works in the app but not in my script" is the script's API call missing the `filterSegments` array — verify against your own integrations.
 
 ### Variables in segments — how the value is supplied
 
@@ -646,21 +653,21 @@ Verified on the validation tenant 09/24/2026: `fetch logs, from:-1h | summarize 
 
 Because segments are query context, **a segment's effective behavior depends on who is calling**. The same segment applied by a user with `storage:logs:read` on bucket A returns rows from bucket A; applied by a user without that scope, the same segment returns nothing from bucket A. Segments do not bypass IAM — they layer on top of it. This is the §9 "Segments filters entities but not logs" troubleshooting story restated as a design principle.
 
-> <sub>**Sources:** [Segments in DQL queries (DT docs)](https://docs.dynatrace.com/docs/manage/segments/concepts/segments-concepts-queries), [Grail service overview (Dynatrace Developer)](https://developer.dynatrace.com/develop/platform-services/services/grail-service/), [Grail storage query SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/). **Softened:** In community practice, the most common cause of "my segment works in the app but not in my script" is the script's API call missing the `filterSegments` array — verify against your own integrations.</sub>
+> <sub>**Sources:** [Segments in DQL queries (DT docs)](https://docs.dynatrace.com/docs/manage/segments/concepts/segments-concepts-queries), [Grail service overview (Dynatrace Developer)](https://developer.dynatrace.com/develop/platform-services/services/grail-service/), [Grail storage query SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/).</sub>
 
 <a id="davis-problem-segment-include-shape"></a>
 
 ## 12. Davis Problem Segment Include Shape
 
-The Problems app shows up as "Full" support in the cross-app integration table in §7, but with a critical asterisk noted in §8: **entity includes alone do not filter problem records**. Davis problems are stored as events, so the segment needs an explicit events include keyed on `event.kind`.
+The Problems app shows up as "Full" support in the cross-app integration table in §7, but with a critical asterisk noted in §8: **entity includes alone do not filter problem records**. The Problems app documentation is explicit: *"Since problems are stored as events in Grail, segments created for filtering problems must define an event filter."* Its own example is `cloud.region = "us-east-1c" AND event.kind = "DAVIS_PROBLEM"`.
 
 ### Include shape
 
 | Data type | Filter | Effect |
 |-----------|--------|--------|
 | `events` | `event.kind = "DAVIS_PROBLEM"` AND your scoping condition | Filters problem records to the team / env / app scope |
-| `dt.entity.host` (optional) | scoping condition on the same dimension | Also scopes the host list shown in problem detail views |
-| `dt.entity.service` (optional) | scoping condition on the same dimension | Also scopes the affected services shown |
+| `dt.entity.host` (optional) | scoping condition on the same dimension | Not applied to problems — scopes host data when the same segment is used in other apps |
+| `dt.entity.service` (optional) | scoping condition on the same dimension | Not applied to problems — scopes service data when the same segment is used in other apps |
 
 ### Worked example — production problems only
 
@@ -680,17 +687,13 @@ includes:
     filter: 'tags = "environment:production"'
 ```
 
-When this segment is active in the Problems app, three things filter together:
+In the Problems app, only the `events` include does any work: *"Segment filters are directly applied to the problem Grail records. Consequently, no entity filters are applied to the problem unless the entity ID is chosen as a primary field of the filtered problem."* Drop the `events` include and the problem feed stops filtering — entity includes alone are not enough.
 
-1. The **problem feed** is scoped by the `events` include (the load-bearing rule).
-2. The **affected hosts** list inside a problem is scoped by `dt.entity.host`.
-3. The **affected services** list inside a problem is scoped by `dt.entity.service`.
-
-Drop the `events` include and the problem feed stops filtering — entity includes alone are not enough.
+The entity includes are optional and earn their place outside the Problems app. Because a segment selection carries across apps (§7), in community practice teams add them so that one "production" segment also scopes the host and service views an investigation moves into next — verify the behavior in the apps your teams actually use.
 
 ### Why this works
 
-Davis problems live in the `events` data object with `event.kind = "DAVIS_PROBLEM"`. The Problems app is a UI layer on top of that data; the segment injects its `events` filter into every Grail query the app issues. Entity includes filter the topology views, not the problem records themselves.
+Davis problems live in the `events` data object with `event.kind = "DAVIS_PROBLEM"`. The Problems app issues DQL against that data, and *"During query execution, Grail evaluates only relevant conditions of segments passed based on the query's targeted data object"* — so a query over `events` reads the `events` include and ignores the entity includes.
 
 ### Validating the include
 
@@ -705,7 +708,7 @@ fetch events, from:-24h
 
 If the count is zero, the underlying scoping field probably isn't enriched on problem events in your tenant — fall back to a Primary Grail Field that is (§3 audit query).
 
-> <sub>**Sources:** [Problems app (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/problems-app), [Segments in DQL queries (DT docs)](https://docs.dynatrace.com/docs/manage/segments/concepts/segments-concepts-queries). **Derived:** the three-include "load-bearing events plus optional entity scoping" pattern is a synthesis — the docs note the requirement for an `events` include with `DAVIS_PROBLEM` but do not prescribe pairing it with entity includes; that comes from operator experience with the Problems app's drill-down behavior.</sub>
+> <sub>**Sources:** [Problems app (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/problems-app), [Segments in DQL queries (DT docs)](https://docs.dynatrace.com/docs/manage/segments/concepts/segments-concepts-queries).</sub>
 
 ## Summary
 

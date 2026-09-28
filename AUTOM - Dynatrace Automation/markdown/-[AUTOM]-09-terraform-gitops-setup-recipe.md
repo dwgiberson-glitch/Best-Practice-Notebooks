@@ -50,9 +50,9 @@ AUTOM-04 documents what Terraform resources exist for Dynatrace. AUTOM-07 docume
 
 ### The opinionated stance
 
-There are many "valid" Terraform layouts. This recipe picks one — separate-modules-and-environments — because in practice that's the layout most production Terraform shops converge to after a year of operating. Picking it on day one saves you the inevitable refactor.
+There are many "valid" Terraform layouts. This recipe picks one — separate-modules-and-environments — because, in community practice, that is the layout production Terraform shops tend to converge to after a year of operating. Picking it on day one saves you the inevitable refactor.
 
-> <sub>**Sources:** [Terraform configuration language (HashiCorp)](https://developer.hashicorp.com/terraform/language) — module and root configuration concepts. **Derived:** the "separate-modules-and-environments" recommendation is community / engagement guidance grounded in the modules-as-reusable-units pattern documented by HashiCorp, applied to Dynatrace's per-environment tenant model.</sub>
+> <sub>**Sources:** [Terraform configuration language (HashiCorp)](https://developer.hashicorp.com/terraform/language) — module and root configuration concepts.</sub>
 
 <a id="repo-layout"></a>
 ## 2. Opinionated Repo Layout
@@ -491,8 +491,8 @@ It's common for `envs/production/main.tf` to drift from `envs/staging/main.tf` i
 Terraform workspaces (`terraform workspace new staging`) are an alternative to the `envs/<env>/` directory pattern: same files, different state per workspace. **Don't.** Workspaces share `main.tf` between envs, which means production changes get applied to dev (and vice versa) the moment you forget to switch workspaces. Directory-per-env is mechanically harder to misuse — if you're editing `envs/production/main.tf`, you know what you're working on.
 
 > <sub>**Sources:**</sub>
-> - <sub>[Terraform workspaces (HashiCorp)](https://developer.hashicorp.com/terraform/language/state/workspaces) — workspace mechanics (which we recommend *against* in favor of directory-per-env).</sub>
-> - <sub>**Derived:** the directory-per-env-vs-workspaces recommendation is community / engagement guidance grounded in the failure mode of workspace switching across envs; HashiCorp does not take a position either way in its docs.</sub>
+> - <sub>[Terraform workspaces (HashiCorp)](https://developer.hashicorp.com/terraform/language/state/workspaces) — *"Workspaces are not appropriate for system decomposition or deployments requiring separate credentials and access controls."* Each environment here has its own tenant credentials.</sub>
+> - <sub>[Managing workspaces (HashiCorp)](https://developer.hashicorp.com/terraform/cli/workspaces) — *"We recommend using alternative approaches for complex deployments requiring separate credentials and access controls."*</sub>
 
 <a id="cicd-pipeline"></a>
 ## 7. CI/CD Pipeline (cross-reference)
@@ -706,6 +706,8 @@ Once the platform team's Terraform GitOps shop is running, the next question is 
 
 ### The onboarding workflow
 
+The steps below are community practice from platform teams running Terraform GitOps, not a vendor-documented procedure — adapt them to your own intake process.
+
 1. **Team requests onboarding.** Lightweight intake form: team name, product, expected resource types (which modules will they use), expected scale (a handful of SLOs? hundreds of synthetics?), preferred Git host.
 2. **Platform team provisions the team's namespace.**
    - A subdirectory under `envs/<env>/` per product (e.g., `envs/production/payments/`)
@@ -758,7 +760,6 @@ The `prevent_destroy` lifecycle on critical resources may need to be temporarily
 > <sub>**Sources:**</sub>
 > - <sub>**AUTOM-04 §7 Brokered Self-Service** (this repo) — the architectural pattern this section operationalizes.</sub>
 > - <sub>**FAQ-02: Tagging — Sources, Standards, and Strategy** (this repo) — `owner` tag convention referenced in off-boarding.</sub>
-> - <sub>**Derived:** the onboarding-workflow steps (intake → namespace → template → first PR → promotion drill) and off-boarding sequence are community / engagement guidance — not a vendor-documented procedure but consistent practice across platform teams running Terraform GitOps shops.</sub>
 
 <a id="cost"></a>
 ## 11. Cost and DPS Considerations at Apply Time
@@ -806,7 +807,7 @@ The Dynatrace API has rate limits. Plans against a tenant with hundreds of resou
 <a id="operational"></a>
 ## 12. Operational Realities — State Lock, Break-Glass, DR
 
-Three operational scenarios every Terraform GitOps shop hits eventually.
+Three operational scenarios every Terraform GitOps shop hits eventually. HashiCorp documents the commands used below; the break-glass and disaster-recovery workflows around them are community practice — adapt them to your own runbooks.
 
 ### Stuck state lock
 
@@ -872,7 +873,6 @@ The drill is not optional — discovering that your "documented" DR procedure ha
 > <sub>**Sources:**</sub>
 > - <sub>[Force-unlock state (HashiCorp)](https://developer.hashicorp.com/terraform/cli/commands/force-unlock) — `terraform force-unlock` semantics and safety caveats.</sub>
 > - <sub>[Terraform import (HashiCorp)](https://developer.hashicorp.com/terraform/cli/commands/import) — bringing UI-created resources into Terraform state.</sub>
-> - <sub>**Derived:** the break-glass and DR workflows are community / engagement guidance — HashiCorp documents the CLI commands but not the operational discipline around using them; the discipline is what separates a working Terraform GitOps shop from a broken one.</sub>
 
 <a id="next-steps"></a>
 ## 13. Next Steps

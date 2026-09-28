@@ -1,6 +1,6 @@
 # FINOPS-03: DPS Consumption Optimization — When to Cut, Tune, or Filter
 
-> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 03 — DPS Consumption Optimization — When to Cut, Tune, or Filter | **Created:** May 2026 | **Last Updated:** 08/12/2026
+> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 03 — DPS Consumption Optimization — When to Cut, Tune, or Filter | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -52,9 +52,11 @@ Most cost-optimization conversations stall because the team treats every reducti
 | **Tune** | Keep the signal flowing but adjust a parameter (sample rate, retention, metric resolution) | The signal is useful but at a different fidelity than current; rate / depth can be reduced without losing the workload | Medium — re-tune the parameter |
 | **Filter** | Drop a subset of an otherwise-flowing signal at OpenPipeline (or equivalent) | The signal is useful overall but specific subsets are noise (DEBUG logs, healthcheck spans, synthetic-test bots) | High — remove the filter |
 
+The three-lever split is this entry's framing, not a Dynatrace taxonomy — Dynatrace's own Optimize guide names two levers, sending and keeping less data and querying it more efficiently. Cut, Tune, and Filter subdivide the first; query-side tuning (§4) covers the second.
+
 **The headline:** match the lever to the question. *"Is this signal still load-bearing?"* → Cut. *"Is the granularity right?"* → Tune. *"Is some-but-not-all of it noise?"* → Filter. Reach for the upstream-most option that solves the problem — emission-time changes are cheaper than ingest-time, which are cheaper than storage-time.
 
-> <sub>**Sources:** Framework is engagement-level synthesis — Dynatrace docs cover the implementation handles (OpenPipeline filters, retention configuration, sampling) but do not present them as a unified three-lever decision framework. **Derived** throughout.</sub>
+> <sub>**Sources:** [Optimize (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/optimize) — *"Two levers drive DPS cost down: Send and keep less data. Query your data more efficiently with DQL, dashboards, workflows."* [Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"Generally, the closer to the client you drop data, the lower the overall cost."* [DPS Log Management (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-log-management) — *"filtering generates usage for Ingest & Process, but not for Retain"*.</sub>
 
 <a id="three-levers"></a>
 ## 2. The Three Levers — Cut / Tune / Filter
@@ -70,7 +72,7 @@ Most cost-optimization conversations stall because the team treats every reducti
 Bias toward upstream levers: Cut (emission) → Filter (ingest) → Tune (storage).
 -->
 
-Every consumption-reduction option in the Dynatrace platform reduces to one of three patterns. Naming them helps the conversation move past *"reduce cost"* to *"change which signal-emission behavior."*
+This entry sorts every consumption-reduction option into one of three patterns. Naming them helps the conversation move past "reduce cost" to deciding which signal-emission behavior to change.
 
 ### Cut
 
@@ -90,14 +92,14 @@ Keep the signal flowing but adjust a parameter. Examples:
 
 - Reduce log retention from 35 days to 14 days (Logs - Retain)
 - Lower trace sampling rate (Traces - Ingest)
-- Increase metric ingestion interval (Metrics - Ingest)
+- Increase metric ingestion interval beyond one minute (Metrics - Ingest — sub-minute collection is already billed as at most one data point per minute)
 - Move a bucket from Retain with Included Queries to standard Retain
 - Switch a synthetic monitor from 1-minute to 5-minute frequency
 - Slow a dashboard's auto-refresh from 1 minute to 5 minutes (Logs / Events / Traces - Query)
 - Narrow a dashboard tile's default time range from 30 days to 24 hours
 - Reduce session retention for a RUM application
 
-Note that the last three examples are **query-side**, not ingest- or storage-side: Logs, Events, and Traces bill on query execution as well as on ingest and retention, so how often a dashboard re-reads its data is a tunable parameter in exactly the same sense as retention. § 4 covers this surface in full. Tune preserves the signal's existence — useful for cases where the signal is load-bearing but at lower fidelity than current. Tune is the lever most often over-used because it requires no organizational conversation: the platform team can lower retention without consulting any application team.
+Note that the last three examples are **query-side**, not ingest- or storage-side: Logs, Events, and Traces bill on query execution as well as on ingest and retention, so how often a dashboard re-reads its data is a tunable parameter in exactly the same sense as retention. § 4 covers this surface in full. Tune preserves the signal's existence — useful for cases where the signal is load-bearing but at lower fidelity than current. In community practice, Tune is the lever most often over-used because it requires no organizational conversation: the platform team can lower retention without consulting any application team.
 
 ### Filter
 
@@ -110,20 +112,20 @@ Examples:
 - Metric filter that excludes test / synthetic-traffic dimensions
 - Log filter that drops noisy known-benign error patterns (e.g., expected 404s on /favicon.ico)
 
-Filter is the most targeted lever — keep the load-bearing subset, drop the noise. It is also the most likely to drift over time: a filter that was correct in 2024 may suppress a signal that became load-bearing in 2026. Filters need ownership and periodic review.
+Filter is the most targeted lever — keep the load-bearing subset, drop the noise. In community practice it is also the lever most likely to drift over time: a filter that was correct in 2024 may suppress a signal that became load-bearing in 2026. Filters need ownership and periodic review.
 
-> <sub>**Sources:** [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline), [DPS Hosts (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-hosts) — synthetic monitor frequency configuration. Examples are illustrative; the underlying mechanisms are documented per-capability. **Derived:** the three-lever taxonomy is engagement-level synthesis.</sub>
+> <sub>**Sources:** [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline), [Optimize (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/optimize), [Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"each timeseries is billed for no more than one data point per minute."* Examples are illustrative; the underlying mechanisms are documented per-capability.</sub>
 
 <a id="when-to-cut"></a>
 ## 3. When to Cut
 
-Cut applies when the signal has no consumer that justifies the cost-of-emission. Three diagnostic questions:
+Cut applies when the signal has no consumer that justifies the cost-of-emission. In community practice, three diagnostic questions settle it:
 
 ### Q1 — Who looks at this signal?
 
 If the answer is "nobody for the last 90 days," the signal is a candidate. The audit pattern: query notebook open events, dashboard queries, and alert configurations that reference the signal. If none exist over a 90-day window, the signal is operationally dark.
 
-**Counter-question:** is the signal a *compliance* requirement (audit logs, security events, regulator-mandated retention)? Compliance retention is not a value question — the signal must exist for the contract / regulation even if no one looks at it. Do not Cut compliance signals; Tune retention to the minimum mandated period instead.
+**Counter-question:** is the signal a *compliance* requirement (audit logs, security events, regulator-mandated retention)? Compliance retention is not a value question — the signal must exist for the contract / regulation even if no one looks at it. Do not Cut compliance signals; Tune retention to the minimum mandated period instead — and verify that period against your specific regulatory framework.
 
 ### Q2 — Does any alert / SLO depend on this signal?
 
@@ -140,8 +142,6 @@ An audit by incident — for the last 5 production incidents, did this signal co
 3. **Document the Cut.** A short note in the team's runbook on what was disabled, when, and why. If the signal needs to come back, the documentation tells the next operator how.
 4. **Set a review date.** Cuts that were correct in 2024 may be wrong in 2026 — schedule a 6-month review of the disabled signals list.
 
-> <sub>**Sources:** **Derived** — Cut is the highest-impact, highest-friction lever; the diagnostic-question framing is engagement practice. Compliance-retention guidance is generic — verify against your specific regulatory framework.</sub>
-
 <a id="when-to-tune"></a>
 ## 4. When to Tune
 
@@ -149,7 +149,7 @@ Tune applies when the signal is load-bearing but at lower fidelity than the curr
 
 ### Retention tuning
 
-The most common Tune. Logs / spans / events stored for 35 days when the use case only references the last 7 days. Workflow:
+In community practice, the most common Tune: logs / spans / events stored for 35 days when the use case only references the last 7 days. Retention is set per bucket and can be re-configured at any time. The workflow that works:
 
 1. Audit query history: what's the longest lookback that actually fired against this bucket in the last 90 days?
 2. Add a buffer — typically 1.5-2× the longest observed lookback.
@@ -162,26 +162,26 @@ Retention tuning is the easiest lever to justify because it has no impact on emi
 
 For traces especially. Reduce trace-ingest sample rate from 100% (all spans) to a lower rate (e.g., 25% — keep 1 in 4 traces). Workflow:
 
-1. Determine the *statistical* requirement: at what sampling rate do you still detect error patterns reliably? (For most apps with sustained traffic, 10-25% is sufficient.)
-2. Use head-based sampling (deterministic per-trace) rather than tail-based when possible — it's simpler and avoids the "sampled out half my errors" surprise.
-3. Keep error and exception traces at higher sampling — the platform supports differential sampling.
+1. Determine the *statistical* requirement: at what sampling rate do you still detect error patterns reliably? (In community practice, 10-25% is often enough for apps with sustained traffic — verify against your own error rates.)
+2. Prefer head-based sampling (deterministic per-trace) where it meets the need — it is simpler to reason about.
+3. Keep error and exception traces at a higher rate where your sampling mechanism supports it (for example, tail-based sampling in an OpenTelemetry Collector) — confirm what your ingest path offers before relying on it.
 4. Measure investigation success after one month — can your team still root-cause issues with the new sample rate?
 
 ### Resolution tuning
 
-For metrics. Reducing metric ingest interval from 1-second to 1-minute granularity dramatically lowers `data_points` consumption. Workflow:
+For metrics. Lengthening a metric's collection interval lowers `data_points` consumption — **but only above one minute**. Dynatrace aggregates sub-minute measurements into one-minute buckets and bills each timeseries for at most one data point per minute, so moving a metric from 10-second to 1-minute collection changes nothing on the bill, while moving it from 1-minute to 5-minute cuts its billed points ~5×. Workflow:
 
-1. What SLO depends on this metric? If it's a high-criticality SLO (sub-minute MTTD), keep high resolution.
-2. Otherwise, 1-minute or even 5-minute resolution is sufficient for trend visibility and most alerts.
+1. What SLO depends on this metric? If it's a high-criticality SLO (sub-minute MTTD), keep one-minute resolution.
+2. Otherwise, consider 5-minute or longer — Dynatrace names less-critical metrics, metrics read over hours or days, and slow-changing metrics such as disk usage as candidates. Longer intervals leave gaps at one-minute resolution, which can affect existing alerts.
 3. Apply per-metric, not globally — some metrics warrant high resolution; most do not.
 
 ### Query-side tuning
 
-The three tuning categories above are all ingest- or storage-side. **Logs, Events, and Traces also bill on query execution** — a Query capability separate from Ingest and Retain (FINOPS-01 §9 documents the schema; `client.application_context == "Dashboards"` attributes the scan to a dashboard rather than a person). That makes query volume a fourth Tune surface, and on a tenant with a wall-mounted dashboard estate it is often the largest one nobody is looking at. Note the asymmetry: the **Metrics** query dimension is always included and never billed, so this lever is about dashboards and notebooks reading **logs, events, and traces**, not metric tiles.
+The three tuning categories above are all ingest- or storage-side. **Logs, Events, and Traces also bill on query execution** — a Query capability separate from Ingest and Retain (FINOPS-01 §9 documents the schema; `client.application_context == "Dashboards"` attributes the scan to a dashboard rather than a person). That makes query volume a fourth Tune surface — Dynatrace's own guidance is that with log queries *you are charged per execution* of every auto-refresh. In community practice, on a tenant with a wall-mounted dashboard estate it is often the largest one nobody is looking at. Note the asymmetry: the **Metrics** query dimension is always included and never billed, so this lever is about dashboards and notebooks reading **logs, events, and traces**, not metric tiles.
 
 Three dials, in the order worth pulling them:
 
-**1. Refresh cadence.** A dashboard on a 1-minute auto-refresh runs every one of its tile queries roughly **1,440 times a day**. Moving it to 5 minutes cuts that by ~5× and changes nothing about what the dashboard *shows* — the same tiles, the same queries, the same data, just re-read less often. This is the cheapest consumption reduction in the platform because it costs no fidelity at all. DASH-02 §6 has the per-audience cadence table (NOC wall 1-2 min, on-call 2-5 min, executive wall 10-15 min, investigation manual); the FinOps read on that table is that anything faster than its audience needs is pure waste. Start by finding dashboards refreshing faster than their tier warrants.
+**1. Refresh cadence.** A dashboard on a 1-minute auto-refresh runs every one of its tile queries roughly **1,440 times a day**. Moving it to 5 minutes cuts that by ~5× and changes nothing about what the dashboard *shows* — the same tiles, the same queries, the same data, just re-read less often. It is among the cheapest consumption reductions in the platform because it costs no fidelity at all. DASH-02 §6 has the per-audience cadence table (NOC wall 1-2 min, on-call 2-5 min, executive wall 10-15 min, investigation manual); the FinOps read on that table is that anything faster than its audience needs is pure waste. Start by finding dashboards refreshing faster than their tier warrants.
 
 **2. Tile default time ranges.** A tile whose default range is 30 days scans 30 days on every refresh, even when every viewer immediately narrows to the last hour. Multiply by cadence and this dominates. Set each tile default to the range the tile is actually *read* at, and let viewers widen deliberately.
 
@@ -198,7 +198,10 @@ Query-side tuning has one property that makes it unusually easy to sell: unlike 
 - **SLO-feeder metrics:** if the metric is the foundation of an availability SLO, reducing resolution may break the SLO calculation. Verify before tuning.
 - **The dashboard that is your detection surface:** if a NOC wall dashboard is how an incident is actually noticed, slowing its refresh trades money for detection time. Tune cadence on the dashboards nobody watches in real time first, and leave the ones on the wall alone.
 
-> <sub>**Sources:** [DPS Log Management (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-log-management) — retention configuration. [DPS Traces (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-traces) — sampling. [DPS Metrics (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-metrics) — ingest interval. **Derived:** the audit-then-tune workflow is engagement practice.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Best practices for Log Management and Analytics (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-best-practices) — per-bucket retention periods</sub>
+> - <sub>[Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"For metrics collected at intervals shorter than one minute, Dynatrace aggregates the incoming measurements into fixed one‑minute buckets for efficient storage and querying. Therefore, each timeseries is billed for no more than one data point per minute."*; *"Longer ingest intervals can introduce gaps when you view data at one‑minute resolution. This can impact existing alerting setups."*</sub>
+> - <sub>[Optimize dashboards running log queries (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-use-cases/lma-log-query-dashboard) — *"If you are using log queries, you are charged per execution."*</sub>
 
 <a id="when-to-filter"></a>
 ## 5. When to Filter
@@ -207,9 +210,9 @@ Filter applies when the signal is useful overall but specific subsets are noise.
 
 ### Logs — severity-based filters
 
-DEBUG / TRACE logs in production. The most common, highest-impact filter. OpenPipeline can drop these conditionally based on the source bucket / app / environment.
+DEBUG / TRACE logs in production. Dynatrace lists *debug-level logging left on in production* among the typical causes of an ingest spike, and in community practice it is the highest-impact filter. Logs can be filtered on ingest with OneAgent log ingest rules or OpenPipeline — sent to a different bucket or dropped outright — conditionally on app or environment.
 
-Implementation: OpenPipeline pipeline with a drop processor matching `loglevel in ("DEBUG", "TRACE")` and a bucket-name predicate (e.g., `usage.bucket startsWith "prod_"`). Full syntax covered in OPLOGS.
+Implementation: OpenPipeline pipeline with a drop processor whose matching condition combines `in(loglevel, {"DEBUG", "TRACE"})` with a predicate that scopes it to production sources (for example a host-group or Kubernetes-namespace field). Full syntax covered in OPLOGS.
 
 **Common mistake:** dropping ALL DEBUG everywhere. Some pre-production environments need DEBUG; some pre-incident-replay scenarios need DEBUG. Filter on environment, not globally.
 
@@ -227,17 +230,17 @@ Repetitive log lines that are *known to be benign* (e.g., favicon.ico 404s, robo
 
 ### Metrics — high-cardinality dimension filters
 
-Custom metrics emitted with a high-cardinality dimension (user.id, request.id, span.id as a label) produce one time series per unique value, exploding `data_points` cost. Filter the dimension at the SDK or at ingest — keep the metric, drop the high-cardinality label.
+Custom metrics emitted with a high-cardinality dimension (user.id, request.id, span.id as a label) produce one time series per unique value, and every series that sends data points is billed for them. Filter the dimension at the SDK or at ingest — an OpenPipeline DQL or Remove-fields processor — keep the metric, drop the high-cardinality label.
 
 **Common mistake:** assuming the dimension is the data. Often, the metric is useful at aggregate (counts per minute) and the dimension was added for debug-style exploration. Confirm before dropping the dimension.
 
 ### When to Filter vs Tune
 
-Filter targets a *known-noisy subset*. Tune adjusts a *parameter applied to everything*. If the noise is concentrated in a subset you can name ("DEBUG logs in prod," "healthcheck spans," "synthetic-traffic dimension on app metric X"), Filter. If the noise is *diffuse* ("all our traces are too detailed for the value they provide"), Tune the sample rate.
+In this entry's framing, Filter targets a *known-noisy subset*. Tune adjusts a *parameter applied to everything*. If the noise is concentrated in a subset you can name ("DEBUG logs in prod," "healthcheck spans," "synthetic-traffic dimension on app metric X"), Filter. If the noise is *diffuse* ("all our traces are too detailed for the value they provide"), Tune the sample rate.
 
 ### Filter ownership and review
 
-Filters drift. A filter rule that was correct in 2024 may suppress a signal that became load-bearing in 2026. Every filter needs:
+In community practice, filters drift: a rule that was correct in 2024 may suppress a signal that became load-bearing in 2026. Every filter needs:
 
 - An owner (the team responsible for the filtered signal)
 - A rationale (what makes the filtered subset noise)
@@ -245,12 +248,16 @@ Filters drift. A filter rule that was correct in 2024 may suppress a signal that
 
 Filters without owners become invisible cost optimization that no one can safely change.
 
-> <sub>**Sources:** [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline), [OPLOGS topic series](../../oplogs/) — full filter-syntax depth. **Derived:** the filter-vs-tune distinction and the ownership-and-review pattern are engagement practice.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Trace a cost spike to its root cause (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/investigate-a-spike) — typical ingest-spike causes include *"debug-level logging left on in production"*</sub>
+> - <sub>[Best practices for Log Management and Analytics (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-best-practices) — filter logs on ingest with OneAgent or OpenPipeline</sub>
+> - <sub>[Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"High-cardinality dimensions, such as user IDs or request IDs, significantly increase metric storage requirements. Removing a high-cardinality dimension reduces the number of stored timeseries and can lower cost."*</sub>
+> - <sub>[OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline), [OPLOGS topic series](../../oplogs/) — full filter-syntax depth</sub>
 
 <a id="decision-tree"></a>
 ## 6. Decision Tree by Data Type
 
-A working version of the framework for each major data type:
+A working version of this entry's framework for each major data type — verify each recommendation against your tenant's actual usage patterns before applying it:
 
 ### Logs
 
@@ -268,7 +275,7 @@ A working version of the framework for each major data type:
 
 1. **Cut first?** Is the custom metric still in use? Audit Notebooks, Dashboards, and alerts.
 2. **Filter next?** Are high-cardinality dimensions inflating data_points without value? Drop the dimension at the SDK.
-3. **Tune last?** Reduce ingest interval for non-SLO-feeder metrics from 10s to 1min.
+3. **Tune last?** Lengthen the ingest interval for non-SLO-feeder metrics beyond one minute (e.g., 1 min → 5 min). Going from 10 s to 1 min saves nothing — sub-minute collection is already billed as one data point per minute.
 
 ### Synthetic monitors
 
@@ -304,7 +311,7 @@ Cross-cutting rather than a data type — this is the consumption caused by *rea
 2. **Tune next?** Reduce scheduled-trigger frequency. Workflows scheduled hourly that could be daily are often a quick win.
 3. **Filter** — workflow filtering is at the trigger condition (only fire if X), which is an action-level filter.
 
-> <sub>**Sources:** Decision tree is **Derived** — synthesizes the lever framework with per-capability semantics documented across the [DPS docs](https://docs.dynatrace.com/docs/license). Verify per-data-type recommendations against your tenant's actual usage patterns before applying.</sub>
+> <sub>**Sources:** Per-capability billing semantics: [DPS docs](https://docs.dynatrace.com/docs/license). [Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"each timeseries is billed for no more than one data point per minute."*</sub>
 
 <a id="tradeoffs"></a>
 ## 7. Trade-offs and Hidden Costs
@@ -332,11 +339,9 @@ Cross-cutting rather than a data type — this is the consumption caused by *rea
 
 ### The category of trade-off that hurts most
 
-**Coverage gaps surface at the worst moment.** A Cut to a synthetic monitor that no one watches is fine — until the day the corresponding service has a real outage and the absent monitor would have caught it 20 minutes earlier. The cost-savings math from optimization usually understates this risk by treating signals as if their value were proportional to their use-frequency. In practice, signal value follows a power-law distribution — most signals are operationally dark most of the time and load-bearing during specific incidents.
+**Coverage gaps surface at the worst moment.** A Cut to a synthetic monitor that no one watches is fine — until the day the corresponding service has a real outage and the absent monitor would have caught it 20 minutes earlier. In community practice, the cost-savings math from optimization tends to understate this risk by treating signals as if their value were proportional to their use-frequency. Signal value is observed to be highly skewed — most signals are operationally dark most of the time and load-bearing during specific incidents. The exact distribution depends on your workload and incident patterns; verify it in your own environment.
 
 **Mitigation:** never optimize a signal that participates in incident-response workflows without explicit incident-team sign-off. *"Did the last 3 incidents reference this signal?"* is a better question than *"is anyone querying this dashboard regularly?"*
-
-> <sub>**Sources:** **Derived** + **Softened** — the trade-off framing is engagement-level guidance. Power-law signal value distribution is community-asserted; specific numeric distribution depends heavily on workload and incident patterns — verify in your own environment.</sub>
 
 <a id="wx-logs"></a>
 ## 8. Worked Example — Production Log Stream
@@ -361,9 +366,9 @@ Suppose the result shows DEBUG = 14M records, INFO = 800K, WARN = 50K, ERROR = 5
 
 - **Cut?** The payments service is in active use — its logs are load-bearing. Cut is not the right lever.
 - **Tune?** Retention is already 14 days. Lowering retention won't help the ingest spike.
-- **Filter?** DEBUG logs in production are the canonical Filter target. The application team may have left a feature-flag DEBUG enabled in a recent deploy, or DEBUG is on permanently and shouldn't be.
+- **Filter?** DEBUG logs in production are the canonical Filter target — Dynatrace's own spike tutorial names debug logging left on in production as a typical ingest-spike cause. The application team may have left a feature-flag DEBUG enabled in a recent deploy, or DEBUG is on permanently and shouldn't be.
 
-**Filter is the right lever.** Specifically, an OpenPipeline pipeline that drops `loglevel == "DEBUG"` from the `payments-prod` bucket.
+**Filter is the right lever.** Specifically, an OpenPipeline pipeline that drops `loglevel == "DEBUG"` records bound for the `payments-prod` bucket.
 
 ### Step 3 — Coordinate before filtering
 
@@ -376,8 +381,8 @@ Ping the payments team before adding the filter. Two outcomes possible:
 
 Implementation depth lives in OPLOGS. The filter spec at the framework level:
 
-- Source: `payments-prod` bucket
-- Condition: `loglevel in ("DEBUG", "TRACE")`
+- Scope: records bound for the `payments-prod` bucket
+- Condition: `in(loglevel, {"DEBUG", "TRACE"})`
 - Action: drop
 - Owner: platform team (with payments team as informed party)
 - Review: 6 months
@@ -386,7 +391,9 @@ Implementation depth lives in OPLOGS. The filter spec at the framework level:
 
 After deploying the filter, the FINOPS-02 daily burn-rate alert should show the bucket returning to baseline within 24-48 hours. If it doesn't, the spike has a different root cause (volume from non-DEBUG levels) and the framework loops back to Step 1 with a sharper question.
 
-> <sub>**Sources:** [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline). **Derived:** the diagnose → frame → coordinate → implement → verify loop is engagement practice; verify against your team's actual change-management process.</sub>
+The diagnose → frame → coordinate → implement → verify loop is this entry's practice rather than a Dynatrace procedure — adapt it to your team's actual change-management process.
+
+> <sub>**Sources:** [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline), [Trace a cost spike to its root cause (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/investigate-a-spike) — typical ingest-spike causes include *"debug-level logging left on in production"*.</sub>
 
 <a id="wx-metrics"></a>
 ## 9. Worked Example — High-Cardinality Metric
@@ -445,9 +452,9 @@ After the app team deploys the change, the metric's cardinality should drop to t
 
 ### The pattern
 
-High-cardinality metrics are a frequent cost driver and almost always have the same root cause: a label that should be a span attribute or log field, not a metric dimension. The fix is structural — emit it as a span attribute (where high cardinality is fine) and remove it from the metric.
+High-cardinality metrics are a documented cost driver — Dynatrace's guidance names user IDs and request IDs, and advises avoiding volatile dimensions when creating custom metrics. In community practice the root cause is usually a label that belongs on a span or log record rather than a metric dimension. The fix is structural — emit it as a span attribute (where high cardinality is fine) and remove it from the metric.
 
-> <sub>**Sources:** [DPS Metrics (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-metrics) — cardinality semantics. [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) — guidance on what belongs in metric dimensions vs span attributes. **Derived:** the "label that should be a span attribute" framing is engagement guidance grounded in OpenTelemetry conventions.</sub>
+> <sub>**Sources:** [DPS Metrics (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-metrics). [Best practices for optimizing metrics cost (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/best-practices-metrics) — *"High-cardinality dimensions, such as user IDs or request IDs, significantly increase metric storage requirements. Removing a high-cardinality dimension reduces the number of stored timeseries and can lower cost."*; *"avoid using volatile dimensions"*.</sub>
 
 <a id="cross-refs"></a>
 ## 10. Cross-References to Implementation Depth

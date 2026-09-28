@@ -1,12 +1,12 @@
 # FINOPS-02: Forecasting and Anomaly Detection on DPS Consumption
 
-> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 02 — Forecasting and Anomaly Detection on DPS Consumption | **Created:** May 2026 | **Last Updated:** 07/01/2026
+> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 02 — Forecasting and Anomaly Detection on DPS Consumption | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
 Knowing *current* consumption (covered in FINOPS-01) is operational. Knowing *projected* consumption — and being alerted when the trajectory breaks — is what turns FinOps from a monthly report into a daily control loop. This entry walks through both the native Dynatrace surfaces (Account Management Cost Monitors and Budget Alerts) and the in-tenant DIY surfaces (Davis Predictive AI on `dt.billing.*` series, plus Workflow-driven burn-rate alerts).
 
-**Three layers of cost visibility:** *Operational* (what's happening right now), *Tactical* (where are we trending this week / this month), *Strategic* (will we hit our annual commit?). Each layer pairs with different surfaces, different cadences, and different audiences. Treating them as one thing — "the cost dashboard" — is the most common reason cost programs never escape monthly snapshots.
+**Three layers of cost visibility:** *Operational* (what's happening right now), *Tactical* (where are we trending this week / this month), *Strategic* (will we hit our annual commit?). Each layer pairs with different surfaces, different cadences, and different audiences. In community practice, treating them as one thing — "the cost dashboard" — is a frequent reason cost programs never escape monthly snapshots.
 
 **Native first, DIY where native is silent.** Cost Monitors and Budget Alerts cover most strategic and tactical use cases out of the box. DIY DQL forecasting is for the operational layer where you want a custom signal (per-bucket trajectory, per-team burn, per-capability projection), or when the native surface doesn't yet exist for the cut you need.
 
@@ -46,16 +46,20 @@ Knowing *current* consumption (covered in FINOPS-01) is operational. Knowing *pr
 | Question | One-line answer |
 |----------|-----------------|
 | Will we hit our annual commit? | Account Management → **Cost Overview** → forecast line on Cost Overview. Native, automatic, billing-period-aligned. |
-| Alert me if month-to-date is overshooting | Account Management → **Budget Alerts**. Configure thresholds; email / webhook notifications. |
-| Alert me if a *specific capability* is spiking | Account Management → **Cost Monitors** (anomaly detection on consumption series). |
+| Alert me if we're on course to overshoot | Account Management → **Budgets**. 75% / 90% / 100% of the annual commitment are pre-configured; add account-, environment-, or capability-level budgets. Notifications via the Notification Center and email, evaluated daily. |
+| Alert me if a *specific capability* is spiking | Account Management → **Cost Monitors** — on automatically; they check each capability in each environment daily. |
 | Forecast per-bucket / per-team consumption | DIY — `timeseries dt.billing.*` + Davis `timeseries-forecast` analyzer. |
 | Alert when per-bucket burn exceeds threshold | DIY — Workflow with scheduled DQL trigger + Davis anomaly analyzer or static threshold. |
 | 7-day / 30-day trend visualization | DIY — `timeseries dt.billing.<capability>.usage` for host-based; `fetch dt.system.events \| makeTimeseries` for byte/count-based. |
 | Day-over-day or week-over-week comparison | DIY — DQL with two parallel time ranges; pattern in [`dt-dql-essentials`](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language) skill. |
 
-**The headline:** native surfaces (Cost Monitors, Budget Alerts) cover commitment-level visibility automatically. DIY surfaces (DQL + Davis analyzers + Workflows) cover the operational cut native doesn't yet do — per-bucket, per-team, per-capability projections that pre-empt the monthly Cost Overview surprise.
+**The headline:** native surfaces (Cost Monitors, Budgets) cover commitment-level visibility automatically. Dynatrace's own guidance draws the line where the built-in forecast stops — it *"only goes as far as environment and capability level"* — and points to DQL for growth rates, 30/60/90-day scenarios, cost-center or team breakdowns, and days-until-a-budget-fires. That is the DIY layer: DQL + Davis analyzers + Workflows.
 
-> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management), [Dynatrace Platform Subscription (DT docs)](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription), [DQL reference (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language). **Derived:** the native-vs-DIY decision framing is engagement-level guidance — the underlying surfaces are documented separately; the consolidated routing table is the synthesis.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — *"Account Management already gives you a built-in forecast, but it only goes as far as environment and capability level."*</sub>
+> - <sub>[Budget alerts (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/budgets) — *"Dynatrace notifies you as actual or forecasted consumption approaches each threshold (defaults: 75%, 90%, 100%)."*</sub>
+> - <sub>[Cost monitors (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/cost-monitors) — *"Cost monitors inspect costs for each capability in each environment daily and notify you when a capability exhibits an unexpected increase"*</sub>
+> - <sub>[DQL reference (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language)</sub>
 
 <a id="three-layers"></a>
 ## 2. Three Layers of Cost Visibility
@@ -71,7 +75,7 @@ Knowing *current* consumption (covered in FINOPS-01) is operational. Knowing *pr
 ★ Tactical is the layer most often missing
 -->
 
-A working FinOps program operates at three time horizons. Conflating them is the most common failure mode — "the cost dashboard" usually means one of the three was built and the other two are missing.
+In community practice, a working FinOps program operates at three time horizons, and conflating them is a common failure mode — "the cost dashboard" usually means one of the three was built and the other two are missing. The three layers are this entry's framing, not a Dynatrace taxonomy.
 
 | Layer | Time horizon | Question | Best surface | Cadence |
 |-------|-------------|----------|--------------|---------|
@@ -85,34 +89,34 @@ A working FinOps program operates at three time horizons. Conflating them is the
 - **Strategic alone** catches the commit miss but only after most of the year has been spent. The conversation with the team that doubled ingest happens in November, when there's no runway left.
 - **Tactical alone** is where most cost programs actually live, and it's the layer most likely to be silent — daily / weekly trend is exactly the cadence at which course corrections are still cheap.
 
-**In community practice, the layer most often missing is tactical.** Operational dashboards get built because they're easy. Strategic Cost Overview is automatic. The weekly burn-rate alert that says "this team's ingest is 40% above its 4-week baseline" is the layer that takes deliberate work — and the layer that prevents the November conversation.
-
-> <sub>**Sources:** Layer taxonomy is engagement-level synthesis — Dynatrace docs cover each surface (Cost Overview, Cost Monitors, custom DQL) separately. **Derived** throughout. **Softened:** the "tactical layer is most often missing" observation is from community practice across cost-program engagements, not a Dynatrace-published claim — verify against your own program before treating it as universal.</sub>
+**In community practice, the layer most often missing is tactical.** Operational dashboards get built because they're easy. Strategic Cost Overview is automatic. The weekly burn-rate alert that says "this team's ingest is 40% above its 4-week baseline" is the layer that takes deliberate work — and the layer that prevents the November conversation. Verify against your own program before treating it as universal.
 
 <a id="cost-monitors"></a>
 ## 3. Native — Account Management Cost Monitors
 
-**Cost Monitors** are Dynatrace's native anomaly-detection surface for DPS consumption. They live in the Account Management portal (not in the tenant) and operate on the same usage data that powers Cost Overview, with seasonal-baseline anomaly detection layered on top.
+**Cost Monitors** are Dynatrace's native anomaly-detection surface for DPS consumption. They live in the Account Management portal (not in the tenant) and work on the same cost data that powers the Subscription overview.
 
 ### What they do
 
-- Watch each enabled capability for unusual consumption patterns
-- Apply seasonal-baseline anomaly detection (account for weekly / daily seasonality)
-- Notify (email, webhook, Slack) when usage deviates significantly from baseline
-- Are pre-configured for common cuts (per capability, per environment in DPS for Hybrid)
+- Are **on by default** — enabled automatically for every DPS account, notifying license administrators with no configuration
+- Watch the **forecast**: notify when the end-of-period forecast crosses a threshold (default 95% of the commitment) or jumps week-over-week
+- Watch **daily cost per capability per environment**, and raise a cost event when a capability shows an unexpected increase
+- Use **linear forecasting** over the past month of consumption, weighting recent days more heavily — no forecast is shown until 15 days of data exist
+- Deliver through the **Notification Center**, **email** (up to 50 recipients), and the **API**
 
 ### What to configure
 
-1. **Enable per-capability monitors** for the capabilities your team uses heavily. Don't enable monitors for capabilities you don't use — the seasonal baseline needs traffic to establish, and an under-used capability will produce noisy alerts.
-2. **Choose sensitivity carefully.** Default sensitivity catches large spikes; a more sensitive setting catches gradual drift but produces more alerts. Start at default for the first 2-3 weeks of baseline establishment, then tune.
-3. **Wire notifications to the team that can act.** A Cost Monitor that alerts a finance distribution list is information; one that alerts the platform team that owns the OpenPipeline pipeline causing the spike is action.
-4. **Review the false-positive rate weekly for the first month.** Tune sensitivity down if you're getting alerts for known seasonal patterns (month-end batch jobs, weekly deployment surges, etc.).
+1. **Recipients.** License administrators are notified by default. Add the people who can act — a Cost Monitor that alerts a finance distribution list is information; one that reaches the platform team owning the OpenPipeline pipeline behind the spike is action. The Notification Center can route different alert categories to different teams.
+2. **Forecast thresholds.** Set the week-over-week threshold and the total-forecast threshold (default 95%) to match how early you want warning.
+3. **Expect ramp-up noise.** Dynatrace's own guidance is that week-over-week forecast notifications can be ignored during the deployment phase, when rising usage is expected. In community practice, review the cost events weekly for the first month and note which ones were actionable before changing thresholds.
 
 ### When Cost Monitors are silent
 
-Cost Monitors operate at the capability level — they catch "Logs ingest is way up" but not "the `payments-team` bucket is way up while the `marketing-team` bucket is steady." For per-bucket / per-team anomaly detection, see §6 (Davis Predictive AI in DQL).
+Cost Monitors operate at the capability-and-environment level — they catch "Logs ingest is way up in production" but not "the `payments-team` bucket is way up while the `marketing-team` bucket is steady." For per-bucket / per-team anomaly detection, see §6 (Davis Predictive AI in DQL).
 
-> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management) — Cost Monitors documentation. **Softened:** specific sensitivity-tuning guidance is community practice — Dynatrace docs document the configuration surface; the tuning heuristics are engagement-level observations.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Cost monitors (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/cost-monitors) — *"Cost monitors are enabled automatically for all DPS accounts and will notify license administrators by default without configuration"*; *"Cost monitor algorithms use linear forecasting techniques to predict future usage from the past month of consumption data."*; *"If you're still in the deployment phase of Dynatrace, you can ignore this kind of notification, as increased weekly usage is expected."*</sub>
+> - <sub>[Control (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control) — *"Cost monitors detect unexpected changes as they happen and route alerts to the team that owns the consumption."*</sub>
 
 <a id="budget-alerts"></a>
 ## 4. Native — Budget Alerts
@@ -123,23 +127,23 @@ Where Cost Monitors are anomaly-detection ("is this period unusual"), **Budget A
 
 ### What they do
 
-- Track month-to-date consumption against an explicit budget (the customer's DPS annual commit, monthly-allocated)
-- Fire at configurable thresholds — Dynatrace auto-provisions 75% / 90% / 100% of the annual commitment on every DPS account; customize tiers (e.g., 50/75/90) on top of that default for earlier signal
-- Notify finance, procurement, and platform teams via email or webhook
-- Provide an end-of-period forecast based on month-to-date trajectory
+- Compare actual **and forecast** consumption against a threshold you set at the account, environment, or capability level — a fixed amount or a percentage of the annual commitment (up to 20 active budgets)
+- Ship with defaults — every DPS account gets 75% / 90% / 100% of the annual commitment, notifying license administrators; adjust them or add tiers for earlier signal
+- Notify through the Notification Center and email; each budget has its own recipient list
+- Evaluate once a day, after the daily cost calculation (usually by 12:00 UTC), and email only on the day a threshold is first exceeded
 
 ### What to configure
 
-1. **Set the monthly budget to the DPS annual commit / 12.** If your commit is not evenly distributed (e.g., growth-phased commit), set per-month budgets to match the contract.
-2. **Pick threshold tiers based on time-to-react.** The Dynatrace-provisioned default is 75/90/100 of the annual commitment, enabled automatically with no configuration required. Many programs add an earlier custom tier (e.g., 50%) for more lead time; for tight-commit customers a 25/50/75 cadence gives earlier signal still.
-3. **Tier the notification escalation.** 50% → platform team. 75% → platform team + finance. 90% → procurement + leadership. The threshold tiers map to who needs to act.
-4. **Annual rollover handling.** Confirm whether unused monthly budget rolls within the year (most DPS contracts do) — this affects how a 75% June alert is interpreted (might be fine if January-May ran low).
+1. **Scope budgets where one area drives cost.** Keep the account-level defaults and add environment- or capability-scoped budgets — Dynatrace's own examples are 10% of total subscription costs for a sandbox environment, and a fixed USD 1,000 threshold for a new capability.
+2. **Pick threshold tiers based on time-to-react.** The default is 75/90/100 of the annual commitment, enabled automatically. In community practice, many programs add an earlier custom tier (e.g., 50%) for more lead time; tight-commit customers sometimes run 25/50/75.
+3. **Tier the notification escalation.** In community practice: 50% → platform team; 75% → platform team + finance; 90% → procurement + leadership. The threshold tiers map to who needs to act.
+4. **Remember the daily cadence.** Budgets have no intra-day alerting — a same-day spike surfaces the next evaluation at the earliest. Pair them with Cost Monitors and the DIY alerts below when you need faster signal.
 
 ### When Budget Alerts are insufficient
 
-Budget Alerts are coarse — month-level, account-level. They don't decompose to "which capability is driving the overshoot" without drilling into Cost Overview, and they don't decompose to per-team / per-bucket attribution at all. Pair them with Cost Monitors (capability-level anomalies) and DIY DQL queries (team-level attribution).
+Budget Alerts are coarse — account-, environment-, or capability-level, evaluated daily. They don't decompose to per-team / per-bucket attribution at all. Pair them with Cost Monitors (capability-level anomalies) and DIY DQL queries (team-level attribution).
 
-> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management) — Budget Alerts documentation. **Softened:** the threshold-tier and notification-escalation patterns are community practice — Dynatrace docs document the configuration surface; the operational patterns are engagement-level.</sub>
+> <sub>**Sources:** [Budget alerts (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/budgets) — *"A Dynatrace Platform Subscription automatically enables three initial budget thresholds that notify license administrators when total account level consumption reaches 75%, 90%, and 100% of the annual commitment."*; *"You can get notifications in the Notification Center and via email."* [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — *"There is no intra-day alerting."*</sub>
 
 <a id="dql-trends"></a>
 ## 5. DIY — DQL Trend Queries with `makeTimeseries`
@@ -185,14 +189,14 @@ Buckets with high positive `delta_pct` are growing fast and merit a closer look.
 <a id="davis-forecast"></a>
 ## 6. DIY — Davis Predictive AI on `dt.billing.*`
 
-Davis Predictive AI's `timeseries-forecast` analyzer runs against any time-aligned metric series, including the `dt.billing.*` family. This is the in-tenant equivalent of the Account Management Cost Overview forecast, but at a finer cut — per bucket, per cost center, per capability.
+Davis Predictive AI's forecast analysis runs against any numeric time series, which includes the `dt.billing.*` family. This is the in-tenant equivalent of the Account Management Cost Overview forecast, but at a finer cut — per bucket, per cost center, per capability.
 
 ### How to invoke it
 
-The analyzer takes a time-bucketed input series and returns a forecast horizon plus confidence bands. Two access paths:
+The analyzer takes a time-bucketed input series (at least 14 data points) and returns point predictions plus a prediction interval. Two access paths:
 
-1. **Notebook tile** — add a Davis-AI / Forecast tile, point it at a `timeseries` query.
-2. **Workflow task** — `davis-execute-analyzer` action with `analyzerName: "dt.statistics.forecast"` and the DQL query as input.
+1. **Notebook** — run a forecast analysis on a `timeseries` query result.
+2. **Workflow task** — a Davis analyzer action with the analyzer `dt.statistics.GenericForecastAnalyzer` and the DQL query as input. (Earlier revisions named `dt.statistics.forecast`, which is not an analyzer; the name here was read from the tenant's analyzer list on 09/28/2026.)
 
 ### Pattern — forecast per-capability host-hours for the next 30 days
 
@@ -204,7 +208,7 @@ timeseries hourlyUsage = sum(dt.billing.full_stack_monitoring.usage, rate:1h),
   from:-28d, interval:1h
 ```
 
-Feed this query into the **Davis Forecast** analyzer with a 30-day forecast horizon. Output: forecasted hourly usage for the next 30 days, with confidence bands (typically 90% and 50%).
+Feed this query into the forecast analyzer. The horizon is counted in data points and capped at 600, so at hourly granularity the longest horizon is 25 days — for a full 30 days, rebuild the input at `interval:1d` and forecast 30 points. Output: forecasted usage per step with a prediction interval (default coverage probability 0.9).
 
 ### What to do with the output
 
@@ -214,18 +218,25 @@ Feed this query into the **Davis Forecast** analyzer with a 30-day forecast hori
 
 ### Pattern — anomaly detection on consumption (seasonal baseline)
 
-For "is *this* hour unusual given the seasonal pattern," use the `seasonal-baseline-anomaly-detector` instead of the forecast analyzer. Same input shape; different output (anomaly score per data point rather than projected values).
+For "is *this* hour unusual given the seasonal pattern," use the seasonal baseline anomaly detection analyzer (`dt.statistics.anomaly_detection.SeasonalBaselineAnomalyDetectionAnalyzer`) instead of the forecast analyzer. Same input shape; different output — a confidence band learned from the series' seasonality, whose width is set by the `tolerance` parameter (0.1–10, default 4), and the points that violate it.
 
 ### When Davis Predictive AI on consumption is wrong
 
-Forecasting assumes stationary or seasonally-stationary input. Consumption time series are *not* stationary during onboarding phases — a new tenant ramps up over weeks, adoption changes the baseline, new buckets get created. Treat the first 2-4 weeks of any new tenant or major rollout as too-noisy-to-forecast; let the baseline stabilize before relying on forecast outputs.
+Forecasting assumes stationary or seasonally-stationary input. Consumption time series are *not* stationary during onboarding phases — a new tenant ramps up over weeks, adoption changes the baseline, new buckets get created. Treat the first 2–4 weeks of any new tenant or major rollout as too-noisy-to-forecast: the analyzer needs 14+ days of input to detect weekly seasonality, and Dynatrace's own built-in forecast waits for 15 days of data and is to be treated with caution below 30.
 
-> <sub>**Sources:** [Davis AI overview (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Workflows actions (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the application of Davis Predictive AI to `dt.billing.*` specifically is community practice — Davis analyzers are documented as general-purpose; their applicability to billing series is the synthesis. **Softened:** the "2-4 week stabilization" guidance is engagement-level observation, not a Dynatrace-published threshold.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Predictive AI analysis (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/reference/ai-models/forecast-analysis) — *"The forecast analysis predicts future values of any time series of numeric values."*; minimum 14 data points, horizon 1–600, default coverage probability 0.9, weekly seasonality needs 14+ days of input</sub>
+> - <sub>[Seasonal baseline (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/reference/ai-models/seasonal-baseline) — tolerance range 0.1–10, default 4</sub>
+> - <sub>[Use the built-in forecast (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/built-in-forecast) — the 15-day minimum and the under-30-days caution for the built-in forecast</sub>
+> - <sub>[Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). Analyzer names read from the validation tenant's analyzer list (`dtctl get analyzers`), 09/28/2026.</sub>
+> - <sub>**Derived:** applying the analyzer to `dt.billing.*` follows from its any-numeric-series scope; the 2–4 week settling window combines the 14-day seasonality requirement with the built-in forecast's 15/30-day guidance.</sub>
 
 <a id="workflow-alerts"></a>
 ## 7. DIY — Workflow Burn-Rate Alerts
 
 **Workflow burn-rate alerts** combine the DQL trend queries (§5) and Davis forecast / anomaly (§6) into an active control loop: scheduled execution, threshold evaluation, notification.
+
+In community practice, two recipes cover most needs. Their DQL building blocks — week-over-week growth and days-until-a-budget-fires — are the ones Dynatrace documents in its run-rate tutorial.
 
 ### Recipe — daily per-bucket burn-rate workflow
 
@@ -238,7 +249,7 @@ Forecasting assumes stationary or seasonally-stationary input. Consumption time 
 
 1. **Trigger:** Schedule — weekly (Monday 09:00 covers the prior-week trajectory).
 2. **Task 1 — DQL query:** 28-day hourly history of each `dt.billing.<capability>.usage`.
-3. **Task 2 — Davis-forecast analyzer:** project 30 days forward.
+3. **Task 2 — Davis-forecast analyzer:** project forward (the horizon caps at 600 points — 25 days at hourly input, or use daily input for 30 days).
 4. **Task 3 — Compare against budget:** if `projection × rate > monthly_budget × (days_remaining / days_in_month)`, fire.
 5. **Task 4 — Notify:** post to a finance-and-platform escalation channel.
 
@@ -246,7 +257,7 @@ Forecasting assumes stationary or seasonally-stationary input. Consumption time 
 
 Native Cost Monitors and Budget Alerts cover the *strategic* layer. Workflow alerts cover the *tactical* layer — finer cuts, faster cadence, your-team's-own-action-handoff. The two should not duplicate; if a Cost Monitor already catches "Logs ingest is way up," don't build a workflow that re-detects the same condition. Build the workflow at the cut native is silent on (per-bucket, per-team, per-cost-center).
 
-> <sub>**Sources:** [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows), [Davis analyzers (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence). **Derived:** the workflow-recipe patterns are engagement-level guidance; the underlying Workflow surface and Davis analyzers are documented separately.</sub>
+> <sub>**Sources:** [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows), [Predictive AI analysis (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/reference/ai-models/forecast-analysis), [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — week-over-week growth and days-until-budget-alert DQL.</sub>
 
 <a id="wx-projection"></a>
 ## 8. Worked Example — End-of-Month Projection
@@ -286,9 +297,9 @@ Run the 28-day input through the `timeseries-forecast` analyzer for a 12-day hor
 
 **Step 4 — Decision:**
 
-If both projections agree the budget will be exceeded: act now. The Cut / Tune / Filter framework in FINOPS-03 covers what to do. If they disagree: investigate the forecast confidence bands — wide bands suggest the recent history is too noisy to forecast reliably (re-baseline after 1-2 more weeks; until then, manage tactically week-over-week).
+In community practice, the decision rule is simple. If both projections agree the budget will be exceeded: act now. The Cut / Tune / Filter framework in FINOPS-03 covers what to do. If they disagree: investigate the forecast confidence bands — wide bands suggest the recent history is too noisy to forecast reliably (re-baseline after 1-2 more weeks; until then, manage tactically week-over-week).
 
-> <sub>**Sources:** [Davis AI forecast (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence). The naive linear projection and the forecast-vs-naive decision pattern are engagement-level synthesis (**Derived**).</sub>
+> <sub>**Sources:** [Predictive AI analysis (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/reference/ai-models/forecast-analysis), [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — the flat run-rate is *"your flat run-rate baseline, with no growth assumed"*.</sub>
 
 <a id="wx-anomaly"></a>
 ## 9. Worked Example — Capability-Level Anomaly Alert
@@ -306,7 +317,7 @@ If both projections agree the budget will be exceeded: act now. The Cut / Tune /
 Two-step diagnosis: anomaly says WHAT is up; attribution says WHO is driving it.
 -->
 
-**Scenario:** The platform team wants to know within 24 hours if any single capability's daily consumption deviates significantly from its 4-week baseline — without waiting for the monthly Cost Monitor to fire.
+**Scenario:** The platform team wants its own in-tenant signal when any host-monitoring capability's daily consumption deviates from its 4-week baseline, routed through a workflow to its own channel. (Cost Monitors already check each capability daily, but deliver through Account Management — Notification Center, email, API.)
 
 **Step 1 — Build the input series (28-day daily history per capability):**
 
@@ -320,22 +331,22 @@ timeseries
   from:-28d, interval:1d
 ```
 
-**Step 2 — Feed into Davis seasonal-baseline-anomaly-detector**, scoring the last 24 hours against the 27-day baseline.
+**Step 2 — Feed into the seasonal baseline anomaly detection analyzer**, checking the latest day against the confidence band learned from the preceding days.
 
 **Step 3 — Workflow logic:**
 
-- If any capability returns an anomaly score above the configured threshold (e.g., > 2 standard deviations), the workflow fires.
+- If any capability's latest value falls outside the analyzer's confidence band (width set by `tolerance`, default 4), the workflow fires.
 - The notification includes the capability name, the magnitude of deviation, and a link to the FINOPS-01 §5 per-host (or §10 per-cost-center) attribution query for drill-down.
 
 **Step 4 — Tune the threshold:**
 
-Start with the analyzer default. After the first 2-4 alerts, judge whether each was actionable: a true cost spike, or a known event (a planned rollout, a synthetic-test enable, a one-time job)? Adjust threshold + add filter conditions (e.g., "ignore Tuesday 02:00-04:00 when the weekly cleanup job runs") to suppress known patterns.
+Start with the analyzer's default tolerance. After the first 2-4 alerts, judge whether each was actionable: a true cost spike, or a known event (a planned rollout, a synthetic-test enable, a one-time job)? Adjust threshold + add filter conditions (e.g., "ignore Tuesday 02:00-04:00 when the weekly cleanup job runs") to suppress known patterns.
 
 **Step 5 — Pair with bucket-level attribution:**
 
-Capability-level anomaly tells you something is up; FINOPS-01 §10 (per-cost-center attribution) tells you *which* bucket or team is driving it. The two-step diagnosis is the typical pattern: anomaly fires → operator runs the attribution query → conversation with the team behind the spike.
+Capability-level anomaly tells you something is up; FINOPS-01 §10 (per-cost-center attribution) tells you *which* bucket or team is driving it. Dynatrace's own cost-spike tutorial runs the same two steps: identify the capability, then attribute the spike to the entity, dashboard, workflow, or detector behind it — followed by the conversation with the owning team.
 
-> <sub>**Sources:** [Davis AI (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the two-step capability-then-bucket diagnosis pattern is engagement practice — both surfaces are documented; the consolidated diagnostic flow is the synthesis.</sub>
+> <sub>**Sources:** [Trace a cost spike to its root cause (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/investigate-a-spike) — *"Identify which DPS capability is driving a cost spike"*, then *"Attribute the spike to the responsible entity, dashboard, workflow, or detector."* [Seasonal baseline (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/reference/ai-models/seasonal-baseline), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows).</sub>
 
 <a id="native-vs-diy"></a>
 ## 10. When to Use Native vs DIY
@@ -349,7 +360,7 @@ Capability-level anomaly tells you something is up; FINOPS-01 §10 (per-cost-cen
 | Forecast per-bucket consumption | ✗ — capability-level only | ✓ DIY required |
 | Per-cost-center chargeback forecast | ✗ — not currently available natively | ✓ DIY required (use `_by_costcenter` series) |
 | Day-over-day burn comparison | (Cost Overview gives weekly cut) | ✓ DIY for fine-grained cut |
-| Custom escalation routing (team → finance → exec) | (single notification configuration) | ✓ DIY workflow with conditional routing |
+| Custom escalation routing (team → finance → exec) | (per-budget recipients; Notification Center routing by alert category) | ✓ DIY workflow with conditional routing |
 
 ### The pattern
 
@@ -361,15 +372,17 @@ In community practice, the most common DIY use cases are:
 2. Per-cost-center monthly chargeback report (delivered to finance as a scheduled notebook export)
 3. Capability-level forecast with end-of-month projection (validates Cost Overview's forecast at finer granularity)
 
-> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management). **Derived:** the native-vs-DIY decision table is engagement synthesis — Dynatrace docs don't position the two as alternatives, and the gaps in native may close over time as Cost Monitors and Budget Alerts evolve. Verify current native capability before adopting a DIY pattern that may already be covered.</sub>
+The native column moves with the product — verify current Cost Monitor and Budget capability before building a DIY pattern that may already be covered.
+
+> <sub>**Sources:** [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — *"Account Management already gives you a built-in forecast, but it only goes as far as environment and capability level."*; its Account-Management-vs-DQL table marks capability-level forecast, cost-center or team breakdown, and days-until-threshold as DQL-only. [Cost monitors (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/cost-monitors) — *"Route different alert categories to different teams"*</sub>
 
 <a id="recommendation"></a>
 ## 11. Recommended Approach
 
 A six-step plan for layering forecasting + anomaly detection on top of FINOPS-01's consumption visibility:
 
-1. **Turn on Budget Alerts immediately.** This is the lowest-effort, highest-value step — Dynatrace auto-provisions 75/90/100 thresholds by default; add an earlier custom tier (e.g., 50%) if your program wants more lead time, and tier notification escalation.
-2. **Enable Cost Monitors for the top 5 capabilities you actually use.** Let baselines establish for 2-3 weeks before tuning. Don't enable monitors for capabilities with little traffic — noise.
+1. **Review the Budgets you already have.** Every DPS account starts with 75/90/100 thresholds notifying license administrators. Add the recipients who can act, add an earlier custom tier (e.g., 50%) if you want more lead time, and add environment- or capability-scoped budgets where one area drives cost.
+2. **Point Cost Monitor notifications at the people who can act.** They are already on and check every capability daily; what you set is recipients and the forecast thresholds (week-over-week jump, total forecast — default 95%).
 3. **Build one DIY weekly per-bucket trend report.** The week-over-week pattern in §5 with delta-pct sort, scheduled via Workflow, delivered to a `#cost-watch` Slack channel. This is the tactical-layer signal that most programs lack.
 4. **Once the trend report has 4 weeks of history, add anomaly detection.** Run the §9 per-capability anomaly workflow against `dt.billing.*` series.
 5. **Add the end-of-month projection workflow.** Combine the §8 worked example into a weekly workflow that posts the projection alongside the budget.
@@ -387,8 +400,8 @@ Forecasting and anomaly detection on DPS consumption operate at three layers —
 - Read **FINOPS-03** for the Cut / Tune / Filter optimization decision framework — once an alert fires, what do you actually do about it?
 - Read the **WFLOW** topic series for Workflow construction patterns — scheduled triggers, DQL tasks, notification actions.
 - Read the **ORGNZ** topic series for bucket and cost-center labeling — the upstream lever for meaningful per-team forecasts.
-- Enable Budget Alerts in your Account Management portal today; the configuration takes ~10 minutes and covers most of the strategic layer.
-- Open the [DPS Usage Details DEMO dashboard](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription) and use the trends visible there as the starting input for your first Davis-forecast notebook tile.
+- Review the default Budgets and Cost Monitor recipients in Account Management today — both are already on, and a few minutes adding the right recipients covers most of the strategic layer.
+- Open the ready-made **Usage - Overview** dashboard ([Ready-made usage dashboards (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/view/usage-dashboards)) and use the trends visible there as the starting input for your first Davis-forecast notebook.
 
 ---
 

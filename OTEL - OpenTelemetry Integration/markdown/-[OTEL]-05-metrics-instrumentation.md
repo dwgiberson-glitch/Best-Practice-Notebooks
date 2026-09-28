@@ -1,6 +1,6 @@
 # OTEL-05: Metrics Instrumentation
 
-> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 5 of 8 | **Created:** January 2026 | **Last Updated:** 08/12/2026
+> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 5 of 8 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Creating Custom Metrics with OpenTelemetry
 OpenTelemetry metrics provide quantitative measurements of your application's behavior over time. This notebook covers metric types, instrumentation patterns, and integration with Dynatrace.
@@ -469,7 +469,7 @@ service:
 | Processor | Purpose |
 |-----------|---------|
 | `memory_limiter` | Sheds load before the collector OOMs. First in the pipeline. |
-| `cumulativetodelta` | Prometheus emits cumulative counters; Dynatrace prefers delta temporality. Without this, every counter looks ever-increasing in Dynatrace and rate math is awkward at query time. |
+| `cumulativetodelta` | Prometheus emits cumulative counters; Dynatrace requires delta temporality, and its instrument mapping gives a cumulative Counter no Dynatrace metric type. Convert before export. |
 | `k8sattributes` | Enriches each metric with pod / deployment / namespace / node so Dynatrace's entity model can join the data. |
 | `transform` | Normalizes workload metadata — `k8s.workload.{name,kind,uid}` are derived from whichever workload kind (deployment / statefulset / daemonset / etc.) owns the pod. |
 | `batch/metrics` | Reduces export overhead. `send_batch_size: 500` keeps batches small enough for OTLP/HTTP without hitting tenant-side payload limits. |
@@ -483,9 +483,9 @@ The collector itself can be deployed two ways:
 | Deployment style | Spec kind | What you write | What manages the collector |
 |------------------|-----------|----------------|----------------------------|
 | **Raw** | `Deployment` + `ConfigMap` | Container image + collector YAML in a ConfigMap | You — manual rollout, RBAC, lifecycle |
-| **Operator-managed** | `OpenTelemetryCollector` (CRD) | Collector config inline in the custom resource | The OpenTelemetry Operator reconciles Deployment, ConfigMap, ServiceAccount, RBAC bindings |
+| **Operator-managed** | `OpenTelemetryCollector` (CRD) | Collector config inline in the custom resource | The OpenTelemetry Operator reconciles Deployment, ConfigMap, ServiceAccount; cluster-scoped RBAC for pod discovery is provisioned separately (OTEL-03 §4) |
 
-The operator-managed pattern is cleaner once you have more than one collector — it owns rollout, auto-restart on config change, and OTLP-auto-instrumentation injection for application pods. The trade-off is one more controller in the cluster.
+In community practice, the operator-managed pattern is preferred once you run more than one collector — it owns rollout, auto-restart on config change, and OTLP-auto-instrumentation injection for application pods. The trade-off is one more controller in the cluster.
 
 See **OTEL-03 — Collector Deployment** for both deployment shapes side-by-side.
 
@@ -512,7 +512,8 @@ This path is rarer in greenfield Dynatrace deployments — it preserves the Prom
 > - <sub>[k8sattributes processor (OpenTelemetry Collector Contrib GitHub)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/k8sattributesprocessor)</sub>
 > - <sub>[Cumulative to Delta processor (OpenTelemetry Collector Contrib GitHub)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/cumulativetodeltaprocessor)</sub>
 > - <sub>[Ingest OTLP metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/otlp-api/ingest-otlp-metrics)</sub>
-> - <sub>**Derived:** §6.6 raw-vs-operator framing combines OTel Operator design with operational trade-offs observed in community examples</sub>
+> - <sub>[About OTLP metrics ingest (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/otlp-api/ingest-otlp-metrics/about-metrics-ingest) — *"The Dynatrace backend exclusively works with delta values and requires the respective aggregation temporality."*</sub>
+> - <sub>[OpenTelemetryCollector CRD reference (opentelemetry-operator GitHub)](https://github.com/open-telemetry/opentelemetry-operator/blob/main/docs/api/opentelemetrycollectors.md) — *"When set, the operator will not automatically create a ServiceAccount for the collector."*</sub>
 
 ```dql
 // Query OTel metrics in Dynatrace

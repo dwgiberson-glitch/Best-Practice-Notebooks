@@ -1,6 +1,6 @@
 # CLOUD-02: AWS Integration
 
-> **Series:** CLOUD — Cloud Provider Integrations | **Notebook:** 2 of 8 | **Created:** March 2026 | **Last Updated:** 09/25/2026
+> **Series:** CLOUD — Cloud Provider Integrations | **Notebook:** 2 of 8 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -64,7 +64,7 @@ The **AWS Connector** used by Workflow actions (the `aws_*` action set) is a dif
 
 ### IAM Permissions
 
-The Dynatrace monitoring role uses a **scoped read-only policy** authored as part of the CloudFormation stack — not the AWS-managed `ReadOnlyAccess` policy. The exact policy is defined inside the nested template `da-aws-nested-integration.yaml` that the Clouds App wizard generates. Review this nested template as part of the security-review workflow described in §7.3.1 Path A.
+The Dynatrace monitoring role uses a **scoped read-only policy** authored as part of the CloudFormation stack — not the AWS-managed `ReadOnlyAccess` policy. The exact policy is defined inside the nested template `da-aws-nested-integration.yaml` that the Clouds App wizard generates. In community practice, teams review this nested template as part of the security-review workflow described in §7.3.1 Path A — and re-review it, because its permission scope evolves per Dynatrace release.
 
 > **Practical note:** the role does not need write permissions for monitoring. If your security team requires a custom least-privilege policy in place of the Dynatrace-generated one, derive it from the nested template and pin it via your IaC pipeline. Re-verify after each Dynatrace release that adds new monitored services — additional services usually need new `Describe*` / `List*` permissions.
 
@@ -73,7 +73,6 @@ The Dynatrace monitoring role uses a **scoped read-only policy** authored as par
 > - <sub>[Create AWS connection via Settings (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/create-an-aws-connection/aws-connection-app-settings) — *"GovCloud and China partitions are not supported"*</sub>
 > - <sub>[Manage your AWS connections (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/manage-aws-connections)</sub>
 > - <sub>[Set up AWS Connector for Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/actions/aws/aws-workflows-setup) — March 31 2026 legacy-schema deprecation</sub>
-> - <sub>**Softened:** the "review the nested template" recommendation is community / SE practice — the exact `da-aws-nested-integration.yaml` permission scope evolves per Dynatrace release.</sub>
 
 <a id="supported-services"></a>
 
@@ -112,7 +111,7 @@ Two notation systems for AWS entities coexist in Dynatrace today:
 
 Both work today. The DQL examples in §4 and §5 show the classic form with the Smartscape 2.0 alternative commented out — pick the one that matches your tenant's preferred query style.
 
-> <sub>**Sources:** [All AWS cloud services (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-all-services), [AWS topology (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/ingest-telemetry/aws-topology) — verbatim: *"Smartscape node types for AWS follow the CloudFormation resource type notation, making all letters uppercase and substituting :: with _"*, [AWS supported services API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/configuration-api/aws-supported-services). **Softened:** the "80+ services" count varies by Dynatrace release as new services are added — check the Hub or the all-services page for the current catalog rather than treating any fixed number as authoritative.</sub>
+> <sub>**Sources:** [All AWS cloud services (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-all-services), [AWS topology (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/ingest-telemetry/aws-topology) — verbatim: *"Smartscape node types for AWS follow the CloudFormation resource type notation, making all letters uppercase and substituting :: with _"*, [AWS supported services API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/configuration-api/aws-supported-services).</sub>
 
 <a id="enabling-monitoring"></a>
 
@@ -128,7 +127,7 @@ The Clouds App is the modern onboarding path for SaaS tenants. It is **polling-b
 2. Enter connection name, AWS Account ID, and the **monitored regions** (`us-east-1` is required for global AWS resources)
 3. Pick a path:
    - **Recommended** — opinionated, immutable defaults; fastest onboarding
-   - **Advanced (Fine-Grained)** — full control over metrics, logs, tags, and enrichment (best practice for production tenants)
+   - **Advanced (Fine-Grained)** — full control over metrics, logs, tags, and enrichment (in community practice, the usual choice for production tenants)
 4. Generate **Platform Tokens** (the wizard auto-creates the Service Users and mints two tokens — one for settings management, one for telemetry ingestion). **No classic API token is needed for the Clouds App.**
 5. Deploy the CloudFormation stack:
    - If you have AWS access — open the CFN template via the direct link
@@ -144,7 +143,7 @@ For Managed deployments or environments with strict network requirements, the cl
 
 ### Advanced-Path Configuration Surface
 
-The Advanced path exposes fine-grained controls. Exact UI labels evolve — verify against your tenant.
+The Advanced path exposes fine-grained controls. The table below combines the documented settings with community observation of the Clouds app UI; exact UI labels evolve — verify against your tenant.
 
 | Control | What it does |
 |---|---|
@@ -163,7 +162,7 @@ The Advanced path exposes fine-grained controls. Exact UI labels evolve — veri
 
 ### Service Selection Strategy
 
-Rather than enabling all 80+ services, start with the services your applications depend on:
+Rather than enabling every supported service (80+ at the time of writing — the catalog grows with each Dynatrace release, so check the supported-services list for the current count), start with the services your applications depend on:
 
 | Tier | Services to Enable | Rationale |
 |---|---|---|
@@ -181,7 +180,7 @@ Rather than enabling all 80+ services, start with the services your applications
 
 ### Multi-Account Patterns at Scale
 
-Beyond the single-account / AWS Organizations choice at onboarding, three layered patterns emerge in practice for tenants running many accounts:
+Beyond the single-account / AWS Organizations choice at onboarding, **in community practice** three layered patterns emerge for tenants running many accounts — none is ranked by Dynatrace-published guidance:
 
 | Pattern | When to use | Key mechanic |
 |---|---|---|
@@ -191,7 +190,7 @@ Beyond the single-account / AWS Organizations choice at onboarding, three layere
 
 > **In community practice**, the org-connection-with-OU-targeted-StackSets pattern reaches an acceptable rollout cadence for tenants in the 50–500 account range — each new account joining an OU gets the monitoring role within a single Org reconcile cycle. Above ~500 accounts, expect StackSet drift to become a regular operational concern; tenants that scale further typically split into per-OU connections.
 
-**AWS Cost Categories ↔ `dt.cost.product` mapping.** If your AWS organization uses [AWS Cost Categories](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/manage-cost-categories.html) for chargeback, mirror the Cost Category dimension into `dt.cost.product` via Dynatrace Attribute Enrichment in §3's Advanced path. Result: a single dimension joins AWS billing data to Dynatrace cost and capacity dashboards without per-team mapping logic on either side. Field-observed; verify the dimension naming with your FinOps team before rolling out.
+**AWS Cost Categories ↔ `dt.cost.product` mapping.** If your AWS organization uses [AWS Cost Categories](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/manage-cost-categories.html) for chargeback, mirror the Cost Category dimension into `dt.cost.product` via Dynatrace Attribute Enrichment in §3's Advanced path. Result: a single dimension joins AWS billing data to Dynatrace cost and capacity dashboards without per-team mapping logic on either side. This mirroring is community practice rather than a documented Dynatrace pattern; verify the dimension naming with your FinOps team before rolling out.
 
 ### EventBridge — Ingesting AWS Events into Davis
 
@@ -208,7 +207,7 @@ The Clouds App's **EventBridge** option (Advanced path) registers an [EventBridg
 > **In community practice**, EventBridge ingestion is most valuable for **security and operational signals AWS already produces** (GuardDuty, Inspector, Health Dashboard, AutoScaling) rather than for application telemetry — application events are better generated directly by your code and pushed to OneAgent or the Business Events API.
 
 
-> <sub>**Sources:** [Create AWS connection via Settings (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/create-an-aws-connection/aws-connection-app-settings), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Onboard AWS Organizations (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/aws-organizations), [AWS Cost Categories (AWS docs)](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/manage-cost-categories.html), [EventBridge API destinations (AWS docs)](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-api-destinations.html). **Derived:** the Advanced-path control surface table synthesizes the public docs with field-observed Clouds App UI; verify exact labels in your tenant. The multi-account pattern matrix and the OU-StackSet rollout cadence are field-observed — no DT-published guidance ranks them. **Softened:** the Recommended → Recommended+Custom → trim-from-Auto-Discovery promotion sequence, the org-vs-per-OU break-point at ~500 accounts, and the "EventBridge for security signals, OneAgent for app telemetry" framing are community / SE guidance, not documented best practices.</sub>
+> <sub>**Sources:** [Create AWS connection via Settings (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/create-an-aws-connection/aws-connection-app-settings), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Onboard AWS Organizations (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/aws-organizations), [AWS Cost Categories (AWS docs)](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/manage-cost-categories.html), [EventBridge API destinations (AWS docs)](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-api-destinations.html).</sub>
 
 <a id="querying-aws-entities"></a>
 
@@ -334,7 +333,7 @@ fetch dt.entity.ec2_instance, from:-7d
 
 ### EC2 CPU Usage
 
-> <sub>**Sources:** [timeseries command (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language/commands/metric-commands#timeseries), [Semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary) — `dt.host.cpu.usage`, `cloud.aws.lambda.*` metric definitions, [AWS topology (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/ingest-telemetry/aws-topology). **Derived:** the `arrayAvg` / `arraySum` post-aggregation pattern is the canonical idiom for sorting a `timeseries` result by total / mean per dimension — see the DQL examples skill for variants.</sub>
+> <sub>**Sources:** [timeseries command (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language/commands/metric-commands#timeseries), [Semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary) — `dt.host.cpu.usage`, `cloud.aws.lambda.*` metric definitions, [AWS topology (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/ingest-telemetry/aws-topology). **Derived:** the `arrayAvg` / `arraySum` post-aggregation step follows from `timeseries` returning each series as an array, which cannot be sorted on directly.</sub>
 
 ```dql
 // EC2 CPU usage over the last 6 hours, top 10 busiest instances
@@ -419,13 +418,15 @@ Cloud metrics are not instantly available in Dynatrace. Understanding delays hel
 | CloudWatch Metric Streams | <1 minute (buffer 60s) | Push-based via Firehose — see §7 |
 | ActiveGate polling | 5-15 minutes | Depends on number of services/metrics |
 
+In community practice, treat these minute ranges as planning estimates, not commitments — they depend on the number of monitored services, regions, and metrics per polling cycle.
+
 ### Implications for Alerting
 
 - **Don't set alert evaluation windows shorter than the metric delay** — a 1-minute evaluation window on a 5-minute metric will produce false negatives
 - **Use sliding windows** — evaluate over 15-30 minutes for cloud metrics
 - **Combine with OneAgent** — for sub-minute alerting, rely on OneAgent metrics rather than cloud metrics
 
-> <sub>**Sources:** [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics) — polling latency framing, [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams) — push latency and 60s buffer, [Amazon CloudWatch concepts (AWS docs)](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html) — standard vs detailed monitoring intervals. **Softened:** specific minute-range numbers depend on the number of monitored services, regions, and metric count per polling cycle — use them as planning estimates, not commitments.</sub>
+> <sub>**Sources:** [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics) — polling latency framing, [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams) — push latency and 60s buffer, [Amazon CloudWatch concepts (AWS docs)](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html) — standard vs detailed monitoring intervals.</sub>
 
 <a id="metric-streams-firehose"></a>
 
@@ -451,7 +452,7 @@ The Clouds App integration described in §3 is **polling-based** — Dynatrace c
 | **AWS tag-driven workflows** | Required (filtering, alerts keyed on tags) | Not needed for the streamed metrics (entity mapping still comes from Clouds App / Hub extension) |
 | **ActiveGate footprint** | Already deployed | Want to avoid AG capacity scaling for metric polling |
 
-**Typical pattern:** keep the Clouds App polling enabled for entity discovery, tags, logs, and per-metric controls; add Metric Streams for the **high-volume, low-latency-sensitive namespaces** (e.g., `AWS/Lambda`, `AWS/ApplicationELB`, `AWS/RDS`) where polling cost or latency is the constraint.
+**Typical pattern:** keep the Clouds App polling enabled for entity discovery, tags, logs, and per-metric controls; add Metric Streams for the **high-volume, low-latency-sensitive namespaces** where polling cost or latency is the constraint. In community practice that shortlist often starts with `AWS/Lambda`, `AWS/ApplicationELB` and `AWS/RDS` — pick yours from your own polling cost and latency requirements.
 
 ### 7.2 Prerequisites
 
@@ -503,11 +504,11 @@ The `wget` above pulls from `https://assets.cloud.dynatrace.com/awsmetricstreami
 - Security policy requires every IaC artifact to pass review before it enters the change pipeline
 - The pipeline must be fully reproducible — no late-binding fetches from third-party hosts
 
-Five paths handle these constraints. Pick by combining your security posture with your existing tooling.
+In community practice, five paths handle these constraints — the set and the scenario mapping below are field guidance, not a Dynatrace-published matrix. Pick by combining your security posture with your existing tooling.
 
 **Path A — Self-host the Dynatrace template (after security review)**
 
-The most common enterprise pattern. Fetch the YAML once from any permitted location, **review it**, version it, then deploy from internal copies.
+In community practice, the most common enterprise pattern. Fetch the YAML once from any permitted location, **review it**, version it, then deploy from internal copies.
 
 1. **Download** on an approved workstation or jump host:
    ```bash
@@ -593,13 +594,13 @@ The §7.4 manual setup (Firehose Delivery Stream → CloudWatch Metric Stream) r
 
 **Path E — Request a signed / checksummed artifact via your Dynatrace account team**
 
-Some procurement teams require vendor templates to arrive through an auditable channel rather than a public asset URL. Worth asking your Dynatrace account team whether they can provide:
+Some procurement teams require vendor templates to arrive through an auditable channel rather than a public asset URL. This path is industry practice, **not a documented Dynatrace offering** — it is worth asking your Dynatrace account team whether they can provide:
 
 - A SHA256 checksum for the published template (so you can verify the copy you fetched matches the published version)
 - A signed / versioned release artifact
 - Access via a private artifact feed your account is entitled to
 
-This is an account-team conversation, not a self-service option — but for highly regulated industries (financial services, government, healthcare) the conversation is often necessary anyway.
+This is an account-team conversation, not a self-service option — confirm what your account is entitled to before committing the path to a runbook. In community practice, highly regulated industries (financial services, government, healthcare) often need the conversation anyway.
 
 **Scenario → recommended path**
 
@@ -611,7 +612,7 @@ This is an account-team conversation, not a self-service option — but for high
 | No IaC allowed from external sources at all | **Path D** | Pure console; pair with a runbook for repeatability |
 | Procurement / compliance requires signed artifacts | **Path E** | The auditable supply-chain conversation |
 
-> <sub>**Sources:** [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams), [aws_cloudwatch_metric_stream (Terraform AWS provider)](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_stream), [aws_kinesis_firehose_delivery_stream (Terraform AWS provider)](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kinesis_firehose_delivery_stream), [AWS CloudShell User Guide](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html). **Derived:** the 5-path matrix and scenario→path table synthesize public-docs primitives with field-observed enterprise procurement patterns — no single source endorses this composition by name. **Softened:** the "ask your Dynatrace account team" Path E is industry-practice guidance, not a documented Dynatrace offering — confirm what your account is entitled to before committing the path to a runbook.</sub>
+> <sub>**Sources:** [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams), [aws_cloudwatch_metric_stream (Terraform AWS provider)](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_stream), [aws_kinesis_firehose_delivery_stream (Terraform AWS provider)](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kinesis_firehose_delivery_stream), [AWS CloudShell User Guide](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html).</sub>
 
 ### 7.4 Option 2 — Manual Setup in AWS Console
 
@@ -646,7 +647,7 @@ In Dynatrace, open **Hub** and enable **AWS Entities for Metric Streaming**. Wit
 | **Per-region cost** | Each region adds Firehose ingestion + S3 backup storage. Plan regional scope deliberately. |
 | **No Terraform support for the Clouds App connection itself** | The CFN-based Clouds App onboarding has no Terraform-provider resource as of this writing. Metric Streams is a separate stack and remains scriptable via plain CloudFormation. |
 
-> <sub>**Sources:** [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Create AWS connection via Settings (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/create-an-aws-connection/aws-connection-app-settings). **Derived:** the §7.1 "polling + selective streaming" coexistence pattern synthesizes both pages — no single page recommends this composition by name. **Softened:** the namespace-shortlist for streaming (Lambda / ELB / RDS) is community guidance; pick based on your own polling cost and latency requirements.</sub>
+> <sub>**Sources:** [Amazon CloudWatch Metric Streams (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/aws-metrics-ingest/cloudwatch-metric-streams), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Create AWS connection via Settings (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/create-an-aws-connection/aws-connection-app-settings). **Derived:** the §7.1 "polling + selective streaming" coexistence pattern synthesizes both pages — no single page recommends this composition by name.</sub>
 
 <a id="cost-optimization"></a>
 
@@ -658,6 +659,8 @@ AWS CloudWatch API calls are billed per request. Dynatrace cloud integration gen
 - **ListMetrics** — metric enumeration
 
 ### Cost Reduction Strategies
+
+In community practice, the levers rank roughly as below — the Impact column is field guidance on which levers move the bill most in a typical enterprise tenant, not a published Dynatrace ranking. Verify against your own CloudWatch bill.
 
 | Strategy | Impact | How |
 |---|---|---|
@@ -676,11 +679,11 @@ Monthly API calls = (services enabled) x (metrics per service) x (resources) x (
 Monthly cost = API calls / 1000 x $0.01
 ```
 
-For example: 5 services x 10 metrics x 100 resources x 288 polls/day x 30 = ~43M calls/month = ~$430/month
+For example, with representative round numbers: 5 services x 10 metrics x 100 resources x 288 polls/day x 30 = ~43M calls/month = ~$430/month. Recompute against your tenant's actual service and resource counts and current AWS pricing before quoting it to stakeholders.
 
 > **Tip:** Review the CloudWatch billing dashboard monthly and correlate spikes with Dynatrace service additions.
 
-> <sub>**Sources:** [Amazon CloudWatch pricing (AWS docs)](https://aws.amazon.com/cloudwatch/pricing/) — `GetMetricData` request pricing tier and `$0.01 per 1,000 metrics requested` (verify current rate per region; the example formula assumes a US region rate), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Tags and management zones for AWS (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics/tags-and-management-zones-aws). **Derived:** the cost-reduction table prioritization (disable-unused > tag-filtering > metric-count > streams > regional-scope) is field-observed guidance based on which levers have the largest absolute impact per typical enterprise tenant. **Softened:** the worked monthly cost example uses representative round numbers; recompute against your tenant's actual service/resource counts and current AWS pricing before quoting to stakeholders.</sub>
+> <sub>**Sources:** [Amazon CloudWatch pricing (AWS docs)](https://aws.amazon.com/cloudwatch/pricing/) — `GetMetricData` request pricing tier and `$0.01 per 1,000 metrics requested` (verify current rate per region; the example formula assumes a US region rate), [Monitor AWS with CloudWatch metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics), [Tags and management zones for AWS (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/integrate-with-aws/cloudwatch-metrics/tags-and-management-zones-aws).</sub>
 
 <a id="related-resources"></a>
 
@@ -730,7 +733,7 @@ Maintained by Dynatrace on GitHub. Pin to a release before deploying to producti
 - Use **IAM role-based authentication** for production AWS integrations
 - Consider adding **CloudWatch Metric Streams via Firehose** *alongside* Clouds App polling for high-volume / low-latency-sensitive namespaces (e.g., Lambda, ELB, RDS) — Streams handles metrics only and does not replace the Clouds App
 - Enable services in **tiers** based on business criticality, not all at once
-- **Tag-based filtering** is the most effective cost optimization lever
+- In community practice, **tag-based filtering** is among the most effective cost optimization levers
 - Account for **metric delays** (5-15 minutes) when configuring alerts
 - Combine **cloud integration** with **OneAgent** for full-stack visibility
 
