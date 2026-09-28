@@ -1,6 +1,6 @@
 # SYNTH-04: Private Synthetic Locations
 
-> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 4 of 6 | **Created:** December 2025 | **Last Updated:** 09/18/2026
+> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 4 of 6 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Monitoring Internal Applications from Your Infrastructure
 This notebook covers deploying and managing private synthetic locations (ActiveGates) for monitoring internal applications, APIs, and services not accessible from the public internet.
@@ -86,13 +86,15 @@ ActiveGate can serve multiple purposes:
 
 ### Synthetic Engine Requirements
 
-| Resource | Minimum | Recommended |
+| Resource | Minimum (XS node with browser support) | Guidance |
 |----------|---------|-------------|
-| **CPU** | 2 cores | 4+ cores |
-| **RAM** | 4 GB | 8+ GB |
-| **Disk** | 20 GB | 50+ GB |
+| **CPU** | 2 vCPU | 4 vCPU for an S node — pick the node size from the sizing guide's executions-per-hour limits |
+| **RAM** | 4 GB | At least 8 GB |
+| **Disk** | 20 GB free | At least 25 GB free |
 | **Network** | HTTPS outbound | Low latency to targets |
 | **Operating system** | A Linux or Windows Server release currently supported for a synthetic-enabled ActiveGate | Track the ActiveGate OS support matrix — supported releases are versioned with the **ActiveGate**, not with the tenant |
+
+The 8 GB / 25 GB guidance is the requirements page's own: *"we recommend having at least 8 GB of RAM and 25 GB of free disk space."* Size is also sticky — *"To change the size of a Synthetic-enabled ActiveGate, for example, after upgrading from size S to meet size M requirements, you must uninstall and reinstall it."*
 
 **Windows Server 2025** is supported for private synthetic locations. The OS option first appeared for synthetic-capable ActiveGates with **ActiveGate 1.341**; **SaaS 1.344** (release notes published 07/27/2026) states it in the private-location context directly: *"You can now install on Windows Server 2025 hosts for private synthetic locations."* The documentation statement is firm — published docs are live regardless of which sprint your tenant is on — but the capability ships in the **ActiveGate installer**, so confirm the ActiveGate build you are about to deploy carries it before committing a Windows Server 2025 rollout plan.
 
@@ -101,7 +103,7 @@ ActiveGate **1.343** (published 07/15/2026, rollout from 07/28/2026) additionall
 ### Browser Monitor Requirements
 
 For browser monitors, additional requirements:
-- A Chromium-family browser — **shipped with the ActiveGate**, not installed separately, so its version tracks your **ActiveGate fleet version, not your tenant version**
+- A Chromium-family browser, provided through the ActiveGate rather than installed by you — on **Windows** the installer package includes Chrome for Testing; on **Linux** the installer downloads the browser and its dependencies. Its version tracks your **ActiveGate fleet** (and, on Linux, the location's browser auto-update switch — see below), **not your tenant version**
 - Write access to `/tmp` — the browser's dependencies, including `xvfb`, are installed with it and use `/tmp` (no separate display server to install)
 - Additional RAM for browser instances
 
@@ -115,11 +117,13 @@ For browser monitors, additional requirements:
 
 ActiveGate 1.347 is forthcoming — verify it has reached your synthetic ActiveGates before relying on Chromium 152; until then, the 1.345 row is the working baseline for upgraded fleets, and the 1.343 row for the rest.
 
-The engine version ships **inside the ActiveGate update** rather than separately, which is why browser-monitor behavior can change on a synthetic AG that nobody deliberately touched. Validate browser monitors after an AG takes a new version before treating new failures as application regressions — post-update monitor flake is more often an engine change than a real one (FAQ-05 §9 makes the same point, and is the reason synthetic-heavy AGs are a standing candidate for manual update scheduling).
+**How the browser is updated.** The browser moves with ActiveGate and Synthetic engine updates, not on a schedule of its own: *"The browser autoupdate takes place during manual as well as automatic ActiveGate and Synthetic engine updates."* On **Linux** this is controlled per private location by the **Enable Chrome(-ium) auto-update** switch, which is on by default (*"the browser autoupdate is turned on by default for locations with Linux-based ActiveGates"*). Turn it off only to hold a specific browser version or for offline environments — and then update the browser manually on every ActiveGate in the location. On **Windows** there is no switch: *"on Windows-based ActiveGates, the browser is always updated during Synthetic engine updates."* So the lever for holding a browser version is that per-location switch, **not** ActiveGate auto-update. Two support rules bound how far a location can drift: Dynatrace *"supports browser versions that are no more than two versions behind the latest Dynatrace-supported version for a specific ActiveGate release"*, and *"We strongly recommend updating all ActiveGates per location to the same version."*
 
-> <sub>**Sources:** [ActiveGate 1.343 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"Chrome for Testing 150 is bundled with the Windows ActiveGate installer."*; [ActiveGate 1.345 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — *"Chrome for Testing 151 is bundled with the Windows ActiveGate installer."*; [ActiveGate 1.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-347) — *"Chromium 152 is the latest supported version for Synthetic-enabled ActiveGate"* and *"Chrome for Testing 152 is bundled with the Windows ActiveGate installer."*; [Requirements for private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/requirements-for-private-synthetic) — *"Its dependencies, including xvfb, utilize /tmp"*.</sub>
+Because the browser can change whenever an ActiveGate or engine update lands, re-check browser monitors after an update before treating new failures as application regressions.
 
-Two things follow from the browser being bundled. First, an ActiveGate that has not been upgraded is still executing clickpaths in the older browser however current the tenant is — so when the *same* clickpath behaves differently at two private locations, compare **ActiveGate versions before** suspecting the application:
+> <sub>**Sources:** [ActiveGate 1.343 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"Chrome for Testing 150 is bundled with the Windows ActiveGate installer."*; [ActiveGate 1.345 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — *"Chrome for Testing 151 is bundled with the Windows ActiveGate installer."*; [ActiveGate 1.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-347) — *"Chromium 152 is the latest supported version for Synthetic-enabled ActiveGate"* and *"Chrome for Testing 152 is bundled with the Windows ActiveGate installer."*; [Requirements for private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/requirements-for-private-synthetic) — *"Its dependencies, including xvfb, utilize /tmp"*; [Manage private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic-monitoring/private-synthetic-locations/manage-private-synthetic-locations) — the auto-update, Windows, two-versions-behind and same-version quotes above.</sub>
+
+Two things follow from the browser being tied to the ActiveGate. First, an ActiveGate that has not been updated — or a Linux location with browser auto-update turned off — is still executing clickpaths in the older browser however current the tenant is — so when the *same* clickpath behaves differently at two private locations, compare **ActiveGate versions before** suspecting the application:
 
 ```dql
 smartscapeNodes "ACTIVEGATE"
@@ -127,7 +131,7 @@ smartscapeNodes "ACTIVEGATE"
 | sort dt.active_gate.version asc, name asc
 ```
 
-Second, the **1.331 floor stated below is a minimum, not a target.** It is the version that lets users whose access is scoped by security context see private-location results; the newer builds in the table above determine which browser your clickpaths actually run in. Both matter, for different reasons. (For the update-management model on SaaS — auto-update windows, version pinning, staged fleet upgrades — see FAQ-05.)
+Second, the **1.331 floor stated below is a minimum, not a target.** It is the version that lets users whose access is scoped by security context see private-location results; the ActiveGate build (and, on Linux, the location's browser auto-update switch) determines which browser your clickpaths actually run in. Both matter, for different reasons. (For the ActiveGate update-management model on SaaS — auto-update windows, version pinning, staged fleet upgrades — see FAQ-05; the browser itself is governed by the per-location switch above.)
 
 > **Security context and ActiveGate 1.331 (SaaS 1.343, July 2026 — staged tenant rollout from mid-July).** SaaS 1.343 migrates the management zones of each synthetic **monitor** to security-context values: *"Dynatrace performs a one-time migration of the management zone each synthetic monitor belongs to, mapping them to security context values with the same name on that monitor."* It runs once — *"Updating or creating management zones and monitors won't be synchronized."* On private locations, ActiveGate **1.331+** is what makes those results scopable: *"Earlier versions do not enrich the metrics and events produced by Synthetic monitor executions with the monitor's security context value. Without this enrichment, IAM policies scoped to security contexts cannot grant access to execution data."* An older ActiveGate keeps executing monitors; users whose access is scoped by security context just cannot see its results. Upgrade any synthetic AG below 1.331 before you move users to security-context-scoped policies, and review monitor access once the migration reaches your tenant — the security-context model replaces MZ-based scoping (the MZ2POL series covers the broader management-zone migration). SaaS 1.343 also adds IAM-based access control for Synthetic Monitoring and API support for assigning security context to synthetic monitors.
 >
@@ -225,7 +229,7 @@ smartscapeNodes "SYNTHETIC_LOCATION"
 ### Creating a Private Location
 
 1. **Deploy ActiveGate** with synthetic capability
-2. **Navigate to**: Settings → Synthetic → Private synthetic locations
+2. **Navigate to**: **Synthetic → Private locations** (or, in Settings Classic, **Settings → Web and mobile monitoring → Private Synthetic locations**)
 3. **Create location**: Name, description, geographic info
 4. **Assign ActiveGates**: Select which ActiveGates serve this location
 
@@ -236,12 +240,14 @@ smartscapeNodes "SYNTHETIC_LOCATION"
 | **Name** | Descriptive location name |
 | **Latitude/Longitude** | Geographic coordinates |
 | **City/Region** | Location metadata |
-| **ActiveGate nodes** | Assigned ActiveGates |
+| **ActiveGate nodes** | Assigned ActiveGates — one ActiveGate cannot serve more than one location |
+| **Enable Chrome(-ium) auto-update** | Linux-based locations; on by default. Updates the browser during ActiveGate and Synthetic engine updates (see § 3). API property: `autoUpdateChromium` |
 
 ### High Availability
 
 For production workloads:
 - Deploy 2+ ActiveGates per location
+- Keep every ActiveGate in a location on the same version
 - Distribute across availability zones
 - Load balancing automatic
 
@@ -253,19 +259,25 @@ The UI flow above is the interactive path. For repeatable, reviewable, source-co
 POST /api/v2/synthetic/locations
 ```
 
-**API 1.344** (published 07/15/2026, **staged rollout from 07/29/2026**) adds three properties to the `PrivateSyntheticLocation` request schema — `minActiveGateCount`, `maxActiveGateCount`, and `nodeSize`. These are what make a *fully* declarative definition possible: before them, the capacity and node-sizing envelope had to be set in the UI after the location was created, so no single API call could express the finished location. Requests that omit the three properties behave exactly as they did before, so existing automation needs no change.
+**API 1.344** (published 07/15/2026, **staged rollout from 07/29/2026**) adds three properties to the `PrivateSyntheticLocation` request schema of `POST /synthetic/locations` — `minActiveGateCount`, `maxActiveGateCount`, and `nodeSize`. All three are **containerized-location** properties: the POST reference describes each as a *"Containerized location property"* that is *"required for a Kubernetes location"*. They are the API counterparts of the fields the UI asks for when you create a Kubernetes or OpenShift location — the minimum and maximum number of ActiveGates the horizontal pod autoscaler works between, and the ActiveGate node size. They do not size a standard Linux/Windows location, whose ActiveGate size is set by the host it is installed on (see § 3).
 
 | Property | Purpose |
 |----------|---------|
-| `minActiveGateCount` | Lower bound on ActiveGates serving the location — set it to your survivor-capacity floor (see High Availability above) |
-| `maxActiveGateCount` | Upper bound — caps scale-out |
-| `nodeSize` | Node sizing class for the location's ActiveGates |
+| `minActiveGateCount` | Minimum number of ActiveGates — the autoscaler's lower bound. The docs recommend *"a minimum of two ActiveGates per location"* |
+| `maxActiveGateCount` | Maximum number of ActiveGates — caps scale-out |
+| `nodeSize` | ActiveGate node size: `XS`, `S` or `M` (*"The node size L is not supported in containerized locations."*). Choose deliberately — *"Once specified, ActiveGate size for a location can't be changed because persistent storage can't be resized."* |
 
-Because the rollout is staged, treat all three as forthcoming: send them, confirm the response accepts them, and keep the post-create UI step in your runbook until you have verified acceptance on the specific tenant you are automating.
+Because the rollout is staged, confirm the tenant you are automating accepts the three properties before relying on them; until it does, creating the containerized location in the UI remains the working path.
 
 > **Authentication boundary (carried over from SYNTH-01):** synthetic monitor and location management still requires an **API token**, not a platform token — including through the Terraform provider (see AUTOM-04 § Authentication Boundary). Do not design a private-location automation path around platform-token auth.
 
-> <sub>**Sources:** [Dynatrace API release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — changed `PrivateSyntheticLocation` schema, added `maxActiveGateCount`, `minActiveGateCount`, `nodeSize`; [Synthetic locations API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/synthetic/synthetic-locations). **Derived:** the "fully declarative" framing combines the new properties with the pre-1.344 requirement to finish sizing in the UI.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[Dynatrace API release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — `POST /synthetic/locations`: changed `PrivateSyntheticLocation` schema, added `maxActiveGateCount`, `minActiveGateCount`, `nodeSize`</sub>
+> - <sub>[Synthetic locations API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/synthetic/synthetic-locations)</sub>
+> - <sub>[POST a location (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/synthetic/synthetic-locations/post-a-location) — *"Containerized location property. The minimum number of ActiveGates deployed for the location (required for a Kubernetes location)."*</sub>
+> - <sub>[Containerized private Synthetic locations on Kubernetes (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/containerized-locations-synth-app) — *"We recommend the S ActiveGate size and a minimum of two ActiveGates per location."*</sub>
+> - <sub>[Private locations in Synthetic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations) — *"We recommend using at least two ActiveGates for a location. You can't use one ActiveGate for multiple locations."*</sub>
+> - <sub>[Manage private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic-monitoring/private-synthetic-locations/manage-private-synthetic-locations) — *"We strongly recommend updating all ActiveGates per location to the same version."*</sub>
 
 ```dql
 // Monitor executions by location

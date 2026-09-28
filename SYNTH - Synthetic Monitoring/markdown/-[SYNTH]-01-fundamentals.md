@@ -1,6 +1,6 @@
 # SYNTH-01: Synthetic Monitoring Fundamentals
 
-> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 1 of 6 | **Created:** December 2025 | **Last Updated:** 09/18/2026
+> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 1 of 6 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Understanding Proactive Availability and Performance Testing
 This notebook introduces Dynatrace Synthetic Monitoring, which enables proactive testing of application availability, functionality, and performance from locations around the world.
@@ -217,7 +217,7 @@ Two smaller conveniences: the node's **`name` field is already the display name*
 
 > **Migration mechanics** — for the general rules on classifying a query before migrating it (dimension-first for mass data, `smartscapeNodes` only for entity-list queries), the type and construct mapping, `traverse`, and the `id_classic` bridge, see **FAQ-16: Migrating Classic Entity Selectors to Smartscape**.
 
-> <sub>**Sources:** [Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — "All latest Dynatrace queries and filters in the above apps now primarily use `dt.smartscape.*` entities, instead of `dt.entity.*` and `dt.rum.application.*`"; [Synthetic monitors in Smartscape (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-smartscape) — the deprecation quoted above. **Derived:** the classic-to-node mapping table is read from `dt.semantic_dictionary.models` (`data_object == "smartscape.nodes"`, `classic_models` expanded) on a live tenant, 07/30/2026; the two "cannot be guessed" traps are the observed consequences of that mapping, not documented warnings.</sub>
+> <sub>**Sources:** [Dynatrace SaaS release notes 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — "All latest Dynatrace queries and filters in the above apps now primarily use `dt.smartscape.*` entities, instead of `dt.entity.*` and `dt.rum.application.*`"; [Synthetic monitors in Smartscape (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-smartscape) — the deprecation quoted above. **Dictionary:** `dt.smartscape.browser_monitor` (`BROWSER_MONITOR` ← `dt.entity.synthetic_test`), `dt.smartscape.http_monitor` (`HTTP_MONITOR` ← `dt.entity.http_check`), `dt.smartscape.network_availability_monitor` (`NETWORK_AVAILABILITY_MONITOR` ← `dt.entity.multiprotocol_monitor`), `dt.smartscape.synthetic_location` (`SYNTHETIC_LOCATION` ← `dt.entity.synthetic_location`), plus `dt.smartscape.browser_monitor_step` / `dt.smartscape.http_monitor_step`, read from `dt.semantic_dictionary.models` (`data_object == "smartscape.nodes"`, `classic_models` expanded) 09/28/2026. Observed on a live tenant 09/28/2026: `smartscapeNodes "MULTIPROTOCOL_MONITOR"` returned 0 rows with no error, while `smartscapeNodes "NETWORK_AVAILABILITY_MONITOR"` returned 4 — the two "cannot be guessed" traps are observed consequences of that mapping, not documented warnings.</sub>
 
 <a id="your-first-synthetic-query"></a>
 ## 5. Your First Synthetic Query

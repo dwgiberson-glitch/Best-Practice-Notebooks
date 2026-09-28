@@ -1,6 +1,6 @@
 # SLO-03: Composition and Error Budgets
 
-> **Series:** SLO — Service Level Objectives | **Notebook:** 3 of 6 | **Created:** June 2026 | **Last Updated:** 08/31/2026
+> **Series:** SLO — Service Level Objectives | **Notebook:** 3 of 6 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -104,7 +104,7 @@ Multiply each target by its weight, sum, then divide by the sum of the weights:
 
 The global SLO is **98.92%** — the overall measure weighted by each service's importance.
 
-> **Honest caveat:** Dynatrace does **not** natively compute a weighted-global SLO across multiple SLO objects from the SLO wizard. The wizard creates individual SLOs; the weighted roll-up is something you compute yourself — as a DQL expression on a dashboard, or in a notebook like this one. Treat the number above as a reporting calculation you maintain, not a built-in SLO type. (This is a point the original field document glossed over.)
+> **Honest caveat:** the Dynatrace SLO documentation describes no weighted-global SLO computed across multiple SLO objects — checked 09/28/2026 across the Service-Level Objectives page, Create service-level objectives, and the templates and examples pages. The wizard creates individual SLOs; the weighted roll-up is something you compute yourself — as a DQL expression on a dashboard, or in a notebook like this one. Treat the number above as a reporting calculation you maintain, not a built-in SLO type. (This is a point the original field document glossed over.)
 
 <a id="windows"></a>
 ## 5. Rolling vs Calendar Windows
@@ -118,7 +118,7 @@ Rolling windows give smoother, more honest day-to-day signals and avoid the "bud
 
 Whatever you choose, **alert on sustained breach, not on momentary dips** — a single bad interval inside a 30-day window is noise. SLO-04 covers how multiwindow burn-rate alerting encodes exactly that.
 
-> <sub>**Sources:** [Service-Level Objectives (DT docs)](https://docs.dynatrace.com/docs/deliver/service-level-objectives), [Site Reliability Engineering — Error Budgets (Google SRE Book)](https://sre.google/sre-book/embracing-risk/). Burn-rate query re-executed against a live tenant 08/28/2026. **Derived:** the weighted-global calculation is a reporting pattern, not a built-in Dynatrace SLO type.</sub>
+> <sub>**Sources:** [Service-Level Objectives (DT docs)](https://docs.dynatrace.com/docs/deliver/service-level-objectives), [Site Reliability Engineering — Error Budgets (Google SRE Book)](https://sre.google/sre-book/embracing-risk/). [Create service-level objectives (DT docs)](https://docs.dynatrace.com/docs/deliver/service-level-objectives/create-slo). Burn-rate query re-executed against a live tenant 08/28/2026. The §4 caveat is a dated reading of the SLO documentation (09/28/2026: no weighted, composite or global SLO type on the Service-Level Objectives page, Create service-level objectives, Service-level objective templates or Service-level objective examples), not a documented statement.</sub>
 
 ---
 

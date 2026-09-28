@@ -1,6 +1,6 @@
 # SYNTH-99: Best Practice Summary
 
-> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** SYNTH — Synthetic Monitoring | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -142,16 +142,17 @@ Verify 1.344 has reached your tenant before relying on the combined form; until 
 | Practice | Recommended Setting/Value | Priority |
 |----------|---------|----------|
 | Deploy ActiveGate with `--enable-synthetic` capability | Capability: **synthetic** | Critical |
-| Provision ActiveGate with minimum **4 CPU cores, 8 GB RAM, 50 GB disk** | Resources: 4 cores / 8 GB / 50 GB (recommended) | Critical |
+| Size each synthetic ActiveGate from the sizing guide (XS/S/M/L by executions per hour), with at least **8 GB RAM and 25 GB free disk** | XS minimum is 2 vCPU / 4 GB / 20 GB; docs recommend 8 GB RAM / 25 GB disk; resizing means reinstalling (SYNTH-04) | Critical |
 | Deploy **2+ ActiveGates** per private location for high availability | Nodes per location: **2+** | Critical |
 | Distribute ActiveGates across availability zones | AZ distribution: one AG per AZ minimum | Recommended |
-| Let the ActiveGate installer provide the browser; do not install Chrome/Chromium or a display server yourself | Browser version tracks the ActiveGate version (SYNTH-04) | Critical |
+| Let the ActiveGate installer provide the browser, and keep it current with the per-location **Enable Chrome(-ium) auto-update** switch (Linux; on by default) — not by changing ActiveGate auto-update | Browser updates during ActiveGate and Synthetic engine updates; Windows always updates it; supported window is two versions behind the latest (SYNTH-04) | Critical |
+| Keep every ActiveGate in a private location on the same version | One ActiveGate version per location | Recommended |
 | Monitor ActiveGate CPU < 80%, memory < 80%, disk < 80% | Alert thresholds: **80%** sustained for CPU/memory/disk | Critical |
 | Monitor ActiveGate execution queue depth | Alert threshold: queue > **100** pending executions | Recommended |
 | Deploy containerized private locations from the UI-generated `synthetic.yaml` template, not from DynaKube | Template: Synthetic → Private locations → Download synthetic.yaml (plus the metric-adapter template) | Recommended |
 | Ensure outbound-only connectivity (no inbound firewall rules required) | Network: HTTPS outbound to Dynatrace cluster only | Critical |
 
-> <sub>**Sources:** [Requirements for private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/requirements-for-private-synthetic) — *"On Windows, the ActiveGate installer package includes the Chrome for Testing browser used to run browser monitors."*; [Containerized private Synthetic locations on Kubernetes (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/containerized-locations-synth-app) — *"Select Download synthetic.yaml. This is the location template file."*</sub>
+> <sub>**Sources:** [Requirements for private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/requirements-for-private-synthetic) — *"On Windows, the ActiveGate installer package includes the Chrome for Testing browser used to run browser monitors."*; [Containerized private Synthetic locations on Kubernetes (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations/containerized-locations-synth-app) — *"Select Download synthetic.yaml. This is the location template file."*; [Manage private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic-monitoring/private-synthetic-locations/manage-private-synthetic-locations) — *"the browser autoupdate is turned on by default for locations with Linux-based ActiveGates"* and *"We strongly recommend updating all ActiveGates per location to the same version."*</sub>
 
 <a id="validation-and-assertions"></a>
 ## 8. Validation and Assertions
