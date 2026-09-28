@@ -1,6 +1,6 @@
 # AUTOM-99: Best Practice Summary
 
-> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 This notebook consolidates every actionable best practice from the AUTOM series (notebooks 01-09) into a single reference. Each practice is definitive: it tells you exactly what to set, not what to consider.
 
@@ -71,13 +71,13 @@ Use this as a checklist when designing, implementing, or auditing Dynatrace conf
 |----------|----------------|----------|
 | Always run `monaco deploy --dry-run` before deploy | Monaco has no `validate` command. `monaco deploy manifest.yaml --dry-run` parses YAML, checks template JSON and resolves references **without contacting the tenant** — it cannot catch payload errors, so a deploy can still fail with HTTP 400 after a clean dry-run. | Critical |
 | Use environment variables for auth | Set `DT_TENANT_URL` and `DT_API_TOKEN` as env vars. In `manifest.yaml`, `auth.token.name` holds the **variable name**, never the token. | Critical |
-| Use meaningful config IDs | IDs should describe the config purpose (e.g., `production-mz`, `web-app-alerting`). These IDs are how Monaco tracks objects. | Critical |
+| Use meaningful config IDs | IDs should describe the config purpose (e.g., `production-segment`, `web-app-problem-routing`). These IDs are how Monaco tracks objects. | Critical |
 | Use `manifest.yaml` for multi-environment setup | Define all environments in `environmentGroups` with separate URL/token env vars per environment. | Recommended |
 | Use environment-specific overrides | Add `environmentOverrides` (or `groupOverrides`) at the config level, sibling of `config:`, to vary values (e.g., `delay_minutes: 1` for prod, `5` for staging). | Recommended |
 | Use `skip` with overrides for env-specific configs | `skip` is a boolean on `config:`; set a default and flip it per environment or environment group in `environmentOverrides` / `groupOverrides`. | Recommended |
 | Use projects to group related configs | Put related configs in one project and deploy it with `--project`. `--group` selects manifest **environment groups**, not configs; there is no per-config `group:` key. | Recommended |
 | Use reference parameters for ordering | Reference other configs with `["<project>", "<configType>", "<configId>", "id"]` (for settings, `configType` is the schema ID) so Monaco deploys the dependency first. | Recommended |
-| Modular directory structure | Separate configs by domain: `management-zones/`, `auto-tagging/`, `alerting-profiles/`. | Recommended |
+| Modular directory structure | Separate configs by domain: `segments/`, `workflows/`, `slo-v2/` (classic estates: `management-zones/`, `alerting-profiles/` until the upgrade). | Recommended |
 | Download before creating from scratch | Run `monaco download` to get the current state, then modify the exported YAML. | Optional |
 
 ---
@@ -92,7 +92,7 @@ Use this as a checklist when designing, implementing, or auditing Dynatrace conf
 | Enable state locking | Use S3+DynamoDB, Terraform Cloud, or equivalent to prevent concurrent applies. | Critical |
 | Always run `terraform plan` before `terraform apply` | Review the plan output for every change. Automate plan-as-PR-comment in CI. | Critical |
 | Use dual auth for full resource coverage | Configure both `dt_api_token` (for Synthetics/SLOs) and `client_id`/`client_secret` (for Gen3/IAM). The provider routes each resource to the correct auth method. | Critical |
-| Use modules for reusable patterns | Create modules for standard patterns (e.g., `modules/environment/`, `modules/alerting-profile/`). | Recommended |
+| Use modules for reusable patterns | Create modules for standard patterns (e.g., `modules/slo/`, `modules/problem-routing/` — see AUTOM-09 §5; classic `modules/alerting-profile/`-style modules only while the tenant is unupgraded). | Recommended |
 | Use variable validation in modules | Add `validation` blocks to enforce naming, environment values, and delay constraints at module input. | Recommended |
 | Use workspaces for multi-environment | Create `development`, `staging`, `production` workspaces. Reference `terraform.workspace` in locals for env-specific values. | Recommended |
 | Import existing resources into state | Write the HCL block first, then `terraform import <resource> "<object-id>"`. Never recreate what already exists. | Recommended |
@@ -110,7 +110,7 @@ Use this as a checklist when designing, implementing, or auditing Dynatrace conf
 | One workflow, one purpose | Each workflow handles a single responsibility (e.g., "problem email notification" not "do everything on problem"). | Critical |
 | Make tasks idempotent | Tasks must be safe to run multiple times without side effects (e.g., check if ticket exists before creating). | Critical |
 | Store secrets in Credential Vault | Use Dynatrace Credential Vault for API keys, webhook URLs, and integration tokens. Never hardcode secrets in workflow YAML or JavaScript. | Critical |
-| Scope triggers narrowly | Filter triggers by management zone, entity tag, problem category, and severity. Do not trigger on all problems. | Critical |
+| Scope triggers narrowly | Filter triggers by entity tag (ownership), problem category, severity, and a custom DQL filter — management-zone scoping is classic. Do not trigger on all problems. | Critical |
 | Add retries on external calls | Set the task retry `count` (1–99) and `delay` in **seconds** (1–3600) on HTTP tasks and external integrations — e.g., count 3, delay 30. | Recommended |
 | Route errors to a handler task | Add a handler task whose condition is the upstream task's state (`states: {api_call: ERROR}` / Terraform `conditions { states = { api_call = "ERROR" } }`). Workflows have no `on_error` construct. | Recommended |
 | Validate entity type before remediation | Check `entity.type` in a JavaScript task before executing remediation (e.g., only restart `PROCESS_GROUP_INSTANCE`, not hosts). | Recommended |
@@ -169,7 +169,7 @@ Use this as a checklist when designing, implementing, or auditing Dynatrace conf
 | Eliminate manual changes alongside automation | If a config is managed by automation, all changes go through the pipeline. No ClickOps in production. | Critical |
 | Always use version control for configs | Every automation artifact (YAML, HCL, JSON) lives in Git with meaningful commit messages. | Critical |
 | Use OPA/Conftest for resource type allowlists | Define a Rego policy that restricts which `dynatrace_*` resource types each team repo can create. | Recommended |
-| Enforce mandatory team tagging via policy | OPA/Sentinel policy requires every resource to include team ownership metadata (e.g., tag, naming prefix, MZ binding). | Recommended |
+| Enforce mandatory team tagging via policy | OPA/Sentinel policy requires every resource to include team ownership metadata (e.g., an `owner` tag, naming prefix; MZ binding on classic tenants). | Recommended |
 | Lock down Terraform state file access | Restrict HCP Terraform workspace permissions. State files can contain OAuth credentials and IAM binding details. | Recommended |
 | Use brokered self-service for Synthetic monitors | Teams submit declarative requests; a central pipeline owns the environment-wide API token and applies on their behalf. Teams never hold direct API credentials. | Recommended |
 | Use IAM policies for schema-level access | Manage `dynatrace_iam_policy` resources with `statement_query` restricting teams to specific `settings:objects:*` schemas. | Recommended |

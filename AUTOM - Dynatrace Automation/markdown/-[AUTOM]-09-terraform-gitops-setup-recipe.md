@@ -1,6 +1,6 @@
 # AUTOM-09: Terraform GitOps Setup Recipe
 
-> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 9 of 9 | **Created:** May 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 9 of 9 | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 A practical, opinionated recipe for standing up a Terraform GitOps shop for Dynatrace from scratch. This notebook covers what AUTOM-04 (Terraform resources) and AUTOM-07 (CI/CD integration) deliberately don't — repo layout, state backend choices, multi-environment promotion, lifecycle protections, secrets handling end-to-end, team onboarding, and operational realities. Use it as the bootstrap reference; consult AUTOM-04 for resource-level patterns and AUTOM-07 for CI/CD pipeline specifics.
 
@@ -64,8 +64,8 @@ There are many "valid" Terraform layouts. This recipe picks one — separate-mod
 |------|---------|
 | `.github/workflows/` | CI/CD pipelines (or `.gitlab-ci.yml`, `bitbucket-pipelines.yml`) |
 | `modules/` | Reusable modules — versioned, environment-agnostic |
-| `modules/management-zone/` | One module per Dynatrace resource family |
-| `modules/alerting-profile/` | Same |
+| `modules/segment/` | One module per Dynatrace resource family |
+| `modules/problem-routing/` | Same (problem-triggered workflows) |
 | `modules/slo/` | Same |
 | `modules/synthetic-http/` | Same |
 | `envs/dev/` | Dev environment root — references modules + per-env tfvars |
@@ -85,7 +85,7 @@ For environments where SVG doesn't render
 | Layer | Purpose | What changes when |
 |-------|---------|-------------------|
 | **`modules/<resource-family>/`** | Reusable building blocks; environment-agnostic; versioned independently | A pattern is added or refined (new field, new validation) |
-| **`envs/<env>/`** | Per-environment composition; references modules with `source = "../../modules/<...>"` or by Git tag | An environment-specific value changes (new MZ name, threshold, location) |
+| **`envs/<env>/`** | Per-environment composition; references modules with `source = "../../modules/<...>"` or by Git tag | An environment-specific value changes (new segment, SLO target, threshold, location) |
 | **`policy/`** | Pre-apply guardrails: Sentinel for HCP Terraform, OPA/Conftest for self-hosted CI | A new governance rule is added (mandatory tag, naming convention) |
 
 The line between `modules/` and `envs/` is the **environment-agnostic vs environment-specific** line. If a value differs between staging and production, it lives in `envs/<env>/terraform.tfvars`, not in the module.
@@ -94,7 +94,7 @@ The line between `modules/` and `envs/` is the **environment-agnostic vs environ
 
 | Concern | Module input or root variable? |
 |---------|-------------------------------|
-| Management Zone naming pattern (`{env}-{app}-{role}`) | Module input — the pattern itself is shared |
+| SLO / segment / workflow naming pattern (`{env}-{app}-{objective}`) | Module input — the pattern itself is shared |
 | The specific env / app / role values | Root tfvars per env |
 | Severity thresholds | Module input with sensible defaults; override in root tfvars per env |
 | Synthetic location IDs | Root tfvars per env — the IDs differ by tenant |
@@ -107,7 +107,7 @@ A common variant promoted in [a May 2026 Dynatrace Guild thread](https://communi
 
 | Repo | Role |
 |---|---|
-| `dynatrace-modules` (or per-resource-family: `dynatrace-dashboards`, `dynatrace-alerting`, `dynatrace-anomalies`, `dynatrace-global-settings`) | Reusable modules. Versioned with Git tags (`v1.4.0`); released as immutable artifacts. |
+| `dynatrace-modules` (or per-resource-family: `dynatrace-dashboards`, `dynatrace-alerting`, `dynatrace-anomalies`, `dynatrace-global-settings`, as the thread names them) | Reusable modules. Versioned with Git tags (`v1.4.0`); released as immutable artifacts. |
 | `dynatrace-config-platform` (consumer) | Environment-specific configuration only. References modules via pinned Git tags. |
 
 The consumer repo organizes by ownership rather than by environment alone:
@@ -125,8 +125,8 @@ dynatrace-config-platform/
 │     └─ team-a/
 │        ├─ dev/
 │        │  ├─ terraform.tfvars      # Dev-only values
-│        │  ├─ management_zones/     # JSON configs consumed by modules
-│        │  └─ alerting_profiles/
+│        │  ├─ segments/             # JSON configs consumed by modules
+│        │  └─ workflows/
 │        └─ prod/
 │           ├─ terraform.tfvars      # Prod-only values
 │           └─ dashboards/
@@ -372,21 +372,21 @@ Modules are how you keep the codebase from sprawling as you add resources. The d
 
 **Modularize when:**
 
-- The same resource shape will be created multiple times with different inputs (e.g., 20 management zones, each following the same naming + tagging pattern → one MZ module instantiated 20 times)
-- A resource has many supporting resources that always go together (e.g., a synthetic monitor + alerting profile + notification channel → one bundle module)
+- The same resource shape will be created multiple times with different inputs (e.g., 20 service SLOs, each following the same naming + tagging pattern → one SLO module instantiated 20 times)
+- A resource has many supporting resources that always go together (e.g., a synthetic monitor + the SLO built on it + the problem-routing workflow that pages its owner → one bundle module)
 - A pattern encodes governance rules (e.g., a module that *always* sets `dt.security_context` and a mandatory tag set)
 
 **Don't modularize when:**
 
-- A resource exists exactly once (most platform-wide configs — wrapping a single management-zone definition in a module just adds indirection)
+- A resource exists exactly once (most platform-wide configs — wrapping a single bucket or OpenPipeline definition in a module just adds indirection)
 - The "module" would have one input and one output (premature abstraction)
 
 ### Versioning modules
 
 | Approach | Use when |
 |----------|----------|
-| **Local-path references** (`source = "../../modules/management-zone"`) | Same repo as the consumer; fastest iteration |
-| **Git tag references** (`source = "git::https://gitlab.example.com/platform/terraform-modules.git//management-zone?ref=v1.4.0"`) | Modules in a separate repo, consumed by multiple product repos; clear version semantics |
+| **Local-path references** (`source = "../../modules/slo"`) | Same repo as the consumer; fastest iteration |
+| **Git tag references** (`source = "git::https://gitlab.example.com/platform/terraform-modules.git//slo?ref=v1.4.0"`) | Modules in a separate repo, consumed by multiple product repos; clear version semantics |
 | **Terraform registry** (private or public) | You publish to a registry (HCP Terraform private registry, Artifactory) and want UI browsing + version metadata |
 
 Pick one per repo; mixing leads to confusion about where modules live.
@@ -402,40 +402,41 @@ Treat module versions as a contract with consumers. Renaming a resource inside a
 ### A representative module
 
 ```hcl
-# modules/management-zone/main.tf
+# modules/slo/main.tf
 variable "env" { type = string }
 variable "app" { type = string }
-variable "role" { type = string }
+variable "objective" { type = string } # e.g. "availability"
 variable "owner_tag" { type = string }
+variable "target" { type = number }
+variable "warning" { type = number }
+variable "sli_query" { type = string } # DQL producing a timeseries field named `sli`
 
-resource "dynatrace_management_zone_v2" "this" {
-  name = "${var.env}-${var.app}-${var.role}"
+resource "dynatrace_platform_slo" "this" {
+  name        = "${var.env}-${var.app}-${var.objective}"
+  description = "${var.objective} SLO for ${var.app} (${var.env})"
+  tags        = ["env:${var.env}", "app:${var.app}", "owner:${var.owner_tag}"]
 
-  rules {
-    rule {
-      type    = "ME"
-      enabled = true
-      attribute_rule {
-        entity_type           = "HOST"
-        host_to_pgpropagation = true
-        attribute_conditions {
-          condition {
-            key            = "HOST_GROUP_NAME"
-            operator       = "EQUALS"
-            string_value   = "${var.env}-${var.app}"
-            case_sensitive = false
-          }
-        }
-      }
+  criteria {
+    criteria_detail {
+      target         = var.target
+      warning        = var.warning
+      timeframe_from = "now-30d"
+      timeframe_to   = "now"
     }
+  }
+
+  custom_sli {
+    indicator = var.sli_query
   }
 }
 
-output "id" { value = dynatrace_management_zone_v2.this.id }
-output "name" { value = dynatrace_management_zone_v2.this.name }
+output "id" { value = dynatrace_platform_slo.this.id }
+output "name" { value = dynatrace_platform_slo.this.name }
 ```
 
-The module encodes the naming pattern (`{env}-{app}-{role}`) and the rule structure. Consumers can't accidentally name a management zone differently — the convention is enforced at the module boundary.
+The module encodes the naming pattern (`{env}-{app}-{objective}`) and the mandatory tag set. Consumers can't accidentally name an SLO differently or ship one without an owner — the convention is enforced at the module boundary. (The SLI query stays a module input because it is the one thing each team must validate for itself — SLO-02 for writing it, SLO-05 for the resource.)
+
+> **Classic equivalent.** Modules written before the upgrade typically wrap `dynatrace_management_zone_v2` with exactly this naming-pattern discipline. Keep such a module only while the zones it manages still exist; management zones are blocked at upgrade, and their jobs split across segments (filtering), IAM policies (access) and problem-routing workflows (alerting) — see AUTOM-04 §4 *Classic Resources* and MZ2POL.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Module development (HashiCorp)](https://developer.hashicorp.com/terraform/language/modules/develop) — module-authoring guidance.</sub>
@@ -601,19 +602,21 @@ Lifecycle blocks are Terraform's safety net for production. Four meta-arguments 
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Meta-argument | Effect | Use for |
 |---------------|--------|---------|
-| `prevent_destroy = true` | Refuses any plan that would delete this resource | Production MZs, IAM policies, Grail buckets, ActiveGate tokens |
+| `prevent_destroy = true` | Refuses any plan that would delete this resource | Grail buckets, IAM policies / bindings, segments other config references, ActiveGate tokens |
 | `ignore_changes = [field, ...]` | Stops Terraform from "fixing" drift on listed fields | Human-owned fields (description, tags), UI-tuned thresholds, auto-populated metadata |
-| `create_before_destroy = true` | New resource stood up before old one removed | Synthetics, alerting profiles, notification channels (no observability gap) |
-| `replace_triggered_by = [ref, ...]` | Force-recreate when a referenced resource changes | Webhook URLs tied to rotated secrets, alerting profiles tied to renamed MZs |
+| `create_before_destroy = true` | New resource stood up before old one removed | Synthetics, problem-routing workflows (no observability gap) |
+| `replace_triggered_by = [ref, ...]` | Force-recreate when a referenced resource changes | Workflows whose webhook credential rotates, dashboards tied to a recreated data source |
 For environments where SVG doesn't render
 -->
 
 ### `prevent_destroy` — for resources whose loss is catastrophic
 
 ```hcl
-resource "dynatrace_management_zone_v2" "platform_baseline" {
-  name = "platform-baseline"
-  # ...
+resource "dynatrace_platform_bucket" "audit_logs" {
+  name         = "audit_logs"
+  display_name = "Audit logs (1-year retention)"
+  retention    = 365
+  table        = "logs"
 
   lifecycle {
     prevent_destroy = true
@@ -623,27 +626,28 @@ resource "dynatrace_management_zone_v2" "platform_baseline" {
 
 Catches `terraform destroy` and any plan that would `-/+` the resource. The plan fails with an error and the apply doesn't proceed.
 
-**Use for:** production Management Zones (lose IAM scope + alerting routing if destroyed), production IAM policies / group bindings (lose access), production Grail buckets (lose data), ActiveGate token resources backing on-call notifications.
+**Use for:** production Grail buckets (lose the data in them), production IAM policies / group bindings (lose access), segments that IAM policies or dashboards reference, ActiveGate token resources backing on-call notifications. On a tenant not yet upgraded, add production management zones — they still carry IAM scope and alerting routing there.
 
 **Caveat:** you can't terraform-apply a deliberate rename. To rename, remove the lifecycle block in PR 1, apply, then re-add it in PR 2.
 
 ### `ignore_changes` — for fields owned by humans
 
 ```hcl
-resource "dynatrace_calculated_service_metric" "request_count" {
-  name = "request-count"
-  # ... most fields managed by Terraform ...
+resource "dynatrace_document" "team_dashboard" {
+  type = "dashboard"
+  name = "Payments - service health"
+  # Terraform creates the dashboard once from a reviewed starting layout...
+  content = file("${path.module}/dashboards/payments-health.json")
 
   lifecycle {
     ignore_changes = [
-      description,   # SMEs edit this in the UI
-      conditions[0].condition_key.attribute,  # Auto-populated by Dynatrace
+      content, # ...then the owning team edits tiles in the Dashboards app
     ]
   }
 }
 ```
 
-**Use for:** description fields, custom tags, threshold values tuned via the UI by domain experts, auto-populated metadata (last_modified, version), schema fields that drift via Dynatrace platform updates.
+**Use for:** dashboards and notebooks Terraform seeds but a team maintains in the app, description fields, custom tags, threshold values tuned via the UI by domain experts, schema fields that drift via Dynatrace platform updates.
 
 **Caveat:** ignored fields drift silently. Confirm you're OK with that before adding — the field becomes invisible to drift detection.
 
@@ -660,25 +664,29 @@ resource "dynatrace_http_monitor" "checkout_api" {
 }
 ```
 
-**Use for:** synthetic monitors (recreation = data gap in SLO), alerting profiles tied to active on-call rotations, notification channels with active webhooks.
+**Use for:** synthetic monitors (recreation = data gap in SLO), problem-routing workflows tied to active on-call rotations (recreation = a window with no route).
 
 **Caveat:** temporarily doubles the resource. Check that unique-name constraints in Dynatrace allow the new resource to exist alongside the old — most do; some don't (e.g., some named-singleton settings).
 
 ### `replace_triggered_by` — for chained recreations
 
 ```hcl
-resource "dynatrace_alerting_profile" "payments_alerts" {
+resource "terraform_data" "webhook_secret_version" {
+  input = var.webhook_secret_version # bumped by the secret-rotation job
+}
+
+resource "dynatrace_automation_workflow" "payments_route" {
   # ...
 
   lifecycle {
     replace_triggered_by = [
-      dynatrace_management_zone_v2.payments.id,
+      terraform_data.webhook_secret_version,
     ]
   }
 }
 ```
 
-**Use for:** webhook URLs that need to refresh when a secret rotates, alerting profiles tied to a renamed Management Zone, dashboards whose data sources reference a recreated entity.
+**Use for:** workflows whose webhook URL or credential must refresh when a secret rotates, dashboards whose data sources reference a recreated entity. (`terraform_data` needs Terraform 1.4+; it is the usual way to turn a value that is not itself a resource into a replacement trigger.)
 
 **Caveat:** chained recreations have non-obvious blast radius — adding `replace_triggered_by` to a hub resource can cascade to many dependents. Add deliberately.
 
@@ -686,7 +694,7 @@ resource "dynatrace_alerting_profile" "payments_alerts" {
 
 It is tempting to drive `prevent_destroy` from a module input (`prevent_destroy = var.protect_from_destroy`) so only production sets it. **Terraform rejects that** — `terraform validate` fails with *Variables not allowed*, because, per HashiCorp, *"only literal values can be used because the processing happens too early for arbitrary expression evaluation."* Two patterns that do work:
 
-- **A protected module variant.** Keep `modules/management-zone/` unprotected and add `modules/management-zone-protected/` with `prevent_destroy = true` hard-coded; only production roots consume the protected variant.
+- **A protected module variant.** Keep `modules/grail-bucket/` unprotected and add `modules/grail-bucket-protected/` with `prevent_destroy = true` hard-coded; only production roots consume the protected variant.
 - **Policy instead of lifecycle.** Enforce it in the pipeline — a Conftest (AUTOM-07 §3 *Policy-as-Code Gates*) rule that fails any production plan containing a `delete` action on the protected resource types.
 
 > <sub>**Sources:** [The lifecycle meta-argument (HashiCorp)](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle) — all four meta-arguments documented; *"only literal values can be used because the processing happens too early for arbitrary expression evaluation."*</sub>
@@ -698,13 +706,13 @@ Once the platform team's Terraform GitOps shop is running, the next question is 
 
 ### The onboarding workflow
 
-1. **Team requests onboarding.** Lightweight intake form: team name, product, expected resource types (which modules will they use), expected scale (handful of MZs? hundreds of synthetics?), preferred Git host.
+1. **Team requests onboarding.** Lightweight intake form: team name, product, expected resource types (which modules will they use), expected scale (a handful of SLOs? hundreds of synthetics?), preferred Git host.
 2. **Platform team provisions the team's namespace.**
    - A subdirectory under `envs/<env>/` per product (e.g., `envs/production/payments/`)
    - A Bitbucket / GitLab / GitHub team with write access to that subdirectory only (CODEOWNERS enforces)
-   - An OPA / Sentinel policy that restricts that team's resources to a specific management zone scope (the "team-fencing" pattern)
+   - An OPA / Sentinel policy that requires every resource the team creates to carry its `owner` tag, and rejects any other team's tag value (the "team-fencing" pattern)
 3. **Team gets a template PR.**
-   - `envs/<env>/<product>/main.tf` with a starter module instantiation (one MZ following the team's naming pattern)
+   - `envs/<env>/<product>/main.tf` with a starter module instantiation (one SLO or problem-routing workflow following the team's naming pattern)
    - `envs/<env>/<product>/terraform.tfvars` with placeholder values
    - A README pointing at the company's Terraform conventions
 4. **Team's first PR validates the path.** Real change, real review, real apply against dev. Platform team co-reviews. After this PR merges, the team has a working pipeline + the muscle memory.
@@ -759,14 +767,15 @@ Two cost surfaces that surprise teams new to Terraform GitOps for Dynatrace.
 
 ### Dynatrace Platform Subscription (DPS) impact at apply time
 
-Some Dynatrace resources consume DPS / DDU at creation or use:
+Some Dynatrace resources drive Dynatrace Platform Subscription (DPS) consumption at creation or use:
 
-| Resource | DPS / DDU impact |
+| Resource | DPS impact |
 |----------|------------------|
-| `dynatrace_calculated_service_metric` | Generates a custom metric — counts against custom-metric DDU allocation |
+| `dynatrace_platform_bucket` | Retention length multiplies stored volume — longer retention, more Retain consumption (ORGNZ, FINOPS-03) |
 | `dynatrace_http_monitor` (synthetic) | Each monitor execution consumes Synthetic actions |
 | `dynatrace_browser_monitor` | Each monitor execution consumes Synthetic actions (higher rate than HTTP) |
-| `dynatrace_application_anomalies` (custom thresholds) | No direct DPS cost; can cause more events → more retention DDU |
+| `dynatrace_davis_anomaly_detectors` | Each evaluation runs the detector's DQL — on logs, spans or events that is billable query; metric queries are not billed (FAQ-09) |
+| `dynatrace_automation_workflow` | Executions bill as workflow automation — ALERT-03 covers how simple and multi-step workflows differ |
 | Mass-creation via a module loop (`count = 100`) | Multiplies the above by 100 |
 
 The pattern that bites: someone runs `terraform apply` against a module configured with `count = var.synthetic_count`, the variable defaults to a number that looked sensible in dev but is too large for production, and the apply provisions hundreds of synthetics — each consuming actions.
@@ -791,7 +800,7 @@ The Dynatrace API has rate limits. Plans against a tenant with hundreds of resou
 - **Drift detection cadence.** Hourly is plenty for most environments; every-15-minutes is rarely justified by the value it adds.
 
 > <sub>**Sources:**</sub>
-> - <sub>**Derived:** the DPS-impact list combines documented Dynatrace billing categories with how each maps to Terraform resource types; not a single vendor-published checklist. Verify specific resource cost behavior against current [Dynatrace pricing documentation](https://www.dynatrace.com/pricing/) at use time.</sub>
+> - <sub>**Derived:** the DPS-impact list combines documented Dynatrace billing categories (FINOPS-01, FAQ-09, ALERT-03) with how each maps to Terraform resource types; not a single vendor-published checklist. Classic tenants on DDU licensing see the same pattern under different unit names — a custom metric (`dynatrace_calculated_service_metric`) or extra events count against DDUs instead. Verify specific resource cost behavior against current [Dynatrace pricing documentation](https://www.dynatrace.com/pricing/) at use time.</sub>
 > - <sub>[Terraform CLI command — apply (HashiCorp)](https://developer.hashicorp.com/terraform/cli/commands/apply) — `-parallelism` flag.</sub>
 
 <a id="operational"></a>
@@ -872,7 +881,7 @@ You now have the recipe to stand up a Terraform GitOps shop for Dynatrace. Pract
 
 1. **Pick a state backend** (§3) — usually whichever cloud your team already runs in
 2. **Set up the repo layout** (§2) with `modules/`, `envs/`, `policy/`
-3. **Provision the dev environment first** — backend, providers, a single management-zone module, one root config
+3. **Provision the dev environment first** — backend, providers, a single module (the SLO or problem-routing module from §5), one root config
 4. **Wire up CI/CD for dev** following AUTOM-07 §3 (or §4/§5 for GitLab/Bitbucket)
 5. **Validate the round-trip** — PR, plan, merge, apply, observe in Dynatrace
 6. **Add staging**, repeat steps 3-5

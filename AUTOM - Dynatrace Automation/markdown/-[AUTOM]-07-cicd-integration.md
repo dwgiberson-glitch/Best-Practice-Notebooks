@@ -1,6 +1,6 @@
 # AUTOM-07: CI/CD Integration
 
-> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 7 of 9 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 7 of 9 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 CI/CD integration brings software development practices to Dynatrace configuration management. By storing configs in Git and deploying via pipelines, teams gain version control, review processes, and automated deployments.
 
@@ -493,22 +493,29 @@ Ensure all resources include team ownership metadata:
 ```rego
 package main
 
-deny contains msg if {
-  resource := input.planned_values.root_module.resources[_]
-  resource.type == "dynatrace_autotag_v2"
-  not resource.values.name
-  msg := "Auto-tag resources must have a name"
-}
+# Resource types that carry a `tags` set must include an owner:<team> tag
+tagged_types := {"dynatrace_platform_slo"}
 
 deny contains msg if {
   resource := input.planned_values.root_module.resources[_]
-  startswith(resource.type, "dynatrace_")
-  not has_team_ownership(resource)
-  msg := sprintf("Resource '%s' must include team ownership metadata", [resource.address])
+  tagged_types[resource.type]
+  not has_owner_tag(resource)
+  msg := sprintf("'%s' must carry an owner:<team> tag", [resource.address])
 }
 
-has_team_ownership(resource) if {
-  contains(resource.values.name, resource.values.team_name)
+has_owner_tag(resource) if {
+  some tag in resource.values.tags
+  startswith(tag, "owner:")
+}
+
+# A Davis problem trigger with no owner entity tag matches every entity in the
+# environment — one team's route becomes an all-hands page
+deny contains msg if {
+  resource := input.planned_values.root_module.resources[_]
+  resource.type == "dynatrace_automation_workflow"
+  trigger := resource.values.trigger[_].event[_].config[_].davis_problem[_]
+  not trigger.entity_tags.owner
+  msg := sprintf("'%s' has a Davis problem trigger with no owner entity tag", [resource.address])
 }
 ```
 
@@ -540,10 +547,16 @@ For teams using **TFE** (now HCP Terraform), Sentinel policies enforce governanc
 # sentinel/restrict_resource_types.sentinel
 import "tfplan/v2" as tfplan
 
+# Platform-native types that carry forward at upgrade. The classic trio earlier
+# versions of this example allowed (dynatrace_alerting, dynatrace_autotag_v2,
+# dynatrace_management_zone_v2) is blocked at upgrade — see the Conftest note above.
 allowed_types = [
-  "dynatrace_alerting",
-  "dynatrace_autotag_v2",
-  "dynatrace_management_zone_v2",
+  "dynatrace_automation_workflow",
+  "dynatrace_document",
+  "dynatrace_segment",
+  "dynatrace_platform_slo",
+  "dynatrace_davis_anomaly_detectors",
+  "dynatrace_maintenance_windows",
 ]
 
 main = rule {
@@ -1085,28 +1098,24 @@ resource "bitbucket_commit_file" "pipelines_yml" {
 # (Bootstrap resources — things you want present before the pipeline runs for
 # the first time. Day-to-day app-team configs land in the repo and deploy via
 # the pipeline itself.)
-resource "dynatrace_management_zone_v2" "platform_baseline" {
-  name = "platform-baseline"
+resource "dynatrace_segment" "platform_baseline" {
+  name        = "platform-baseline"
+  description = "Data from the platform-baseline host group"
+  is_public   = true
 
-  rules {
-    rule {
-      type    = "ME"
-      enabled = true
-      attribute_rule {
-        entity_type           = "HOST"
-        host_to_pgpropagation = true
-        attribute_conditions {
-          condition {
-            key            = "HOST_GROUP_NAME"
-            operator       = "EQUALS"
-            string_value   = "platform-baseline"
-            case_sensitive = false
-          }
-        }
-      }
+  includes {
+    items {
+      data_object = "_all_data_object"
+      # The filter is the segment editor's JSON filter tree, not DQL. Build the
+      # segment once in the UI and export it (AUTOM-04 §4 Segment) rather than
+      # hand-writing the tree.
+      filter = file("${path.module}/segments/platform-baseline.json")
     }
   }
 }
+# Classic equivalent on a tenant not yet upgraded: a dynatrace_management_zone_v2
+# with a HOST_GROUP_NAME rule. Management zones are blocked at upgrade — the
+# segment above carries the filtering job, IAM policies carry the access job.
 ```
 
 **Ordering is load-bearing:**
@@ -1273,8 +1282,8 @@ Bamboo's **Plan Branches** feature creates a child plan per Bitbucket branch aut
 
 **How it composes:**
 
-1. **Developer opens a PR** from `feat/new-mz` → `main` in Bitbucket.
-2. **Bamboo detects the new branch** (via the Linked Repository's polling or webhook trigger) and creates a child plan `DTRF-TERRAFORM-FEAT-NEW-MZ` automatically.
+1. **Developer opens a PR** from `feat/new-segment` → `main` in Bitbucket.
+2. **Bamboo detects the new branch** (via the Linked Repository's polling or webhook trigger) and creates a child plan `DTRF-TERRAFORM-FEAT-NEW-SEGMENT` automatically.
 3. **The child plan runs `Plan` stage only.** The `Apply` stage is marked `manual: true` and is gated behind a reviewer in Bamboo — but in the PR workflow you typically also wire stage permissions so the gate effectively means "merge the PR first."
 4. **PR review happens in Bitbucket.** Required reviewers + branch restrictions are enforced there; Bamboo posts plan output as a build status / Bitbucket build update.
 5. **Merge to `main` triggers the main plan.** Plan runs, then the manual Apply gate waits for an authorized user to release production.
@@ -2167,7 +2176,7 @@ SVC_USER_ID="${SVC_USER_IDS[${INDEX}]}"
 **Don't use it for:**
 
 - **Single-team, low-frequency dev applies** — a few applies per week against a non-production tenant. The simpler pattern (long-lived Platform Token on a Service User, stored in your CI platform's secret store) is fine. The composed pattern's operational overhead is overkill for the blast radius.
-- **Synthetic monitors / SLO v1 / `dynatrace_api_token`** — these resources cannot use Platform Tokens at all (AUTOM-04 §3 Decision matrix). They require classic API Tokens (`dt0c01.*`), which are minted by the `dynatrace_api_token` Terraform resource with the state-leakage trade-off documented in AUTOM-04 §3 *Operational Safety*.
+- **Synthetic monitors / classic SLOs / `dynatrace_api_token`** — these resources cannot use Platform Tokens at all (AUTOM-04 §3 Decision matrix). They require classic API Tokens (`dt0c01.*`), which are minted by the `dynatrace_api_token` Terraform resource with the state-leakage trade-off documented in AUTOM-04 §3 *Operational Safety*.
 - **Bootstrap / pre-IAM scenarios** — the very first time you stand up Dynatrace automation, you don't yet have the Service Users or IAM policies in place. Run that bootstrap pipeline with an admin's Platform Token, then transition subsequent runs to this pattern. Don't try to apply this pattern to the pipeline that creates the Service Users it depends on (chicken-and-egg).
 
 **Decision shortcut — three signals that flip the recommendation to "adopt":**
@@ -2316,9 +2325,9 @@ Enterprise Dynatrace governance requires **two distinct pipelines** with separat
 |--------|--------|
 | **Owner** | Per-team / per-LOB (via middleman repo or brokered self-service) |
 | **Identity** | Service User + OAuth client scoped to the config domains Pipeline A granted |
-| **Manages** | Workflows, dashboards, segments, alerting profiles, auto-tags, management zones |
+| **Manages** | Workflows, dashboards, segments, SLOs, anomaly detectors — plus classic alerting profiles, auto-tags and management zones only while the tenant is not yet upgraded |
 | **Auth** | Dual-auth (OAuth + API token) when synthetics are in scope |
-| **Governance** | Sentinel/OPA enforces naming, tagging, MZ boundaries, allowed resource types |
+| **Governance** | Sentinel/OPA enforces naming, ownership tagging, allowed resource types (and MZ boundaries on classic tenants) |
 | **Cadence** | Frequent — runs on every config change promotion through environments |
 | **Repo** | `dt-lob-<lobname>` or team-specific config repos |
 
@@ -2384,7 +2393,7 @@ No single tool provides complete governance. Enterprise Dynatrace configuration 
 | Sentinel / OPA CAN | Sentinel / OPA CANNOT |
 |----|-----|
 | Restrict which Terraform modules and resource types may be used | Integrate with Dynatrace IAM at runtime |
-| Enforce naming conventions, tagging, and MZ boundaries | Reduce the runtime permissions of a Dynatrace token |
+| Enforce naming conventions, ownership tagging, and team boundaries | Reduce the runtime permissions of a Dynatrace token |
 | Prevent privilege escalation in IAM-as-code | Replace Dynatrace RBAC / IAM policies |
 | Validate team-to-object ownership in brokered self-service | Run outside HCP Terraform (Sentinel only — use OPA/Conftest for CI) |
 
@@ -2396,7 +2405,7 @@ When presenting this architecture to security teams or auditors, document the v1
 
 1. **Gen3/platform resources** — genuinely scoped via Service User + OAuth + IAM policies
 2. **v1 Synthetic monitors** — brokered API token access through central pipeline (teams never hold the token directly)
-3. **Pipeline guardrails** — Sentinel/OPA enforce naming, tagging, MZ boundaries, and resource type restrictions
+3. **Pipeline guardrails** — Sentinel/OPA enforce naming, ownership tagging, team boundaries, and resource type restrictions
 4. **Credential management** — Vault provides runtime retrieval, automatic expiration, and access audit logging
 5. **Audit trail** — Git history + PR reviews + Dynatrace audit logs provide full change traceability
 

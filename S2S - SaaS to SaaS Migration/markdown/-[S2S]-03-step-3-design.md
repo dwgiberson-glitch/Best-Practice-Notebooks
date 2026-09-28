@@ -43,7 +43,7 @@ This notebook produces five deliverables: an IAM architecture, a Grail bucket an
 | **OAuth Client** | `account-idm-read`, `account-idm-write`, `iam-policies-management` scopes (for IAM design validation) |
 | **Stakeholder Alignment** | IAM owners, platform team, and security team available for design review |
 
-> The Terraform resources used below (`dynatrace_iam_group`, `dynatrace_iam_policy`, `dynatrace_slo_v2`) are documented with full worked examples in **AUTOM-04**'s consolidated resource catalog — this notebook shows the migration-specific design pattern, not the general resource shape.
+> The Terraform resources used below (`dynatrace_iam_group`, `dynatrace_iam_policy`, and for SLOs `dynatrace_platform_slo` — the classic `dynatrace_slo_v2` only where a tenant is still on classic SLOs) are documented with full worked examples in **AUTOM-04**'s consolidated resource catalog — this notebook shows the migration-specific design pattern, not the general resource shape.
 
 <a id="iam-architecture-design"></a>
 ## 1. IAM Architecture Design
@@ -303,7 +303,7 @@ This is the single most important reference for Step 4 (Prepare) and Step 5 (Exe
 | 14 | Alerting profiles | None | `api` / `settings` |
 | 15 | Notification rules + integrations | Alerting profiles | `api` / `settings` |
 | 16 | Maintenance windows | Management zones (for scope) | `api` / `settings` |
-| 17 | SLO definitions | Tags, management zones | `slo-v2` |
+| 17 | SLO definitions (modern SLO app; `slo-v2` is the Grail-based type, Monaco v2.22+) | Tags, segments (management zones only for classic SLOs) | `slo-v2` |
 | 18 | Synthetic monitors | Notification rules, credential vault | `api` |
 
 ### Phase 4: User-Facing Configuration

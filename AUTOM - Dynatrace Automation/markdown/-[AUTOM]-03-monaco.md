@@ -1,6 +1,6 @@
 # AUTOM-03: Monaco Configuration-as-Code
 
-> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 3 of 9 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 3 of 9 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 Monaco (Monitoring as Code) is Dynatrace's official CLI tool for configuration management. It uses YAML files to define configurations and supports version control, CI/CD integration, and multi-environment deployments.
 
@@ -25,7 +25,8 @@ Before starting this notebook, ensure you have:
 | Requirement | Description |
 |-------------|-------------|
 | Monaco CLI | Installed from the GitHub releases binary (Dynatrace publishes no Homebrew formula) |
-| API Token | Token with `settings.read`, `settings.write`, `ReadConfig`, `WriteConfig` |
+| Platform token or OAuth client | For platform configuration — SLOs (`slo:slos:read` / `slo:slos:write`), workflows, documents, segments, buckets |
+| API Token | Token with `settings.read`, `settings.write` (Settings 2.0), plus `ReadConfig`, `WriteConfig` only if you still manage classic Configuration API objects |
 | Tenant URL | Your Dynatrace SaaS tenant URL |
 
 ---
@@ -100,6 +101,7 @@ Create environment variables for authentication:
 ```bash
 export DT_TENANT_URL="https://{tenant-id}.live.dynatrace.com"
 export DT_API_TOKEN="<your-api-token>"
+export DT_PLATFORM_TOKEN="<your-platform-token>"   # SLOs, workflows, documents, segments, buckets
 ```
 
 Monaco never takes a secret on the command line. Both the manifest and the `--token` download flag take the **name** of the environment variable that holds the token (`DT_API_TOKEN`), not its value.
@@ -119,7 +121,20 @@ monaco download \
 
 `--token` names the environment variable (no `$`). An access token covers settings and classic configuration APIs; to also download platform configurations (workflows, documents, buckets, segments), add `--platform-token <VAR_NAME>` or the `--oauth-client-id` / `--oauth-client-secret` pair — access tokens and platform tokens are not interchangeable.
 
-Download specific Settings 2.0 schemas (`--settings-schema`; `--api` is for **classic** Configuration APIs only):
+Download only the platform configuration types — SLOs, segments, workflows and documents. The `--only-*` flags can be combined (Monaco 2.23.1+):
+
+```bash
+monaco download \
+  --url "$DT_TENANT_URL" \
+  --token DT_API_TOKEN \
+  --platform-token DT_PLATFORM_TOKEN \
+  --output-folder ./downloaded-config \
+  --only-slo-v2 --only-segments --only-automation --only-documents
+```
+
+The full set of `--only-*` flags is `--only-settings`, `--only-apis`, `--only-slo-v2`, `--only-segments`, `--only-automation`, `--only-documents`, `--only-buckets` and `--only-openpipeline` (read from the download command's source, `cmd/monaco/download/download_command.go`).
+
+**Classic — inventorying what you still have before the upgrade.** Download specific Settings 2.0 schemas with `--settings-schema` (`--api` is for **classic** Configuration APIs only):
 
 ```bash
 monaco download \
@@ -146,13 +161,17 @@ dynatrace-config/
 │   └── production.yaml        # Production config
 └── projects/
     └── my-project/
-        ├── management-zones/
+        ├── slo-v2/                # service-level objectives (modern SLO app)
         │   └── config.yaml
-        ├── auto-tagging/
+        ├── segments/
         │   └── config.yaml
-        └── alerting-profiles/
+        ├── workflows/             # problem routing and other automations
+        │   └── config.yaml
+        └── anomaly-detectors/     # builtin:davis.anomaly-detectors (Settings 2.0)
             └── config.yaml
 ```
+
+Classic estates add `management-zones/`, `auto-tagging/` and `alerting-profiles/` here until the upgrade — see the *Classic* blocks in §4.
 
 ### Manifest File
 
@@ -175,6 +194,8 @@ environmentGroups:
         auth:
           token:
             name: DT_DEV_TOKEN
+          platformToken:
+            name: DT_DEV_PLATFORM_TOKEN
       - name: production
         url:
           type: environment
@@ -182,36 +203,86 @@ environmentGroups:
         auth:
           token:
             name: DT_PROD_TOKEN
+          platformToken:
+            name: DT_PROD_PLATFORM_TOKEN
 ```
 
-`url` accepts `type: environment` + `value: <VAR_NAME>`, but every `auth` entry takes only `name: <VAR_NAME>` — Monaco always loads secrets from environment variables. Add `platformToken: {name: DT_PLATFORM_TOKEN}` (Monaco 2.24.0+) or an `oAuth` client alongside `token` if the project also manages workflows, documents, buckets or segments.
+`url` accepts `type: environment` + `value: <VAR_NAME>`, but every `auth` entry takes only `name: <VAR_NAME>` — Monaco always loads secrets from environment variables. `platformToken` (Monaco 2.24.0+) — or an `oAuth` client in its place — is what lets the project manage SLOs, workflows, documents, buckets and segments; drop it only for a project that manages Settings 2.0 and classic configuration alone.
 
 ---
 
 <a id="configuration-files"></a>
 ## 4. Configuration Files
 
-> **About the schemas used in these examples.** Management zones, auto-tagging and alerting profiles appear throughout §4–§6 because they are the configurations most tenants already have, which makes them the clearest illustrations of Monaco's YAML shape. All three are marked **Blocked at upgrade** in AUTOM-02's Settings 2.0 catalog, and all three are on Dynatrace's published [Settings 2.0 schemas that are removed in Latest Dynatrace (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/removed-schemas) — *"None of the schemas on this page are visible in Latest Dynatrace."*
->
-> That matters more for Monaco than for the raw API. Monaco resolves a schema before writing objects, so once a schema is removed, `monaco deploy` fails for every config that references it — and it fails at deploy time, in your pipeline, not at edit time. Treat these as **Monaco mechanics you can apply to any schema**, and check a schema's upgrade status before building a long-lived project around it.
->
-> The `type.settings.schema` block is schema-agnostic: swap the schema string and the matching template JSON and everything else here is unchanged. Carry-forward schemas worth practising on include `builtin:davis.anomaly-detectors`, `builtin:anomaly-detection.services`, and the `builtin:openpipeline.<scope>.*` family.
-
 ### Basic Configuration Structure
+
+Every config is an `id`, a `config:` block (name, template, parameters) and a `type:`. For a Settings 2.0 object the type names a schema; for a platform object it names the platform type:
 
 ```yaml
 configs:
-  - id: production-zone
+  - id: checkout-availability
     config:
-      name: Production
-      template: management-zone.json
-    type:
-      settings:
-        schema: builtin:management-zones
-        scope: environment
+      name: Checkout availability
+      template: slo.json
+    type: slo-v2
 ```
 
-### Management Zone Example
+### SLO Example (`type: slo-v2`)
+
+**slo-v2/config.yaml:**
+```yaml
+configs:
+  - id: checkout-availability
+    config:
+      name: Checkout availability
+      template: checkout-availability.json
+    type: slo-v2
+```
+
+**slo-v2/checkout-availability.json:**
+```json
+{
+  "name": "{{ .name }}",
+  "description": "Request success ratio, rolling 30 days",
+  "tags": ["app:checkout", "owner:payments"],
+  "criteria": [
+    {
+      "target": 99.5,
+      "warning": 99.9,
+      "timeframeFrom": "now-30d",
+      "timeframeTo": "now"
+    }
+  ],
+  "customSli": {
+    "indicator": "timeseries { total = sum(dt.service.request.count), failures = sum(dt.service.request.failure_count) }\n| fieldsAdd sli = ((total[] - failures[]) / total[]) * 100\n| fieldsRemove total, failures"
+  }
+}
+```
+
+The payload is the SLO Service API's own shape — `criteria` is a **list**, and the SLI is a DQL `indicator` producing a timeseries field named `sli` (SLO-02's availability query, minus `from:` / `interval:`, which the criteria supply). It matches Monaco's own `slo-v2` integration-test template field for field. `type: slo-v2` needs Monaco **v2.22.0+** and platform auth, and despite the name it is the **modern** SLO app — the classic SLO is a different Monaco type, and the Terraform resource `dynatrace_slo_v2` is classic too (SLO-05).
+
+### Other Platform Types
+
+| Type block | Manages | Since |
+|---|---|---|
+| `type: slo-v2` | SLOs on the modern SLO app | v2.22.0 |
+| `type: segment` | Segments (the filtering successor to management zones) | v2.19.0 |
+| `type: {automation: {resource: workflow}}` — also `business-calendar`, `scheduling-rule` | Workflows (the routing successor to alerting profiles + problem notifications) | v2.6.0 |
+| `type: {document: {kind: dashboard}}` — also `notebook`, `launchpad`; optional `private` | Dashboards, notebooks, launchpads | v2.15.0 (launchpad v2.18.0) |
+| `type: bucket` | Grail buckets | v2.9.0 |
+| `type: {settings: {schema: builtin:davis.anomaly-detectors, scope: environment}}` | Davis anomaly detectors (the successor to custom metric events) — a Settings 2.0 schema that carries forward | — |
+
+**Download a workflow or segment before you author one.** A workflow template is the full Automation API payload (trigger, tasks, positions) and a segment template is the segment editor's JSON filter tree — neither is sensible to hand-write. Build one in the app, `monaco download --only-automation` / `--only-segments`, and parameterize the result.
+
+> <sub>**Sources:** [Monaco YAML configuration — type fields (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/configuration/yaml-configuration-saas-type-fields) — the type blocks and version gates in the table; [`slo-v2` test template (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/main/test/commands/testdata/integration-download-configs-platform/project/slo-v2/custom-sli.json) — payload shape, read 09/28/2026; [Monaco v2.22.0 release notes (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/releases/tag/v2.22.0) — *"Support for service-level objectives leveraging Grail"*.</sub>
+
+### Classic Configuration — existing estates on unupgraded tenants
+
+> **Dynatrace Classic — maintain, don't author.** Management zones, auto-tagging and alerting profiles are the configurations most existing Monaco projects contain, so their shape is kept below. All three are marked **Blocked at upgrade** in AUTOM-02's Settings 2.0 catalog and are on Dynatrace's published [Settings 2.0 schemas that are removed in Latest Dynatrace (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/removed-schemas) — *"None of the schemas on this page are visible in Latest Dynatrace."*
+>
+> That matters more for Monaco than for the raw API. Monaco resolves a schema before writing objects, so once a schema is removed, `monaco deploy` fails for every config that references it — and it fails at deploy time, in your pipeline, not at edit time. Successors: management zone → `segment` (filtering) + IAM policies (access); alerting profile → `automation` workflow; auto-tagging → primary fields/tags set at ingest (FAQ-02).
+
+#### Management Zone Example (classic)
 
 **config.yaml:**
 ```yaml
@@ -268,7 +339,7 @@ configs:
 
 ---
 
-### Auto-Tagging Example
+#### Auto-Tagging Example (classic)
 
 **config.yaml:**
 ```yaml
@@ -306,25 +377,22 @@ Monaco v2 reads environment variables through **`environment` parameters**, decl
 **config.yaml:**
 ```yaml
 configs:
-  - id: alerting-profile
+  - id: checkout-availability
     config:
-      name: Alerting
-      template: alerting.json
+      name: Checkout availability
+      template: checkout-availability.json
       parameters:
-        environment_name:
+        owner_team:
           type: environment
-          name: ENVIRONMENT_NAME
-        severity_level:
+          name: OWNER_TEAM
+        slo_target:
           type: environment
-          name: ALERT_SEVERITY
-          default: ERRORS
-    type:
-      settings:
-        schema: builtin:alerting.profile
-        scope: environment
+          name: SLO_TARGET
+          default: "99.5"
+    type: slo-v2
 ```
 
-In `alerting.json`, use `{{ .environment_name }}` and `{{ .severity_level }}`. Without a `default`, the deployment fails if the variable is unset.
+In `checkout-availability.json`, use `"tags": ["owner:{{ .owner_team }}"]` and `"target": {{ .slo_target }}` — unquoted, so the rendered JSON carries a number. Without a `default`, the deployment fails if the variable is unset.
 
 ---
 
@@ -366,9 +434,16 @@ monaco delete --manifest manifest.yaml --file delete.yaml
 **delete.yaml:**
 ```yaml
 delete:
-  - type: builtin:management-zones
+  - project: my-project
+    type: slo-v2
+    id: checkout-availability
+  # Classic, until the upgrade — a Settings 2.0 entry takes the schema as its type
+  - project: my-project
+    type: builtin:management-zones
     id: old-management-zone-id
 ```
+
+Every non-classic entry needs **`project` and `id` together** (the Monaco config coordinate) or an `objectId` on its own; Monaco's delete-file loader rejects an entry with `id` and no `project`. The `type` is the config type (`slo-v2`, `segment`, `workflow`, `document`, `bucket`) or, for Settings 2.0, the schema ID.
 
 ---
 
@@ -395,23 +470,26 @@ Commands: download (pull config), generate (deletefile, graph, schema), deploy (
 ## 6. Advanced Features
 ### Configuration Dependencies
 
-Reference another configuration with a **reference parameter** — `[project, configType, configId, property]`. For Settings 2.0 configs the `configType` is the schema ID; `property: id` resolves to the referenced object's real Dynatrace ID at deploy time, and Monaco orders the deployment so the referenced object exists first:
+Reference another configuration with a **reference parameter** — `[project, configType, configId, property]`, or the long form with `type: reference`. The `configType` is the config type (`segment`, `slo-v2`, `workflow`, …) or, for Settings 2.0, the schema ID; `property: id` resolves to the referenced object's real Dynatrace ID at deploy time, and Monaco orders the deployment so the referenced object exists first. Here an SLO is scoped by a segment deployed from the same project:
 
 ```yaml
 configs:
-  - id: my-alerting-profile
+  - id: checkout-availability
     config:
-      name: Production Alerting
-      template: alerting.json
+      name: Checkout availability
+      template: checkout-availability.json
       parameters:
-        management_zone_id: ["my-project", "builtin:management-zones", "production-mz", "id"]
-    type:
-      settings:
-        schema: builtin:alerting.profile
-        scope: environment
+        checkout_segment_id:
+          type: reference
+          configType: segment
+          configId: checkout-production
+          property: id
+    type: slo-v2
 ```
 
-In `alerting.json`, use `{{ .management_zone_id }}`.
+In the template, scope the SLI with `"filterSegments": [{"id": "{{ .checkout_segment_id }}"}]` inside `customSli`. Because the segment ID is resolved per environment, the same config deploys to every tenant without a hard-coded ID — the portability problem S2S-07 spends a section on.
+
+**Classic equivalent:** an alerting profile referencing a management zone — `management_zone_id: ["my-project", "builtin:management-zones", "production-mz", "id"]` on a `builtin:alerting.profile` config, used in the template as `{{ .management_zone_id }}`. Same mechanism, blocked schemas.
 
 ### Conditional Configurations
 
@@ -440,21 +518,18 @@ configs:
 
 ```yaml
 configs:
-  - id: alerting
+  - id: checkout-availability
     config:
-      name: Alerting Profile
-      template: alerting.json
+      name: Checkout availability
+      template: checkout-availability.json
       parameters:
-        delay_minutes: 5
-    type:
-      settings:
-        schema: builtin:alerting.profile
-        scope: environment
+        slo_target: 99.0
+    type: slo-v2
     environmentOverrides:
       - environment: production
         override:
           parameters:
-            delay_minutes: 1
+            slo_target: 99.5
 ```
 
 ---
