@@ -1,6 +1,6 @@
 # OPMIG-01: OpenPipeline Migration Guide: Part 1
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 1 of 10 | **Created:** December 2025 | **Last Updated:** 05/06/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 1 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Introduction & Why Migrate from Classic to OpenPipeline v2.0
 
@@ -45,7 +45,7 @@ By the end of this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail enabled |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail — OpenPipeline runs in the SaaS environment; Managed is not covered by this series |
 | **Classic Log Ingestion** | Existing logs flowing via `/api/v2/logs/ingest` |
 | **API Access** | `logs.read` and `logs.ingest` token scopes |
 | **Knowledge** | Basic Dynatrace familiarity; no OpenPipeline experience required |
@@ -114,7 +114,7 @@ Understanding the fundamental differences helps you plan your migration effectiv
 | Model | Flow | Key Difference |
 |-------|------|----------------|
 | **Classic** | Ingest → Store → Query (parse at query time) | Post-storage processing |
-| **OpenPipeline** | Ingest → Route → Process → Store (extract & enrich within Process) | Pre-storage processing — 4-stage flow per `/concepts/data-flow` |
+| **OpenPipeline** | Ingest → Route → pipeline (fixed stage sequence: Processing … Bucket assignment → Metric extraction → Davis → Data extraction) → Store | Pre-storage processing — see OPMIG-02 § Understanding Processing Order for the full stage table |
 -->
 
 > ⚠️ **Important:** With OpenPipeline, data processing happens **before** storage. This means you can reduce storage costs by dropping unwanted data and masking sensitive information before it's ever written to Grail.
@@ -214,7 +214,7 @@ Good news: **The API endpoint remains the same!**
 | Endpoint | Classic | OpenPipeline | Notes |
 |----------|---------|--------------|-------|
 | **Logs** | `/api/v2/logs/ingest` | `/api/v2/logs/ingest` | ✅ No change required |
-| **OTLP Logs** | Not available | `/otlp/v1/logs` | ✅ New endpoint |
+| **OTLP Logs** | Not available | `/api/v2/otlp/v1/logs` | ✅ New endpoint |
 | **Spans** | `/api/v2/otlp/v1/traces` | `/api/v2/otlp/v1/traces` | ✅ No change required |
 
 > 💡 **Migration Tip:** You don't need to update your API calls! OpenPipeline automatically receives data sent to `/api/v2/logs/ingest`. The difference is in **how** the data is processed after ingestion.
@@ -224,12 +224,16 @@ Good news: **The API endpoint remains the same!**
 | Method | Classic | OpenPipeline | `dt.openpipeline.source` Value |
 |--------|---------|--------------|-------------------------------|
 | **OneAgent** | ✅ Supported | ✅ Supported | `oneagent` |
-| **Generic Log API** | ✅ Supported | ✅ Supported | `generic` |
-| **OTLP Protocol** | ⚠️ Limited | ✅ Full support | `otlp` |
-| **Fluent Bit** | ✅ Via API | ✅ Via API | `generic` |
-| **Fluentd** | ✅ Via API | ✅ Via API | `generic` |
-| **Logstash** | ✅ Via API | ✅ Via API | `generic` |
-| **Vector** | ✅ Via API | ✅ Via API | `generic` |
+| **Generic Log API** | ✅ Supported | ✅ Supported | `/api/v2/logs/ingest` |
+| **OTLP Protocol** | ⚠️ Limited | ✅ Full support | `/api/v2/otlp/v1/logs` |
+| **Fluent Bit** | ✅ Via API | ✅ Via API | the API path it sends to (usually `/api/v2/logs/ingest`) |
+| **Fluentd** | ✅ Via API | ✅ Via API | the API path it sends to (usually `/api/v2/logs/ingest`) |
+| **Logstash** | ✅ Via API | ✅ Via API | the API path it sends to (usually `/api/v2/logs/ingest`) |
+| **Vector** | ✅ Via API | ✅ Via API | the API path it sends to (usually `/api/v2/logs/ingest`) |
+
+For a built-in API source, `dt.openpipeline.source` holds the endpoint **path**, not a short name — a validation tenant showed `oneagent`, `/api/v2/otlp/v1/logs` and `/api/v2/logs/ingest` over 24 hours (09/28/2026). Run the *Analyze log volume by OpenPipeline source* query below to see your own values before writing a routing condition on this field.
+
+> <sub>**Sources:** [Data flow (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/data-flow) — ingest sources *"are defined by a name and a path (dt.openpipeline.source)"*.</sub>
 
 ### Required Token Permissions
 
@@ -472,28 +476,29 @@ Before migrating, understand these key limits:
 | Limit | Value | What Happens if Exceeded |
 |-------|-------|-------------------------|
 | **Max record size (after processing)** | 16 MB | Record is **dropped** |
-| **Working memory per record** | 16 MB | Processing fails, record dropped |
-| **Log attribute size** | 32 KB | Attribute is **truncated** |
-| **Max field name length** | 255 characters | Field creation fails |
-| **Max string field length** | 32 KB | Content truncated (truncated to 4 KB in event templates) |
+| **Working memory per record** | Limited — no figure published † | Record dropped once processing memory is exhausted |
+| **Log attribute size** | 32 KB (4,096 characters per attribute in an event template) | Attribute is **truncated** |
+| **Max field name length** | 255 characters † | Field creation fails |
+| **Max string field length** | 32 KB † | Content truncated |
 
 ### Processing Limits
 
 | Limit | Value | Impact |
 |-------|-------|--------|
-| **Max extractions per record** | 5 pipelines | Record processed by max 5 pipelines |
-| **Max processors per pipeline** | 1,000 processors | Cannot add more processors |
-| **Max DQL commands per processor** | 10 commands | Split into multiple processors |
-| **Max parse operations per processor** | 100 patterns | Create multiple parse processors |
-| **Processing timeout** | 30 seconds | Record dropped if processing exceeds |
+| **Max extractions per record** | 5 pipelines | Beyond 5, data extraction stops; the record is still processed and stored |
+| **Max processors per pipeline** | 1,000 processors (100 in a base pipeline) | Cannot add more processors |
+| **Max DQL processor script length** | 8,192 characters | Split into multiple processors |
+| **Max DQL commands per processor** | 10 commands † | Split into multiple processors |
+| **Max parse operations per processor** | 100 patterns † | Create multiple parse processors |
+| **Processing timeout** | 30 seconds † | Record dropped if processing exceeds |
 
 ### Timestamp Constraints
 
-| Data Type | Timestamp Range | Records Outside Range |
+| Data Type | Earliest accepted timestamp | Timestamp more than 10 min in the future |
 |-----------|----------------|----------------------|
-| **Logs** | 24 hours past to 10 min future | **Dropped** |
-| **Spans** | 60 minutes past (end time) | **Dropped** |
-| **Events** | 24 hours past to 10 min future | **Dropped** |
+| **Logs** | Ingest time minus 24 hours — **older records are dropped** before processing. From **SaaS 1.348** (pre-release; staged tenant rollout planned from 09/22/2026) logs are accepted up to 72 hours in the past — verify the new window has reached your tenant before relying on it | **Adjusted** to ingest time + 10 min |
+| **Spans** | 60 minutes past (end time) † | Not adjusted (the adjustment doesn't apply to spans) |
+| **Events** | Ingest time minus 24 hours — older records are dropped | **Adjusted** to ingest time + 10 min |
 
 > ⚠️ **Important:** Always send data with recent timestamps. Historical data imports require special considerations.
 
@@ -502,8 +507,11 @@ Before migrating, understand these key limits:
 | Limit | Value | Notes |
 |-------|-------|-------|
 | **Max custom pipelines** | 100 | Per configuration scope (includes built-in and custom) |
-| **Max dynamic routes** | 3,000 routes | Per configuration scope (per `/reference/limits`) |
-| **Max conditions per route** | 10 conditions | Use AND/OR to combine |
+| **Max dynamic routes** | 100 routes | Per configuration scope (per `/reference/limits`) |
+| **Max conditions per route** | 10 conditions † | Use AND/OR to combine |
+| **Processor matching condition length** | 4,096 characters | Settings API configurations; 1,500 for legacy configurations |
+
+† Not stated on the *OpenPipeline limits* page (read 09/28/2026) — treat as community-reported and verify in your tenant before planning to it.
 
 ### Field Restrictions
 
@@ -519,7 +527,11 @@ Before migrating, understand these key limits:
 - `dt.entity.process_group`
 - `dt.entity.kubernetes_cluster`
 
-> 💡 **Design Tip:** Entity fields are NOT available during routing or processing. They're added automatically by Dynatrace after the transform processors and before the extraction processors run, all of which live within the Processing stage.
+> 💡 **Design Tip:** Entity fields are NOT available during routing or processing. They're added automatically by Dynatrace after the Processing stage, so they can be used in the later stages — such as Bucket assignment and the extraction stages — but not in routing conditions or Processing-stage processors.
+
+> <sub>**Sources:**</sub>
+> - <sub>[OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — *"If the timestamp is more than 10 minutes in the future, it's adjusted to the ingest server time plus 10 minutes."*; *"The maximum size of a record after processing is 16 MB."*; *"You can extract data on a single record in a maximum of five different pipelines"*</sub>
+> - <sub>[What's new in SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"The log ingestion pipeline now accepts log records with timestamps up to 72 hours in the past, extended from the previous 24-hour limit."*</sub>
 
 ---
 
@@ -549,10 +561,6 @@ Now that you understand OpenPipeline and have assessed your current state, conti
 - [Processing Examples](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/processing-examples)
 - [Log Processing Tutorial](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/tutorial-log-processing-pipeline)
 - [Ingest API Reference](https://docs.dynatrace.com/docs/platform/openpipeline/reference/api-ingestion-reference)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

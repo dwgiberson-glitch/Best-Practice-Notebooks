@@ -16,7 +16,7 @@ Read only the file(s) matching the question. All paths are under `markdown/`.
 | When the question is about… | Read |
 |---|---|
 | What business events are, `bizevents` vs `events`/`logs`, data model (`event.type`, `event.provider`, `event.category`), ingestion methods, first `fetch bizevents` queries | `-[BIZEV]-01-business-events-fundamentals.md` |
-| Capturing events: OneAgent capture rules, Business Events API (`bizevents.ingest`), SDK integration, OTel span-to-bizevent mapping, event naming, payload/cardinality design | `-[BIZEV]-02-instrumentation.md` |
+| Capturing events: OneAgent capture rules, Business Events API (`bizevents.ingest`), RUM/mobile `sendBizEvent` and the Workflows Ingest business event action, OpenPipeline span-to-bizevent extraction (Business event processor), event naming, payload/cardinality design | `-[BIZEV]-02-instrumentation.md` |
 | Building multi-step conversion funnels, step-by-step conversion rates, drop-off points, time between steps, funnel segmentation and trends | `-[BIZEV]-03-funnel-analysis.md` |
 | Quantifying revenue lost during a detected problem, incident-vs-baseline comparison, business-hours filtering, day-over-day comparison, SLA impact, impact timelines | `-[BIZEV]-04-revenue-impact.md` |
 | Defining business KPIs (transaction volume, AOV, error rate), extracting metrics from bizevents via OpenPipeline, business health scores, trend analysis | `-[BIZEV]-05-kpis-and-metrics.md` |
@@ -38,7 +38,5 @@ and follow its pointers.
 
 - Read-only; markdown only (see repo-root AGENTS.md for the full format table).
 - Filenames contain literal brackets and a leading dash — quote paths in shell.
-- Prefer `smartscapeNodes` query forms when quoting; `fetch dt.entity.*`
-  variants shown in these notebooks are deprecated alternatives.
 - Cite by notebook ID (e.g. "BIZEV-03") and mention that the matching JSON in
   `notebooks/` can be imported into a Dynatrace tenant for interactive use.

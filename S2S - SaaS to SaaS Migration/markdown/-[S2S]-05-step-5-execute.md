@@ -1,6 +1,6 @@
 # S2S-05: Step 5 — Execute: Configuration Import and Agent Cutover
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 5 of 9 | **Phase:** Upgrade | **Step:** Execute | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 5 of 9 | **Phase:** Upgrade | **Step:** Execute | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -123,47 +123,63 @@ Configuration must be imported in dependency order. Resources that other resourc
 <a id="monaco-deploy-workflow"></a>
 ## 2. Monaco Deploy Workflow
 
-Monaco deploys configuration in three stages: validate, dry-run, and deploy. Always run all three.
+Monaco deploys configuration in two stages: an offline dry-run, then the deploy. `monaco deploy` takes the manifest as its one positional argument and selects the target with `--environment`; the target's URL and token come from the manifest, not from command-line flags.
 
-### Validate
+### Point the Manifest at the Target
 
-```bash
-# Set target tenant environment variables
-export DT_TARGET_URL="https://<target-env-id>.live.dynatrace.com"
-export DT_TARGET_TOKEN="dt0c01.xxx..."
+Add the target environment to `export/manifest.yaml`. Both values name environment variables — the manifest never holds the token itself:
 
-# Validate the exported configuration against the target tenant
-monaco deploy --dry-run \
-  --environment-url "$DT_TARGET_URL" \
-  --token "$DT_TARGET_TOKEN" \
-  --manifest ./export/manifest.yaml
+```yaml
+environmentGroups:
+  - name: target
+    environments:
+      - name: target-tenant
+        url:
+          type: environment
+          value: DT_TARGET_URL
+        auth:
+          token:
+            name: DT_TARGET_TOKEN
 ```
 
-### Common Validation Errors
+```bash
+export DT_TARGET_URL="https://<target-env-id>.live.dynatrace.com"
+export DT_TARGET_TOKEN="dt0c01.xxx..."
+```
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `unknown schema` | Target tenant on older version | Upgrade target tenant or remove unsupported settings |
-| `duplicate key` | Configuration already exists | Use `--force` or delete conflicting config |
-| `reference not found` | Dependency not deployed yet | Deploy in correct order (see Section 1) |
-| `permission denied` | API token missing scope | Add required scope to token |
+Platform configurations (documents, automations, buckets, segments, SLOs, OpenPipeline) additionally need an OAuth client under the environment's `auth` block.
+
+### Dry-Run (Offline)
+
+```bash
+monaco deploy ./export/manifest.yaml --environment target-tenant --dry-run
+```
+
+A dry-run checks manifest structure, references and template rendering. It does **not** contact the target tenant, so it cannot tell you whether the target will accept the payloads — Monaco's own flag help: *"Dry-run will resolve all configuration parameters and render JSON templates, but can not validate the content of JSON payloads."*
+
+### Errors and Where They Surface
+
+| Error | Surfaces at | Cause | Fix |
+|-------|-------------|-------|-----|
+| `reference not found` | Dry-run | A configuration references one that is not in the deploy | Include the referenced project, or deploy it first (see Section 1) |
+| Template or parameter error | Dry-run | Unresolved parameter or unset environment variable | Fix the YAML or export the variable |
+| `unknown schema` (HTTP 400) | Deploy | Schema or payload not valid on the target | Remove or adapt the setting for the target |
+| `permission denied` (HTTP 403) | Deploy | Token missing a scope | Add the scope to the target token |
+| `duplicate key` | Deploy | The object already exists on the target with a different ID | Download it from the target and reconcile, or delete it first |
 
 ### Deploy
 
 ```bash
-# Deploy configuration to target tenant
-monaco deploy \
-  --environment-url "$DT_TARGET_URL" \
-  --token "$DT_TARGET_TOKEN" \
-  --manifest ./export/manifest.yaml
+# Deploy configuration to the target tenant
+monaco deploy ./export/manifest.yaml --environment target-tenant
 
-# Deploy specific project only (for phased deployment)
-monaco deploy \
-  --environment-url "$DT_TARGET_URL" \
-  --token "$DT_TARGET_TOKEN" \
-  --manifest ./export/manifest.yaml \
-  --project alerting-profile
+# Deploy a single project (phased deployment). monaco download writes one project,
+# named "project" by default — split configurations into separate project folders
+# to deploy them in phases.
+monaco deploy ./export/manifest.yaml --environment target-tenant --project project
 ```
+
+> <sub>**Sources:** [Monaco CLI commands (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/reference/commands-saas) — *"A dry-run doesn't connect to Dynatrace and can't validate the content of the JSON sent to Dynatrace."*, [monaco deploy flags, v2.30.0 (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/v2.30.0/cmd/monaco/deploy/command.go).</sub>
 
 > **Monaco resolves dependencies automatically** within a single deploy run. The 24-item deployment order (Section 1) is the reference model for understanding dependencies. If you deploy everything in one run, Monaco handles the ordering.
 
@@ -255,15 +271,21 @@ OneAgent instances must be redirected from the source tenant to the target tenan
 # Linux
 /opt/dynatrace/oneagent/agent/tools/oneagentctl \
   --set-server=https://<target-env-id>.live.dynatrace.com/communication \
-  --set-tenant-token=<target-tenant-token>
+  --set-tenant=<target-env-id> \
+  --set-tenant-token=<target-tenant-token> \
+  --restart-service
 
 # Windows
 "C:\Program Files\dynatrace\oneagent\agent\tools\oneagentctl.exe" \
   --set-server=https://<target-env-id>.live.dynatrace.com/communication \
-  --set-tenant-token=<target-tenant-token>
+  --set-tenant=<target-env-id> \
+  --set-tenant-token=<target-tenant-token> \
+  --restart-service
 ```
 
-> **Application restart required.** After changing the server and tenant token, the monitored application must be restarted for the agent to reconnect. Plan application restarts as part of the wave execution.
+> **OneAgent and application restarts required.** `--set-tenant` and `--set-tenant-token` always go together — the environment ID changes with the tenant. The OneAgent CLI docs: *"These parameters require restart of OneAgent, as well as restart of all the applications monitored with deep code modules. Add --restart-service to the command to restart OneAgent automatically (version 1.189+) or stop and start OneAgent process manually."* `--restart-service` handles OneAgent; plan the application restarts as part of the wave execution.
+>
+> <sub>**Sources:** [OneAgent configuration via command-line interface (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-oneagent/oneagent-configuration-via-command-line-interface).</sub>
 
 ### ActiveGate Routing for Firewall-Restricted Hosts
 
@@ -273,12 +295,16 @@ On-premises or DMZ hosts that cannot reach the SaaS target directly must route t
 # Route through a single ActiveGate
 /opt/dynatrace/oneagent/agent/tools/oneagentctl \
   --set-server=https://<activegate-host>:9999/communication \
-  --set-tenant-token=<target-tenant-token>
+  --set-tenant=<target-env-id> \
+  --set-tenant-token=<target-tenant-token> \
+  --restart-service
 
 # Route through multiple ActiveGates (failover — semicolon-separated)
 /opt/dynatrace/oneagent/agent/tools/oneagentctl \
   --set-server="https://ag-01.corp.com:9999/communication;https://ag-02.corp.com:9999/communication" \
-  --set-tenant-token=<target-tenant-token>
+  --set-tenant=<target-env-id> \
+  --set-tenant-token=<target-tenant-token> \
+  --restart-service
 ```
 
 > **Network dependency:** ActiveGate routing requires firewall rules allowing the monitored host to reach the AG on port 9999. Coordinate with the network team early — firewall change lead times are a common critical path item.
@@ -342,21 +368,25 @@ fetch dt.entity.service
 <a id="kubernetes-operator-migration"></a>
 ## 6. Kubernetes Operator Migration
 
-Kubernetes environments are migrated by updating the DynaKube custom resource to point to the target tenant. This triggers a rolling restart of the OneAgent pods.
+A DynaKube cannot be edited to point at a different tenant: `spec.apiUrl` is immutable, and the Operator rejects a CR that changes the tenant in it. Kubernetes environments are migrated by **deleting** the DynaKube and **applying a new one** against the target tenant (the same rule as **M2S-05**).
 
 ### Migration Steps
 
 | Step | Command | Notes |
 |------|---------|-------|
-| 1 | Update the Kubernetes secret with target tenant tokens | `kubectl edit secret dynakube -n dynatrace` |
-| 2 | Update DynaKube CR with target tenant `apiUrl` | Apply the prepared CR from Step 4 |
-| 3 | Monitor operator logs for successful reconnection | `kubectl logs -n dynatrace -l app.kubernetes.io/name=dynatrace-operator` |
-| 4 | Verify pods restart with new configuration | `kubectl get pods -n dynatrace -w` |
+| 1 | Confirm the source CR is saved for rollback | `dynakube-source.yaml` from Step 4, Section 5 |
+| 2 | Delete the running DynaKube | `kubectl delete dynakube dynakube -n dynatrace` |
+| 3 | Apply the target CR prepared in Step 4 | Its `tokens:` field names the `dynakube-target` secret created in Step 4 |
+| 4 | Monitor operator logs for successful reconnection | `kubectl logs -n dynatrace -l app.kubernetes.io/name=dynatrace-operator` |
+| 5 | Verify pods restart with new configuration, then restart applications | `kubectl get pods -n dynatrace -w` |
 
-### Apply DynaKube CR Update
+### Delete and Recreate the DynaKube
 
 ```bash
-# Apply the prepared DynaKube CR from Step 4
+# apiUrl is immutable — delete and recreate (OneAgent pods restart)
+kubectl delete dynakube dynakube -n dynatrace
+
+# Apply the target CR prepared in Step 4 (tokens: dynakube-target)
 kubectl apply -f dynakube-target.yaml -n dynatrace
 
 # Monitor the rollout
@@ -366,18 +396,13 @@ kubectl get dynakube -n dynatrace -w
 kubectl get pods -n dynatrace -l app.kubernetes.io/component=oneagent
 ```
 
-### Helm-Based Migration
+> **Monitoring gap.** Deleting the DynaKube removes its OneAgent and ActiveGate pods, so monitoring on that cluster stops until the new CR reconciles. Restart the monitored applications afterwards so their code modules report to the target. Schedule the switch inside the wave's maintenance window.
 
-If the operator was installed via Helm:
+The Dynatrace docs give the same sequence: *"Delete the existing DynaKube (starting with Dynatrace Operator version 1.3.0, editing spec.apiUrl is not allowed)."* Their example reuses the secret name `dynakube`; this series creates a separate `dynakube-target` secret in Step 4, so the source tokens stay available for rollback.
 
-```bash
-# Update Helm release with target tenant values
-helm upgrade dynatrace-operator dynatrace/dynatrace-operator \
-  --namespace dynatrace \
-  --set apiUrl=https://<target-env-id>.live.dynatrace.com/api \
-  --set apiToken=<target-api-token> \
-  --set dataIngestToken=<target-data-ingest-token>
-```
+**Helm-installed Operators** are switched the same way. The Helm chart installs the Operator only — the tenant URL and tokens live in the DynaKube CR and its secret, not in Helm values — so use the delete-and-recreate steps above. A `helm upgrade --set apiUrl=…` is accepted without error and changes nothing.
+
+> <sub>**Sources:** [Migrate Dynatrace Operator to a new environment (DT docs)](https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s/guides/migration/migrate-dto-to-tenant).</sub>
 
 > **Rolling restart timing:** The operator performs a rolling restart of OneAgent DaemonSet pods. For large clusters (100+ nodes), the full rollout may take 15–30 minutes. Monitor with `kubectl rollout status daemonset -n dynatrace`.
 

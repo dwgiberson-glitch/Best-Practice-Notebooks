@@ -1,6 +1,6 @@
 # OPMIG-04: OpenPipeline Migration Guide: Part 4
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 4 of 10 | **Created:** December 2025 | **Last Updated:** 08/24/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 4 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Pipeline Configuration Fundamentals
 ---
@@ -40,10 +40,12 @@ By the end of this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
-| **Permissions** | `openpipeline.configurations.read` and `openpipeline.configurations.write` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
+| **Permissions** | `settings:read` and `settings:write` (custom pipelines; built-in and ready-made pipelines are view-only with `settings:read`) |
 | **API Access** | `logs.read` and `logs.ingest` token scopes |
 | **Knowledge** | OPMIG-01 through OPMIG-03; basic understanding of log ingestion |
+
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — pipeline *Types* table, *Permissions* row.</sub>
 
 ### Sprint 1.337 (April 2026): Configuration API → Settings v2 Acceleration
 
@@ -170,10 +172,10 @@ Let's walk through creating a complete pipeline for nginx access logs.
 Name: Parse nginx access log
 
 Matching condition:
-log.source == "nginx" OR contains(content, "GET") OR contains(content, "POST")
+log.source == "nginx" OR matchesPhrase(content, "GET") OR matchesPhrase(content, "POST")
 
 Processor definition:
-parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:timestamp ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
+parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:log_time ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
 ```
 
 **Test with Sample Data:**
@@ -185,7 +187,7 @@ parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:timestamp 
 ```
 
 5. Click **[Run sample data]**
-6. Verify fields extracted: `client_ip`, `method`, `path`, `status_code`, `bytes`
+6. Verify fields extracted: `client_ip`, `log_time`, `method`, `path`, `status_code`, `bytes` (the bracketed time goes into `log_time`, not `timestamp` — overwriting the record's `timestamp` with a string risks the record failing log schema validation)
 7. Click **[Save]**
 
 #### 2b. Add Enrichment Processor
@@ -276,7 +278,7 @@ isNotNull(bytes)
 Name: Route nginx logs
 
 Matching condition:
-log.source == "nginx" OR contains(content, "nginx")
+log.source == "nginx" OR matchesValue(content, "*nginx*")
 
 Pipeline: nginx-access-logs
 ```
@@ -414,9 +416,9 @@ fieldsAdd service = "payment"
 **Processing Stage:**
 
 **Processor 1: Drop System Logs**
-```dql
-Matching: k8s.namespace.name == "kube-system" AND loglevel == "DEBUG"
-Action: Drop
+```text
+Processor type: Drop record
+Matching condition: k8s.namespace.name == "kube-system" AND loglevel == "DEBUG"
 ```
 
 **Processor 2: Parse JSON Logs**
@@ -507,7 +509,7 @@ Settings → Process and contextualize → OpenPipeline → Logs
    - **Matching condition**: `matchesValue(content, "*HTTP*")`
    - **Processor definition**:
    ```
-   parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:timestamp ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
+   parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:log_time ']' SPACE '\"' LD:method SPACE LD:path SPACE LD:protocol '\"' SPACE INT:status_code SPACE INT:bytes"
    ```
 
 #### Step 4: Test with Sample Data
@@ -532,7 +534,7 @@ The DQL processor is the most flexible. Here are common patterns:
 #### Add Static Fields
 ```
 fieldsAdd environment = "production"
-fieldsAdd application = "web-frontend"
+| fieldsAdd application = "web-frontend"
 ```
 
 #### Add Conditional Fields
@@ -564,9 +566,11 @@ Drop processors remove records matching conditions:
 | Matching Condition | Effect |
 |---------------------|--------|
 | `loglevel == "DEBUG"` | Drop all debug logs |
-| `contains(content, "healthz")` | Drop health check logs |
-| `contains(content, "/metrics")` | Drop Prometheus scrapes |
+| `matchesValue(content, "*healthz*")` | Drop health check logs |
+| `matchesValue(content, "*/metrics*")` | Drop Prometheus scrapes |
 | `status == "TRACE"` | Drop trace-level logs |
+
+> Matchers accept `matchesValue` (with `*` wildcards, any substring) and `matchesPhrase` (whole tokens); `contains()` is not enabled in a matching condition.
 
 ### Technology Parsers
 
@@ -600,8 +604,8 @@ Dynamic routing sends data to specific pipelines based on matching conditions.
 |-----------|----------|
 | `log.source == "nginx"` | nginx-logs pipeline |
 | `k8s.namespace.name == "production"` | prod-logs pipeline |
-| `contains(content, "payment")` | payment-logs pipeline |
-| `dt.openpipeline.source == "generic"` | api-ingested pipeline |
+| `matchesPhrase(content, "payment")` | payment-logs pipeline |
+| `dt.openpipeline.source == "/api/v2/logs/ingest"` | api-ingested pipeline |
 | `host.name == "web-server-01"` | specific host pipeline |
 
 ### Route Evaluation Order
@@ -674,15 +678,17 @@ Response `204` indicates successful ingestion.
 
 ### Processor Ordering
 
-Within a pipeline, order processors logically:
+Within the **Processing stage**, order processors logically:
 
-```
+```text
 1. Masking      → Protect sensitive data first
 2. Drop         → Remove unwanted records
 3. Parse        → Extract structured fields
 4. Enrich       → Add context fields
 5. Transform    → Compute derived values
 ```
+
+Everything else — Smartscape, permission, cost allocation, bucket assignment, and metric/event extraction — runs in later stages whose order is fixed by the platform (see OPMIG-02 § Understanding Processing Order).
 
 ### Naming Conventions
 
@@ -785,11 +791,11 @@ k8s.namespace.name == "payments" OR log.source == "payment-service"
 **Processors (in order):**
 
 1. **Mask Credit Cards** (Masking)
-   - Matching: `contains(content, "card")`
-   - Definition: `fieldsAdd content = replacePattern(toString(content), "\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}", "****-****-****-****")`
+   - Matching: `matchesPhrase(content, "card")`
+   - Definition: `fieldsAdd content = replacePattern(content, "CREDITCARD", replacement: "****-****-****-****")` — `replacePattern` takes a DPL pattern, not a regular expression
 
 2. **Drop Health Checks** (Drop)
-   - Matching: `contains(content, "/health") OR contains(content, "/ready")`
+   - Matching: `matchesValue(content, "*/health*") OR matchesValue(content, "*/ready*")`
 
 3. **Parse Payment Logs** (DQL)
    - Matching: `matchesValue(content, "*transaction*")`
@@ -828,10 +834,6 @@ Now that you can create and configure pipelines, continue with:
 - [Processing Examples](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/processing-examples)
 - [DQL Functions in OpenPipeline](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/openpipeline-dql-functions)
 - [Dynatrace Pattern Language](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

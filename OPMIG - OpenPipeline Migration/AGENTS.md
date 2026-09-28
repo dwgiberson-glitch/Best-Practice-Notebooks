@@ -22,8 +22,8 @@ Read only the file(s) matching the question. All paths are under `markdown/`.
 | Routing strategies, Grail bucket design, multi-tier bucket architectures, cost-optimization ROI, bucket governance and access control | `-[OPMIG]-05-routing-buckets.md` |
 | Parsing and transformation: DPL patterns, Apache/Nginx/JSON log formats, Grok→DPL (ELK/Logstash) conversion, drop processors, DPL Architect | `-[OPMIG]-06-processing-parsing.md` |
 | Extracting metrics and events from logs: RED SLI metrics, business events and KPIs, matching conditions, cardinality-aware metric design, and the attribution prerequisite for extracted Davis events — without `dt.smartscape_source.id` the event is attributed to the environment entity rather than the thing it is about | `-[OPMIG]-07-metric-event-extraction.md` |
-| Masking and PII protection, built-in vs custom `replacePattern` masking, GDPR/HIPAA/PCI-DSS/SOC 2 checklists, field removal | `-[OPMIG]-08-security-masking.md` |
-| Diagnosing pipeline issues via decision trees, pipeline health monitoring, parsing/volume validation, emergency rollback, performance tuning | `-[OPMIG]-09-troubleshooting-validation.md` |
+| Masking and PII protection as DQL processors (`replacePattern` with built-in DPL matchers or custom patterns), keeping PII out of routing conditions, GDPR/HIPAA/PCI-DSS/SOC 2 checklists, field removal | `-[OPMIG]-08-security-masking.md` |
+| Diagnosing pipeline issues via decision trees, pipeline health monitoring, parsing/volume validation, emergency rollback, deleting exposed PII records, performance tuning | `-[OPMIG]-09-troubleshooting-validation.md` |
 | Consolidated best-practice settings tables and the DQL cookbook for the whole migration | `-[OPMIG]-99-best-practice-summary.md` |
 
 If more than three rows match, start with

@@ -37,9 +37,9 @@ This notebook distills every actionable best practice from the CLOUD series (CLO
 | 6 | Azure: Use managed identity only for a classic ActiveGate on an Azure VM | For Clouds-app connections the federated identity credential (row 8) is the recommended method; managed identity applies only to the classic ActiveGate path | Recommended | CLOUD-05 |
 | 7 | Azure: Assign `Monitoring Reader` role at subscription scope | Scope: subscription or management group; role: `Monitoring Reader` (the role the Azure connection docs assign); `Reader` only for the classic integration | Critical | CLOUD-05 |
 | 8 | Azure: Use a federated identity credential (non-native) | Use a federated identity credential for Clouds-app Azure connections; client secret only where federation is unavailable (keep expiry < 12 months) | Recommended | CLOUD-05 |
-| 9 | GCP: Create dedicated service account with minimal roles | Assign `roles/monitoring.viewer`, `roles/compute.viewer`, `roles/container.viewer`, `roles/cloudasset.viewer` | Critical | CLOUD-06 |
+| 9 | GCP: No service account keys | Clouds-app connection: impersonation — grant the Dynatrace principal `roles/iam.serviceAccountTokenCreator` on a read-only service account; `dynatrace-gcp-monitor`: Workload Identity Federation for GKE with its generated custom roles | Critical | CLOUD-06 |
 | 10 | GCP: Use dedicated project for monitoring resources | Isolate Dynatrace service accounts, Pub/Sub topics, and billing in a separate GCP project | Recommended | CLOUD-06 |
-| 11 | GCP: Use Helm on GKE for push-based integration | Deploy via Pub/Sub for metrics and logs; no ActiveGate needed for SaaS | Recommended | CLOUD-06 |
+| 11 | GCP: Choose the connection model deliberately | Clouds-app GCP connection is Preview; `dynatrace-gcp-monitor` on GKE is in maintenance mode but is the working production path. It polls metrics and pulls logs from Pub/Sub (Pub/Sub carries logs only) | Recommended | CLOUD-06 |
 
 <a id="aws-integration"></a>
 
@@ -78,7 +78,7 @@ This notebook distills every actionable best practice from the CLOUD series (CLO
 |---|---|---|---|---|
 | 23 | Use Workload Identity for GKE pods | Replace service account JSON keys with Workload Identity for DynaKube and integration pods | Critical | CLOUD-06 |
 | 24 | Tag all GCP resources with standard labels | Required labels: `env`, `team`, `service`, `cost-center`; propagate as Dynatrace tags | Recommended | CLOUD-06 |
-| 25 | Propagate GCP project ID as a Dynatrace tag | Tag key: `gcp.project`; enables cross-project filtering and Segment creation | Recommended | CLOUD-06 |
+| 25 | Scope by the `gcp.project.id` field | The project arrives as a field on nodes, logs and metrics — build segments and filters on it instead of a hand-propagated tag | Recommended | CLOUD-06 |
 | 26 | Create Dynatrace Segments per GCP project | One Segment per project for cost attribution and scoped dashboards (segments filter; access is an IAM-policy job) | Recommended | CLOUD-06 |
 | 27 | Monitor Pub/Sub message volume for cost control | Filter logs at Cloud Logging export to reduce Pub/Sub throughput and costs | Recommended | CLOUD-06 |
 | 28 | Use Cloud Monitoring metrics scope for multi-project | Aggregate metrics from multiple projects into a single metrics scope rather than separate integrations | Optional | CLOUD-06 |
@@ -92,7 +92,7 @@ This notebook distills every actionable best practice from the CLOUD series (CLO
 | # | Best Practice | Recommended Setting/Value | Priority | Source |
 |---|---|---|---|---|
 | 29 | Deploy DynaKube in CloudNativeFullStack mode for standard node pools | `spec.oneAgent.cloudNativeFullStack` — full agent injection + infrastructure monitoring | Critical | CLOUD-03 |
-| 30 | Use ApplicationMonitoring mode for Fargate and GKE Autopilot | `spec.oneAgent.applicationMonitoring`; for Fargate, install the Operator with the **Without CSI driver** variant (`useCSIDriver` is not a DynaKube `v1beta5` / `v1beta6` field) | Critical | CLOUD-03, CLOUD-06 |
+| 30 | Use ApplicationMonitoring mode for Fargate; check mode support on GKE Autopilot | `spec.oneAgent.applicationMonitoring`; on GKE Autopilot the Operator's chart creates the allowlist for its CSI driver — confirm per-mode support for your Autopilot version; for Fargate, install the Operator with the **Without CSI driver** variant (`useCSIDriver` is not a DynaKube `v1beta5` / `v1beta6` field) | Critical | CLOUD-03, CLOUD-06 |
 | 31 | Add tolerations for tainted node groups | `tolerations: [{effect: NoSchedule, key: node-role, operator: Exists}]` to ensure OneAgent runs on all nodes | Critical | CLOUD-03 |
 | 32 | Enable kubernetes-monitoring capability on ActiveGate | `spec.activeGate.capabilities: [kubernetes-monitoring, routing]` | Critical | CLOUD-03 |
 | 33 | Use nodeSelector to exclude Windows nodes | `nodeSelector: {kubernetes.io/os: linux}` in DynaKube spec | Recommended | CLOUD-03 |
@@ -133,7 +133,7 @@ This notebook distills every actionable best practice from the CLOUD series (CLO
 | 53 | Route logs to purpose-specific Grail buckets | Route `/aws/lambda/*` → `lambda_logs`, `/ecs/*` → `application_logs`, `/aws/rds/*` → `database_logs` | Recommended | CLOUD-07 |
 | 54 | Enable S3 backup on Firehose delivery stream | Backup failed or all records to S3 for disaster recovery and compliance | Recommended | CLOUD-07 |
 | 55 | Azure: One diagnostic setting per resource, regional Event Hubs | Event Hubs must be in the resource's region; each resource allows at most five diagnostic settings | Recommended | CLOUD-05 |
-| 56 | GCP: Use Pub/Sub via GKE integration for log forwarding | Push-based delivery; filter at Cloud Logging export level to reduce volume | Recommended | CLOUD-07 |
+| 56 | GCP: Aggregated Log Router sink → Pub/Sub | One folder/organization sink with `includeChildren`; exclusion filters before Pub/Sub; grant the writer identity `roles/pubsub.publisher` | Recommended | CLOUD-06 |
 
 <a id="cost-optimization"></a>
 
@@ -178,7 +178,7 @@ This notebook distills every actionable best practice from the CLOUD series (CLO
 | 77 | Combine cloud integration with OneAgent on all compute | Cloud integration: infrastructure context. OneAgent: processes, traces, code-level diagnostics. Both required for full-stack visibility | Critical | CLOUD-01 |
 | 78 | Build unified health dashboards showing all providers | Components: host CPU (all providers), active detected problems, service error rates, log error trends, K8s container metrics | Recommended | CLOUD-08 |
 | 79 | Deduplicate alerts using Dynatrace Intelligence correlation | Dynatrace Intelligence automatically correlates related issues across providers; do not create redundant static alerts | Recommended | CLOUD-08 |
-| 80 | Forward control plane logs to Dynatrace for unified analysis | EKS: Container Insights logs. AKS: control-plane resource logs via diagnostic settings (prefer `kube-audit-admin` over `kube-audit` for cost). GKE: Cloud Logging. Forward all to Grail for cross-platform analysis | Recommended | CLOUD-03, CLOUD-06 |
+| 80 | Forward control plane logs to Dynatrace for unified analysis | EKS: Container Insights logs. AKS: control-plane resource logs via diagnostic settings (prefer `kube-audit-admin` over `kube-audit` for cost). GKE: audit and control-plane logs via a Log Router sink → Pub/Sub. Forward all to Grail for cross-platform analysis | Recommended | CLOUD-03, CLOUD-06 |
 
 ---
 

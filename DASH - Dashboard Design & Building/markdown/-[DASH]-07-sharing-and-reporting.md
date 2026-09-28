@@ -1,10 +1,10 @@
 # DASH-07: Sharing and Reporting
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 7 of 7 | **Created:** March 2026 | **Last Updated:** 09/02/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 7 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
-A dashboard only delivers value when the right people can access it. This final notebook in the DASH series covers the full lifecycle of dashboard distribution — permission models, sharing with teams and stakeholders, scheduled reports via Dynatrace Workflows, exporting dashboard snapshots, managing dashboards as code through the Settings API, and version control patterns that keep your dashboard library maintainable.
+A dashboard only delivers value when the right people can access it. This final notebook in the DASH series covers the full lifecycle of dashboard distribution — permission models, sharing with teams and stakeholders, scheduled reports via Dynatrace Workflows, exporting dashboard snapshots, managing dashboards as code through the Documents API, and version control patterns that keep your dashboard library maintainable.
 
 ---
 
@@ -26,7 +26,7 @@ A dashboard only delivers value when the right people can access it. This final 
 |-------------|----------|
 | **Dynatrace Environment** | SaaS or Managed with Grail enabled |
 | **Permissions** | `document:documents:write`, `document:direct-shares:write`, `automation:workflows:write` |
-| **API Access** | API token with `ReadConfig` and `WriteConfig` scopes (for dashboard-as-code) |
+| **API Access** | For dashboard-as-code: a platform token or OAuth client with `document:documents:read` and `document:documents:write` (Monaco requires an OAuth client for documents — see §5). Dashboards are documents, not Settings objects |
 | **Prior Reading** | DASH-01 through DASH-06 |
 
 <a id="permission-models"></a>
@@ -67,12 +67,21 @@ Dynatrace provides granular control over who can view, edit, and manage dashboar
 
 ### Sharing Methods
 
+The Dashboards app shares a dashboard three ways, all of them with Dynatrace users in your environment:
+
 | Method | How | Audience |
 |--------|-----|----------|
-| **Direct share** | Share button in dashboard UI | Named users or groups |
-| **Link sharing** | Copy dashboard URL | Anyone with environment access |
-| **Preset dashboards** | Configure as default for a group | New team members get it automatically |
-| **Embedding** | Embed in internal portals (iframe) | Non-Dynatrace users (limited) |
+| **Access for all** | Share → *Visible to anyone in your environment (Read only)* | Every user in the environment, view only |
+| **Share access** | Share → add users and user groups | Named users or groups, view or edit |
+| **Share link** | Share → create a link for viewing or for editing | Anyone in the environment who has the link, at the level the link grants |
+| **Default for a team** | There is no preset setting in the new Dashboards app — use *Access for all*, or a Launchpad as the team's landing page (FAQ-07) | New team members |
+
+Two classic-dashboard distribution features have no counterpart: **anonymous links** and **report subscriptions** do not exist in the new Dashboards app. Scheduled delivery is a Workflow (§3). There is no embedding option for non-Dynatrace users.
+
+> <sub>**Sources:**</sub>
+> - <sub>[Dashboards (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/dashboards-and-notebooks/dashboards-new) — *"Share links: Create links (URLs) pointing to your document and distribute the links through the channels of your choice (email, for example)."*</sub>
+> - <sub>[Share Dynatrace documents (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/share) — *"No one outside your Dynatrace environment could use the link to access your document, of course, but anyone in your Dynatrace environment could use it."*</sub>
+> - <sub>[Upgrade from Dashboards Classic to Dashboards (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/get-apps-and-surfaces-working/upgrade-guide-dashboards) — *"don't exist in new Dashboards"* (said of both anonymous links and report subscriptions)</sub>
 
 ### Dashboard Organization
 
@@ -83,19 +92,29 @@ As your dashboard library grows, organization becomes critical.
 | **Naming convention** | `[Tier] - [Team/Service] - [Purpose]` e.g., "Ops - Checkout - Service Health" |
 | **Tags** | Tag dashboards with tier, team, and service for easy filtering |
 | **Ownership registry** | Maintain a list of dashboard owners for accountability |
-| **Regular cleanup** | Archive dashboards that haven't been viewed in 90 days |
+| **Regular cleanup** | Archive dashboards that ran no tile queries in 90 days (query below) |
 
 ### Querying Dashboard Usage
 
-Track which dashboards are actually used to identify candidates for cleanup.
+There is no per-dashboard view log to query. The document audit trail — `event.kind == "AUDIT_EVENT"` with `event.provider == "DOCUMENTS"` in `dt.system.events` — records list reads and sharing changes, not reads of a dashboard: on a validation tenant (09/28/2026) its only event types over 30 days were `DIRECT_SHARES_LIST_READ`, `DIRECT_SHARE_RECIPIENTS_LIST_READ`, `DOCUMENTS_LIST_READ` and `ENV_SHARE_CREATE`. Use it to answer *who changed sharing*, not *who looked*.
+
+The usable signal is query execution, so treat it as a **proxy**. Every query Dynatrace executes is stored as a `QUERY_EXECUTION_EVENT` in `dt.system.events`; for tile queries run by the Dashboards app, `client.application_context` is `dynatrace.dashboards` and `client.source` carries the dashboard URL. The query below counts those per dashboard. A dashboard that never appears ran no tile queries in the window — the cleanup candidate. A count is queries, not views: a dashboard with many tiles produces many records per opening.
+
+> **Corrected 09/28/2026.** An earlier version of this cell filtered `fetch events` on `event.kind == "AUDIT_LOG"`. No such kind exists, so it returned zero rows on every tenant — which the cleanup advice above would read as "no dashboard has been viewed".
+
+> <sub>**Dictionary:** model `query_execution_event` (`data_object` `dt.system.events`), whose fields include `client.application_context` and `client.source`; model `audit_event` (`dt.system.events`), read 09/28/2026.</sub>
 
 ```dql
-// Audit trail: document access events over last 7 days
-fetch events, from:-7d
-| filter event.kind == "AUDIT_LOG"
-| filter event.type == "DOCUMENT_ACCESS" or event.type == "DOCUMENT_READ"
-| summarize access_count = count(), by:{event.type}
-| sort access_count desc
+// Dashboard usage proxy: tile queries run by the Dashboards app, per dashboard, last 90 days.
+// Document reads are not audited, so this counts query executions, not views.
+// Dashboards with the oldest last_used — or that never appear — are cleanup candidates.
+fetch dt.system.events, from:-90d
+| filter event.kind == "QUERY_EXECUTION_EVENT"
+| filter client.application_context == "dynatrace.dashboards"
+| parse client.source, "LD '/ui/dashboard/' LD:dashboard_id EOS"
+| filter isNotNull(dashboard_id)
+| summarize {queries = count(), viewers = countDistinct(user.id), last_used = max(timestamp)}, by:{dashboard_id}
+| sort last_used asc
 ```
 
 <a id="scheduled-reports"></a>
@@ -121,7 +140,8 @@ This query would be used in a Workflow DQL action for a weekly executive report.
 // Weekly problem summary — suitable for automated report
 fetch dt.davis.problems, from:-7d
 | filter dt.davis.is_duplicate == false
-| summarize total = count(), active = countIf(event.status == "ACTIVE"), closed = countIf(event.status == "CLOSED"), avg_mttr_hours = avg(if(event.status == "CLOSED", then: resolved_problem_duration / 1h, else: 0))
+// MTTR averages CLOSED problems only — avg() ignores the nulls the if() returns for active ones
+| summarize {total = count(), active = countIf(event.status == "ACTIVE"), closed = countIf(event.status == "CLOSED"), avg_mttr_hours = avg(if(event.status == "CLOSED", then: resolved_problem_duration / 1h))}
 | fieldsAdd report_period = "Last 7 days"
 ```
 
@@ -176,11 +196,14 @@ Sometimes stakeholders need a static copy of a dashboard — for compliance, aud
 Export the dashboard definition as JSON for version control or migration.
 
 ```bash
-# Export dashboard via Documents API
+# Fetch a dashboard via the Documents API (platform token or OAuth client with document:documents:read)
 curl -X GET "https://<environment>.apps.dynatrace.com/platform/document/v1/documents/<dashboard-id>" \
-  -H "Authorization: Bearer <token>" \
-  -H "Accept: application/json" > dashboard-backup.json
+  -H "Authorization: Bearer <platform-token>" > dashboard-backup.multipart
 ```
+
+This endpoint returns **metadata and content together as a `multipart/form-data` response** — not a bare dashboard JSON file. The dashboard definition is the content part; the other part is the document's metadata. A Monaco `template:` or a restore needs the content part only. The Document service's content-only operation is `downloadDocumentContent` (*"Download latest document content."*); use it through the Document SDK or look up its REST path in your environment's API reference — this notebook has not verified that path.
+
+> <sub>**Sources:** [Document SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-document/) — `getDocument`: *"Return metadata and content in one multipart response."* The multipart response was observed on a validation tenant, 09/28/2026.</sub>
 
 > **Note:** Dashboard export captures the definition (tiles, queries, variables) but not the current data. Re-importing will re-execute queries against the live environment.
 
@@ -219,13 +242,19 @@ The export → modify → review → deploy workflow described in §6 remains th
 configs:
   - id: ops-service-health
     type:
-      api: document
+      document:
+        kind: dashboard   # or "notebook" / "launchpad"
+        private: false
     config:
       name: "Ops - Service Health"
       template: ops-service-health.json
       parameters:
-        environment: "{{ .Env.DT_ENVIRONMENT }}"
+        environment:
+          type: environment
+          name: DT_ENVIRONMENT
 ```
+
+New dashboards are the Monaco **`document`** type (Monaco CLI 2.15.0+), not an `api:` type — `api:` selects classic configuration APIs. Parameters read environment variables with `type: environment` — a `{{ .Env.… }}` template string is not a documented Monaco 2 parameter form. Monaco authenticates to the Documents API with an **OAuth client**, not a classic API token.
 
 ### Benefits of Dashboard as Code
 
@@ -237,7 +266,12 @@ configs:
 | **Disaster recovery** | Rebuild entire dashboard library from code |
 | **Standardization** | Enforce naming, layout, and variable conventions |
 
-> <sub>**Sources:** [What's new in Dynatrace SaaS 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-346) — the stricter dashboard-validation rule quoted above; [What's new in Dynatrace SaaS 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — the 1.344 release that first shipped it.</sub>
+> <sub>**Sources:**</sub>
+> - <sub>[What's new in Dynatrace SaaS 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-346) — the stricter dashboard-validation rule quoted above</sub>
+> - <sub>[What's new in Dynatrace SaaS 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344) — the 1.344 release that first shipped it</sub>
+> - <sub>[Monaco configuration YAML file - list of type fields (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/configuration/yaml-configuration-saas-type-fields) — *"Since Dynatrace Monaco CLI version 2.15.0+, the `document` type is supported, and it represents the API for Dashboards and Notebooks."*</sub>
+> - <sub>[Monaco configuration YAML file structure (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/configuration/yaml-configuration-saas) — *"The `environment` type parameter allows you to reference an environment variable."*</sub>
+> - <sub>[Monaco API support and access permission handling (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/monaco-api-support-and-access-handling) — *"OAuth credentials are required to target platform APIs"*</sub>
 
 <a id="version-control"></a>
 

@@ -1,6 +1,6 @@
 # S2S-07: Step 7 — Expand: OpenPipeline, SLOs, and Alerting
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 7 of 9 | **Phase:** Run | **Step:** Expand | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 7 of 9 | **Phase:** Run | **Step:** Expand | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -55,13 +55,13 @@ OpenPipeline processing rules define how ingested data is enriched, extracted, r
 
 ### Enrichment Propagation Delay
 
-> **Warning:** On Kubernetes clusters (especially EKS), enrichment rules typically take ~45 minutes to propagate cluster-wide after deployment (observed; actual time varies by cluster size and ActiveGate configuration). Routing rules that depend on enriched attributes (e.g., `app.namespace`, `k8s.cluster.name`) will not match incoming data until propagation completes — data lands in `default_logs` during the gap.
+> **Warning:** On Kubernetes clusters (especially EKS), enrichment rules typically take ~45 minutes to propagate cluster-wide after deployment (observed; actual time varies by cluster size and ActiveGate configuration). Routing rules that depend on enriched attributes (e.g., a `primary_tags.*` field or a Kubernetes label you route on) will not match incoming data until propagation completes — data lands in `default_logs` during the gap.
 >
 > **Mitigation:** If deploying via Terraform or CI/CD, add a validation gate between enrichment deployment and routing deployment. Either use a fixed wait (45-60 min on EKS) or query for enriched fields before proceeding:
+> ```dql
+> fetch logs, from:-5m | filter isNotNull(k8s.namespace.name) | summarize count()
 > ```
-> fetch logs, from:-5m | filter isNotNull(app.namespace) | summarize count()
-> ```
-> If count > 0, enrichment is propagated and routing rules can be deployed safely.
+> Replace `k8s.namespace.name` (the built-in Kubernetes enrichment) with the enriched field your routing rules actually match on. If count > 0, enrichment is propagated and routing rules can be deployed safely.
 
 ### Deployment Order (Critical)
 
@@ -91,7 +91,7 @@ For consolidation scenarios where multiple source tenants have different OpenPip
 
 ```bash
 # Export OpenPipeline rules from source tenant
-monaco download manifest.yaml --environment source-tenant --type openpipeline
+monaco download --manifest manifest.yaml --environment source-tenant --only-openpipeline
 
 # Review and update bucket references in the exported YAML
 # Then deploy to target tenant
@@ -194,7 +194,7 @@ SLO definitions are portable via Monaco (`slo-v2` type) or Terraform (`dynatrace
 
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Export SLO definitions from source tenant | `monaco download --type slo-v2` |
+| 1 | Export SLO definitions from source tenant | `monaco download --only-slo-v2` |
 | 2 | Audit metric expressions for entity IDs | Manual review or script |
 | 3 | Replace entity IDs with tag-based selectors | Manual edit |
 | 4 | Deploy SLOs to target tenant | `monaco deploy` |
@@ -202,7 +202,7 @@ SLO definitions are portable via Monaco (`slo-v2` type) or Terraform (`dynatrace
 
 ### Entity ID to Tag Conversion
 
-```
+```text
 # BEFORE (hardcoded entity ID — breaks on migration)
 metric_expression = "(100)*(builtin:service.errors.server.successCount:splitBy()):merge(0):default(0):sort(value(auto,descending)):limit(20):names:fold(auto)/((builtin:service.requestCount.server:splitBy()):merge(0):default(0):sort(value(auto,descending)):limit(20):names:fold(auto))"
 entity_filter = "type(SERVICE),entityId(SERVICE-5E6F7A8B)"

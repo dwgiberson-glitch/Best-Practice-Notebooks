@@ -1,6 +1,6 @@
 # DASH-04: Operations Dashboards
 
-> **Series:** DASH — Dashboard Design & Building | **Notebook:** 4 of 7 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** DASH — Dashboard Design & Building | **Notebook:** 4 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -86,10 +86,14 @@ fetch spans, from:-1h
 
 ```dql
 // Overall error rate trend — operations line chart
+// Divide the arrays element by element so each 5-minute bucket gets its own rate;
+// arrayAvg(errors) / arrayAvg(total) would collapse the trend to a single number.
+// coalesce() turns buckets with no errors (null) into 0 instead of a gap.
 fetch spans, from:-2h
 | filter span.kind == "server"
-| makeTimeseries total = count(), errors = countIf(span.status_code == "error"), interval:5m
-| fieldsAdd error_rate = arrayAvg(errors) / arrayAvg(total) * 100
+| makeTimeseries {total = count(), errors = countIf(span.status_code == "error")}, interval:5m
+| fieldsAdd error_rate = 100.0 * coalesce(errors[], 0) / total[]
+| fieldsKeep timeframe, interval, error_rate
 ```
 
 <a id="log-volume-tracking"></a>
@@ -196,11 +200,16 @@ Deployments are the most common cause of production issues. Overlaying deploymen
 
 ### Recent Deployment Events
 
+Deployment events arrive in two shapes: classic Events-API deployments (`event.type == "CUSTOM_DEPLOYMENT"`) and SDLC deployment task events, where `event.kind` is always `SDLC_EVENT`, `event.category` is `task` and `event.type` is `deployment`. The query below catches both. The SDLC branch follows the semantic dictionary's model; it executes, but the validation tenant (09/28/2026) held no deployment events of either shape over 365 days, so it has not been checked against live SDLC data — confirm it returns your pipeline's deployments before putting it on a dashboard.
+
+> <sub>**Sources:** [SDLC events (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/sdlc-events) — `event.kind`: *"Automatically and unconditionally set to value `SDLC_EVENT`."* **Dictionary:** models `sdlc.task.deployment.started.event` and `sdlc.task.deployment.finished.event` (`data_object` `events`), read 09/28/2026; no model uses the kind `DEPLOYMENT_EVENT` that an earlier version of this cell filtered on.</sub>
+
 ```dql
-// Recent deployment events — operations context table
+// Recent deployment events — classic (Events API) and SDLC deployment events
 fetch events, from:-6h
-| filter event.kind == "DEPLOYMENT_EVENT" or event.type == "CUSTOM_DEPLOYMENT"
-| fieldsKeep timestamp, event.type, dt.entity.service, event.name
+| filter event.type == "CUSTOM_DEPLOYMENT"
+    or (event.kind == "SDLC_EVENT" and event.category == "task" and event.type == "deployment")
+| fieldsKeep timestamp, event.kind, event.type, event.status, event.name, dt.entity.service, cicd.deployment.name, cicd.deployment.release_stage
 | sort timestamp desc
 | limit 20
 ```

@@ -1,6 +1,6 @@
 # FAQ-14: Should I Replace My Custom SQL Server Monitoring Scripts with the Dynatrace Extension?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 14 — Custom SQL Server Scripts vs. the Dynatrace Extension | **Created:** July 2026 | **Last Updated:** 08/27/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 14 — Custom SQL Server Scripts vs. the Dynatrace Extension | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -32,7 +32,7 @@ You can — but in a typical estate the **Microsoft SQL Server extension from Dy
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail |
 | **ActiveGate** | An ActiveGate group with network reach to the SQL Server estate (host-based; a local OneAgent variant of the extension also exists) |
-| **SQL monitoring user** | `VIEW SERVER STATE` (SQL Server 2022+: `VIEW SERVER PERFORMANCE STATE`); `VIEW ANY DEFINITION` for Always On views; read on `msdb` for jobs/backups |
+| **SQL monitoring user** | `VIEW SERVER STATE` (SQL Server 2022+: `VIEW SERVER PERFORMANCE STATE`); `VIEW ANY DEFINITION` for Always On views; read on `msdb` for jobs/backups; `ALTER ANY DATABASE` (or `CREATE DATABASE` in `master`) if OFFLINE databases must be visible — `VIEW ANY DATABASE` shows ONLINE databases only |
 | **Audience** | DBA teams with existing script/Telegraf-based SQL Server monitoring; platform teams; account teams |
 | **Related series** | DBMON (database monitoring mechanics, dashboards, alerting), FAQ-09 (metric vs log query economics), AUTOM (extension deployment at scale) |
 
@@ -74,16 +74,17 @@ Homegrown script estates exist because teams historically only had the server-si
 <a id="what-it-collects"></a>
 ## 3. What the Extension Collects Out of the Box
 
-The extension organizes collection into **11 feature sets**. The ones that matter for replacing a typical script estate:
+The extension organizes collection into **14 feature sets**. The ones that matter for replacing a typical script estate:
 
 | Feature set | Key signals (documented keys) |
 |---|---|
 | **Default** (always on) | `sql-server.general.processesBlocked`, `sql-server.databases.state`, `sql-server.uptime`, `sql-server.general.userConnections`, memory/CPU/worker-thread metrics |
 | **Transaction Logs** | `sql-server.databases.log.percentUsed`, `.log.filesUsedSize`, `.log.filesSize`, growth/shrink/truncation/flush-wait counts |
-| **Database Files** | `sql-server.databases.file.size` / `.usedSpace` / `.emptySpace` + a `largest_files` log stream (top 100 files every 5 minutes) |
-| **Always On** | Availability-group, replica, and database-level health: `.ag.synchronizationHealth`, `.ar.role`, `.ar.failoverMode`, `.ar.operationalState`, `.db.synchronizationState`, log send/redo queue sizes and rates |
-| **Jobs** | `current_jobs` log stream (`job_name`, `job_status`, `last_run_outcome`, duration, execution dates) + `failed_jobs` log stream (step, `sql_severity`, retries, **error message text**) |
+| **Database Files** | `sql-server.databases.file.size` / `.usedSpace` / `.emptySpace` + a `largest_files` log stream (top 100 files every 5 minutes). `usedSpace` and `emptySpace` are reported **only for the database the extension is connected to** |
+| **Always On** | Availability-group, replica, and database-level health: `sql-server.always-on.ag.synchronizationHealth`, `sql-server.always-on.ar.role`, `sql-server.always-on.ar.failoverMode`, `sql-server.always-on.ar.operationalState`, `sql-server.always-on.db.synchronizationState`, `sql-server.always-on.db.logSendQueueSize` / `.logSendRate` / `.redoQueueSize` / `.redoRate` |
+| **Jobs** | `current_jobs` log stream — a snapshot of current jobs every 5 minutes (`job_name`, `job_status`, `last_run_outcome`, duration, execution dates) — + `failed_jobs` log stream (`step_name`, `outcome`, `sql_severity`, `retries_attempted`, **error message text** in `content`) |
 | **Agent** | `sql-server.sql.agent.status` |
+| **Locks and waits** | `all_requests` log stream — active requests with their locks and waits, every minute |
 | Memory / Locks / Latches / Queries / Sessions / Replication / Backups | Buffer pool and page life expectancy, deadlocks, latch waits, top longest queries (2016+), session counts, backup age/size |
 
 Two structural points worth internalizing:
@@ -91,7 +92,7 @@ Two structural points worth internalizing:
 - **The metric namespace is `sql-server.*`** — these are documented, versioned keys maintained by Dynatrace, not names you invented in a Telegraf config.
 - **Job outcomes arrive as log streams, not metrics.** That is an upgrade: the failure message text lands in Grail and is queryable with DQL, which polling `sysjobhistory` into a numeric metric never gave you.
 
-> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2) — feature sets, metric keys, and log-stream attributes are documented on this page.</sub>
+> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2) — feature sets, metric keys, and log-stream attributes are documented on this page; *"are only reported for the database the extension is currently connected to"*; *"Current jobs are fetched by the extension every 5 minutes."*</sub>
 
 <a id="mapping"></a>
 ## 4. Mapping a Typical Homegrown Monitor Set
@@ -104,10 +105,10 @@ The table below maps the monitor set we see most often in script/Telegraf estate
 | Database status (`sys.databases`) | ✅ `sql-server.databases.state` | Per database |
 | Agent job last-run outcome (`msdb.dbo.sysjobhistory`) | ✅ `current_jobs` / `failed_jobs` log streams | Richer than the script — error text queryable |
 | Transaction log space | ✅ `sql-server.databases.log.percentUsed` | Exact equivalent |
-| Always On sync health | ✅ `.ag/.ar/.db.synchronizationHealth` family | AG, replica, and database granularity |
-| Failover posture / replica role | ✅ `.ar.role`, `.ar.failoverMode`, `.ar.operationalState` | Point the Always On config at the **primary** replica |
+| Always On sync health | ✅ `sql-server.always-on.ag.synchronizationHealth` / `.ar.synchronizationHealth` / `.db.synchronizationHealth` | AG, replica, and database granularity |
+| Failover posture / replica role | ✅ `sql-server.always-on.ar.role`, `.ar.failoverMode`, `.ar.operationalState` | Point the Always On config at the **primary** replica |
 | Instance status / uptime | ✅ `sql-server.uptime` + connection/worker metrics | Extension connectivity doubles as reachability signal |
-| Database file space | ✅ Database Files feature set | Per database and per file |
+| Database file space | ⚠️ Database Files feature set | File size per database and per file; used/empty space only for the database the extension is connected to |
 | tempdb version-store pressure | ❌ Not collected | The one recurring hard gap — see section 7 |
 | Filegroup-level %-of-maxsize rollup | ⚠️ File-level only | No filegroup dimension exists on the file metrics |
 
@@ -181,7 +182,7 @@ If you skip the extension entirely and bring everything in through Telegraf, you
 ## 9. Setup Essentials and Cost
 
 1. Install the extension from **Dynatrace Hub** (remote flavor; a local OneAgent variant exists for hosts already running OneAgent).
-2. Designate an **ActiveGate group** for DB connections — one 2 vCPU / 4 GB ActiveGate handles hundreds of endpoints, with automatic failover within the group.
+2. Designate an **ActiveGate group** for DB connections — each monitoring configuration handles hundreds of active endpoints on a single 2 vCPU / 4 GiB ActiveGate, with automatic failover within the group.
 3. Create the **monitoring SQL user** (grants in Prerequisites). The extension only executes `SELECT`s.
 4. Enable feature sets to match your monitor inventory — Default, Database Files, Transaction Logs, Always On, Jobs, Agent covers the typical set.
 5. Set up the **two Always On configurations** (section 6).
@@ -189,20 +190,21 @@ If you skip the extension entirely and bring everything in through Telegraf, you
 
 Verification once data flows — blocked processes from the Default feature set:
 
-> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2) — Hub install, ActiveGate-group placement and failover, monitoring-user grants, and the feature-set list, [Microsoft SQL Server local extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-local), [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference) — the SQL data source executes queries only. **Derived:** the one-ActiveGate-per-hundreds-of-endpoints figure is a planning heuristic, not a published sizing number — measure against your own endpoint count.</sub>
+> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2) — Hub install, ActiveGate-group placement and failover, monitoring-user grants, and the feature-set list, [Microsoft SQL Server local extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-local), [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference) — the SQL data source executes queries only. The sizing figure is published: *"Each monitoring configuration can handle hundreds of active endpoints simultaneously on a single ActiveGate with 2vCPU and 4GiB RAM."*; the failed-jobs query below uses the documented `failed_jobs` fields (*"job_name, step_name, outcome, content, duration, instance, server, sql_severity, retries_attempted, start_execution_date, stop_execution_date"*) and *"Failed jobs are fetched by extension every 5 minutes."*</sub>
 
 ```dql
 // Blocked processes from the SQL Server extension (Default feature set)
 timeseries blocked = avg(`sql-server.general.processesBlocked`), from:-24h
 ```
 
-And the job-outcome log stream — the failure message text is right there in Grail:
+And the failed-jobs log stream — the failure message text is right there in Grail. Two details matter. Filter on the extension and the `failed_jobs` event group, the way the extension documentation does, rather than on `last_run_outcome`: that field is on the `current_jobs` stream, a snapshot taken every 5 minutes, so counting its records counts snapshots rather than failures. And count distinct `stop_execution_date` values, so a failure that appears in more than one 5-minute fetch is counted once. **This query follows the documented field list but has not been run against live SQL Server data** (the validation tenant has no SQL Server extension deployed; it executes and returns no rows) — confirm the counts on your own estate before alerting on them:
 
 ```dql
-// Failed SQL Server Agent jobs in the last 24h (Jobs feature set log stream)
+// Failed SQL Server Agent jobs in the last 24h (Jobs feature set, failed_jobs stream).
+// Not yet run against live SQL Server data — verify on your estate.
 fetch logs, from:-24h
-| filter isNotNull(job_name) and last_run_outcome == "Failed"
-| summarize {failures = count(), latest = max(timestamp)}, by:{job_name, server}
+| filter dt.extension.name == "com.dynatrace.extension.sql-server" and event.group == "failed_jobs"
+| summarize {failures = countDistinct(stop_execution_date), latest = max(stop_execution_date)}, by:{job_name, server}
 | sort failures desc
 ```
 

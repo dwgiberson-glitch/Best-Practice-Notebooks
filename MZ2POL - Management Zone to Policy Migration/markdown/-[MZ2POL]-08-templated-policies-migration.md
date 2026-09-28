@@ -1,6 +1,6 @@
 # MZ2POL-08: Templated Policies for MZ Migration
 
-> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 9 of 10 | **Created:** February 2026 | **Last Updated:** 09/24/2026
+> **Series:** MZ2POL — Management Zone to Policy Migration | **Notebook:** 9 of 10 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -310,8 +310,8 @@ fetch dt.entity.service
 fetch dt.entity.service
 | summarize
     inMZ = countIf(in(managementZones, {"Frontend-Team"})),
-    hasContext = countIf(dt.security_context == "team-frontend"),
-    inBoth = countIf(in(managementZones, {"Frontend-Team"}) and dt.security_context == "team-frontend")
+    hasContext = countIf(matchesValue(dt.security_context, "team-frontend")),
+    inBoth = countIf(in(managementZones, {"Frontend-Team"}) and matchesValue(dt.security_context, "team-frontend"))
 | fields inMZ, hasContext, inBoth,
          match = if(inMZ == inBoth, then: "ALIGNED", else: "GAPS EXIST")
 
@@ -319,6 +319,9 @@ fetch dt.entity.service
 // the classic constructs this migration replaces, so keep the classic query above:
 //   - management zones have NO Smartscape node equivalent; they are what this migration
 //     replaces with segments and policies.
+//   - dt.security_context is an ARRAY on dt.entity.service too, so it is tested with
+//     matchesValue (matches any element). dt.security_context == "team-frontend" compares an
+//     array to a string, is always false, and made every run report "GAPS EXIST".
 //   - dt.security_context is an ARRAY on Smartscape nodes (empty [] when unset, not null),
 //     so isNull / isNotNull(dt.security_context) does not carry over — a Smartscape rewrite
 //     would miscount coverage.

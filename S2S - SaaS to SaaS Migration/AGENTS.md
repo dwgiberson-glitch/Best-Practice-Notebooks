@@ -19,12 +19,12 @@ Read only the file(s) matching the question. All paths are under `markdown/`.
 | Choosing a migration approach, the S2S order of operations, risk assessment, success criteria, timeline, the 90/10 rule | `-[S2S]-02-step-2-strategize.md` |
 | Target tenant design: IAM architecture, Grail bucket + retention layout, OpenPipeline layout, cloud-integration mapping, configuration deployment order, entity-ID remapping | `-[S2S]-03-step-3-design.md` |
 | Pre-staging: target provisioning, SSO/IAM setup, Monaco bulk export, ActiveGate provisioning, Kubernetes operator prep, config freeze, rollback | `-[S2S]-04-step-4-prepare.md` |
-| Executing the cutover: `monaco deploy` workflow, `terraform apply` for IAM, entity-ID remapping, OneAgent reconfiguration, DynaKube operator and ActiveGate migration, wave validation gates | `-[S2S]-05-step-5-execute.md` |
+| Executing the cutover: `monaco deploy` workflow, `terraform apply` for IAM, entity-ID remapping, OneAgent reconfiguration (`oneagentctl --set-tenant` + `--restart-service`), DynaKube delete-and-recreate (immutable `apiUrl`) and ActiveGate migration, wave validation gates | `-[S2S]-05-step-5-execute.md` |
 | Reconnecting AWS/Azure/GCP integrations, cloud-transformation scenarios, dashboards, workflows, notification channels, synthetic monitors, extensions | `-[S2S]-06-step-6-integrate.md` |
 | OpenPipeline rule migration, Grail bucket configuration, SLO migration, alerting/notification migration, retention optimization | `-[S2S]-07-step-7-expand.md` |
 | Parallel operation (dual-tenant cost control), Davis baseline establishment, SLO continuity, stakeholder communication, user training | `-[S2S]-08-step-8-enable.md` |
 | Go/no-go checklist, cutover execution, post-cutover validation queries, rollback procedures, source-tenant decommission, lessons learned | `-[S2S]-09-step-9-optimize.md` |
-| Ready-to-run Bash and PowerShell scripts: Monaco download/export and SaaS Upgrade Assistant `.tar.gz` + `exportMetadata.json` packaging (script/reference format) | `-[S2S]-10-migration-scripts.md` |
+| Ready-to-run Bash and PowerShell scripts: short-lived, auto-revoked export token, Monaco download/export and SaaS Upgrade Assistant `.tar.gz` + `exportMetadata.json` packaging (script/reference format) | `-[S2S]-10-migration-scripts.md` |
 | Consolidated checklist of 112 best practices across the 9 steps | `-[S2S]-99-best-practice-summary.md` |
 
 If more than three rows match, start with `-[S2S]-99-best-practice-summary.md`

@@ -1,6 +1,6 @@
 # FAQ-02: Tagging — Sources, Standards, and Strategy
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 02 — Tagging Sources, Standards, and Strategy | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 02 — Tagging Sources, Standards, and Strategy | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -77,9 +77,9 @@ The layering is why tagging is worth doing carefully. A value set at the source 
 
 > **Spaces — rolling out with SaaS 1.348 (pre-release; staged tenant rollout planned from 09/22/2026).** The release notes introduce *"Space-based access control with `dt.space`"*: *"The dt.space attribute is now a primary, permission-relevant field in Grail. Data access can be scoped by space membership, enabling fine-grained governance and consistent data separation across your Grail datasets."* That is a **data-access** control: it sits beside `dt.security_context` in deciding which *records* a team may read.
 >
-> The gap this column was first drawn for is still open in what Dynatrace documents. Nothing yet delegates which *configuration objects* a team may own — changing an alert, an SLO or a maintenance window still goes through whoever holds the settings permissions, which is how a central team becomes a queue. Whether spaces will also delegate ownership of configuration objects is **not documented yet**: as of 09/24/2026 there is no docs page for spaces, and `dt.space` is not yet in the semantic dictionary. Verify that 1.348 has reached your tenant before relying on `dt.space`; until then — and for configuration ownership in any case — design against what the other columns give you today.
+> The gap this column was first drawn for is still open in what Dynatrace documents. Nothing yet delegates which *configuration objects* a team may own — changing an alert, an SLO or a maintenance window still goes through whoever holds the settings permissions, which is how a central team becomes a queue. Whether spaces will also delegate ownership of configuration objects is **not documented yet**: as of 09/28/2026 there is no docs page for spaces. `dt.space` is listed in the published semantic dictionary as an `experimental` permission field (*"The space associated with the record. Spaces enable granular scoping and delegation of monitoring responsibilities."*), but it was not yet in this validation tenant's `dt.semantic_dictionary.fields` on 09/28/2026 — check yours. That field description's "delegation of monitoring responsibilities" is not a documented mechanism for owning configuration objects. Verify that 1.348 has reached your tenant before relying on `dt.space`; until then — and for configuration ownership in any case — design against what the other columns give you today.
 >
-> <sub>**Sources:** [What's new in Dynatrace SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — the `dt.space` release note quoted above (pre-release, read 09/24/2026). **Dictionary:** no row for `dt.space` under `filter contains(name, "space")`, read 09/24/2026 (control: the same filter returned 21 other fields).</sub>
+> <sub>**Sources:** [What's new in Dynatrace SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — the `dt.space` release note quoted above (pre-release, read 09/24/2026). [Permission fields — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/tags/permission) — *"The space associated with the record. Spaces enable granular scoping and delegation of monitoring responsibilities."* (listed `experimental`). **Dictionary:** no row for `dt.space` in the validation tenant under `filter contains(name, "space")`, read 09/28/2026 (control: the same filter returned 21 other fields).</sub>
 
 Inside the OneAgent surface, several distinct concepts share "tag"-adjacent vocabulary. Disambiguating them is essential:
 
@@ -189,7 +189,7 @@ tag, and yet is easy to look for in the wrong place. Release identity is declare
 
 **Read them from the `tags` map on a Smartscape process node, with *unquoted* bracket keys:**
 
-```
+```dql
 smartscapeNodes "PROCESS"
 | fieldsAdd product = tags[DT_RELEASE_PRODUCT], version = tags[DT_RELEASE_VERSION]
 | filter isNotNull(product) and isNotNull(version)

@@ -1,6 +1,6 @@
 # S2S-04: Step 4 — Prepare: Export and Pre-Stage
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 4 of 9 | **Phase:** Upgrade | **Step:** Prepare | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 4 of 9 | **Phase:** Upgrade | **Step:** Prepare | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -199,27 +199,32 @@ export DT_SOURCE_URL="https://<source-env-id>.live.dynatrace.com"
 export DT_SOURCE_TOKEN="dt0c01.xxx..."
 
 # Full export of source tenant
+# --token takes the NAME of the environment variable, not the token itself
 monaco download \
-  --environment-url "$DT_SOURCE_URL" \
-  --token "$DT_SOURCE_TOKEN" \
+  --url "$DT_SOURCE_URL" \
+  --token DT_SOURCE_TOKEN \
   --output-folder ./export \
   --force
 
-# Export specific configuration types only
+# Export Settings 2.0 objects only
 monaco download \
-  --environment-url "$DT_SOURCE_URL" \
-  --token "$DT_SOURCE_TOKEN" \
+  --url "$DT_SOURCE_URL" \
+  --token DT_SOURCE_TOKEN \
   --output-folder ./export-settings \
   --only-settings \
   --force
 ```
+
+`--token` names an environment variable — the Monaco command reference: *"The name of the environment variable that contains the API token (classic Dynatrace only)."* Passing `"$DT_SOURCE_TOKEN"` hands Monaco the secret where it expects a variable name. Platform configurations (documents, automations, buckets, segments, SLOs, OpenPipeline) are downloaded with a platform token (`--platform-token`) or an OAuth client (`--oauth-client-id` and `--oauth-client-secret`), each likewise naming an environment variable. To narrow a download, use `--only-settings`, `--only-apis`, `--only-openpipeline`, `--only-slo-v2` (and the other `--only-*` flags), `--settings-schema <schema>` or `--api <api>`.
+
+> <sub>**Sources:** [Monaco CLI commands (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/reference/commands-saas), [monaco download flags, v2.30.0 (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/v2.30.0/cmd/monaco/download/download_command.go).</sub>
 
 ### Automated Export with SUA Packaging
 
 For a streamlined workflow that handles Monaco download, checksum verification, and SUA-compatible `.tar.gz` packaging in a single command, see **S2S-10: Migration Scripts**. The scripts automate:
 
 - Platform-aware Monaco binary download (macOS, Linux, Windows)
-- Temporary read-only API token creation with minimal scopes
+- Short-lived export token creation (read scopes only, 24 h expiry, revoked after the download)
 - Full `monaco download` execution
 - Packaging in SaaS Upgrade Assistant format (`.tar.gz` with `exportMetadata.json`)
 
@@ -229,7 +234,7 @@ For a streamlined workflow that handles Monaco download, checksum verification, 
 
 After `monaco download`, the export directory contains:
 
-```
+```text
 export/
 ├── project/
 │   ├── alerting-profile/          # Alerting profiles
@@ -254,11 +259,9 @@ After export, validate the output before proceeding:
 # Count exported configuration items
 find ./export/project -name "*.json" -o -name "*.yaml" | wc -l
 
-# Verify manifest is valid
-monaco deploy --dry-run \
-  --environment-url "$DT_TARGET_URL" \
-  --token "$DT_TARGET_TOKEN" \
-  --manifest ./export/manifest.yaml
+# Verify the manifest renders (offline dry-run). Add the target environment to
+# export/manifest.yaml first — see S2S-05 §2 — then:
+monaco deploy ./export/manifest.yaml --environment target-tenant --dry-run
 
 # Check for entity ID references that need remapping
 grep -r "HOST-\|SERVICE-\|PROCESS_GROUP-" ./export/project/ | wc -l
@@ -279,18 +282,22 @@ ActiveGates in the source tenant cannot be "moved" to the target tenant. New Act
 
 ### ActiveGate Sizing
 
-| Role | CPU | Memory | Disk | Notes |
-|------|-----|--------|------|-------|
-| **Environment ActiveGate** | 2+ cores | 4+ GB | 20 GB | Routing, API access |
-| **Cluster ActiveGate** | 4+ cores | 8+ GB | 50 GB | Extensions, synthetic |
-| **Multi-purpose** | 4+ cores | 8+ GB | 50 GB | Combined routing + extensions |
+A SaaS target uses **Environment ActiveGates** only — Cluster ActiveGates belong to Dynatrace Managed. Plan Environment ActiveGates by purpose, and size them with **FAQ-10** (ActiveGate sizing and scaling):
+
+| Purpose | Typical modules | Notes |
+|---------|-----------------|-------|
+| **Routing / API** | OneAgent routing, API | Needed where hosts cannot reach the SaaS endpoint directly |
+| **Extensions** | Extension Execution Controller | Remote extensions run on an ActiveGate group |
+| **Synthetic** | Synthetic (private location) | One per private location; recreated in the target |
+
+> <sub>**Sources:** [ActiveGate overview (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-activegate) — *"If you are using the Dynatrace SaaS solution, you only need to install an Environment ActiveGate."*</sub>
 
 ### Deployment Steps
 
 | Step | Action | Validation |
 |------|--------|------------|
 | 1 | Download ActiveGate installer from target tenant | Verify installer matches target tenant ID |
-| 2 | Deploy to designated hosts (same hosts or new hosts) | Check `oneagentctl --get-server` output |
+| 2 | Deploy to designated hosts (same hosts or new hosts) | ActiveGate appears under `smartscapeNodes "ACTIVEGATE"` in the target (query below) |
 | 3 | Assign ActiveGate groups (zones) matching source topology | Verify group assignment in target tenant UI |
 | 4 | Configure network zones if used | Match source network zone structure |
 | 5 | Verify connectivity from monitored hosts to new AGs | Test TCP connectivity on port 443 |
@@ -306,7 +313,9 @@ If the source tenant uses ActiveGate groups (zones) to segment traffic, replicat
 | `eu-west-prod` | EU production | `eu-west-prod` | 2 (HA pair) |
 | `extensions` | Extension execution | `extensions` | 1 (host-based only) |
 
-> **Extensions 2.0 requirement:** Extensions 2.0 require a **host-based ActiveGate** — not a Kubernetes-based ActiveGate. Plan at least one host-based AG if extensions are in scope.
+> **Extensions placement:** remote extensions run on an ActiveGate group; SQL monitoring extensions can alternatively run in Kubernetes through Dynatrace Operator (see the K8S series). Verify the supported runtime per extension before sizing the extensions zone.
+>
+> <sub>**Sources:** [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — *"Run SQL monitoring extensions on Kubernetes using Dynatrace Operator."*</sub>
 
 ### Verify ActiveGate Connectivity
 
@@ -314,16 +323,13 @@ After deploying ActiveGates to the target tenant, verify they are reporting:
 
 ```dql
 // Target tenant: verify ActiveGates are connected and reporting
-// Note: ActiveGate entity type varies by deployment; host entities report AG status
-fetch dt.entity.host
-| filter contains(entity.name, "activegate") or contains(entity.name, "ActiveGate")
-| fields entity.name, id, state
-| sort entity.name asc
+smartscapeNodes "ACTIVEGATE"
+| fields name, zone = dt.network_zone.id, group = dt.active_gate.group.name, version = dt.active_gate.version
+| sort name asc
 
-// Smartscape note (dt.entity.* is deprecated but still functional): this query uses the
-// classic-only field state, which has NO Smartscape node equivalent (Smartscape expresses
-// liveness via node lifetime, not a state field). Keep the classic query above.
-// Other fields do map: entity.name -> name.
+// ActiveGates are their own Smartscape node type. Do not look for them among hosts:
+// containerized ActiveGates are not hosts at all, and host-based ones are rarely named
+// after their role, so a host-name filter returns zero rows on a tenant with working AGs.
 ```
 
 <a id="kubernetes-operator-preparation"></a>
@@ -337,7 +343,7 @@ For environments running Kubernetes, the Dynatrace Operator must be configured t
 |------|--------|-------|
 | 1 | Generate new API token and PaaS token in target tenant | Scopes: `activeGateTokenManagement.create`, `entities.read`, `DataExport`, `metrics.read` |
 | 2 | Create Kubernetes secret for target tenant | `kubectl create secret generic dynakube-target --from-literal=apiToken=<token> --from-literal=dataIngestToken=<token>` |
-| 3 | Prepare updated DynaKube CR with target tenant URL | Do **not** apply yet — wait for Step 5 |
+| 3 | Save the running source CR for rollback, then prepare the target CR | `kubectl get dynakube dynakube -n dynatrace -o yaml > dynakube-source.yaml`. Do **not** apply the target CR yet — wait for Step 5 |
 | 4 | Validate Helm chart version compatibility | Target tenant cluster version must support the operator version |
 
 ### DynaKube CR Template (Target Tenant)
@@ -373,21 +379,20 @@ spec:
 ### Helm Chart Preparation
 
 ```bash
-# Add Dynatrace Helm repo (if not already added)
-helm repo add dynatrace https://raw.githubusercontent.com/Dynatrace/dynatrace-operator/main/config/helm/repos/stable
-helm repo update
-
-# Check available versions
-helm search repo dynatrace/dynatrace-operator --versions
+# Inspect the Operator chart in the OCI registry
+helm show chart oci://public.ecr.aws/dynatrace/dynatrace-operator --version <operator-version>
 
 # Dry-run to validate (do NOT install yet)
-helm upgrade --install dynatrace-operator dynatrace/dynatrace-operator \
+helm upgrade dynatrace-operator oci://public.ecr.aws/dynatrace/dynatrace-operator \
+  --version <operator-version> \
   --namespace dynatrace \
   --create-namespace \
+  --install \
+  --atomic \
   --dry-run
 ```
 
-> **Do not apply the DynaKube CR yet.** Applying it now would cause agents to start reporting to the target tenant before configuration is imported. Wait for Step 5.
+> **Do not apply the DynaKube CR yet.** Applying it now would cause agents to start reporting to the target tenant before configuration is imported. Wait for Step 5. The Helm chart installs the Operator only — the tenant URL and tokens live in the DynaKube CR and its secret, not in Helm values.
 
 <a id="configuration-freeze"></a>
 ## 6. Configuration Freeze
@@ -471,8 +476,8 @@ Every migration must have a documented rollback procedure. Rollback is possible 
 
 | Step | Action | Time Estimate |
 |------|--------|---------------|
-| 1 | Revert OneAgent `--set-server` to source tenant URL | 15 min per wave |
-| 2 | Revert DynaKube CR `apiUrl` to source tenant | 5 min |
+| 1 | Re-run `oneagentctl` with the source server, tenant and tenant token (`--set-server`, `--set-tenant`, `--set-tenant-token`, `--restart-service`) | 15 min per wave |
+| 2 | Delete the target DynaKube and re-apply the source CR saved in Section 5 (`apiUrl` is immutable — it cannot be edited back) | 5 min + pod restart |
 | 3 | Verify agents reconnect to source tenant | 15 min |
 | 4 | Lift configuration freeze on source tenant | Immediate |
 | 5 | Notify stakeholders | Immediate |

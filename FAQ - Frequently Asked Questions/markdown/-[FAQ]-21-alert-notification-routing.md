@@ -1,6 +1,6 @@
 # FAQ-21: How Do I Get the Right Alerts to the Right People?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 21 — Alert Notification Routing | **Created:** August 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 21 — Alert Notification Routing | **Created:** August 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -50,7 +50,7 @@ Everything below is written for a Gen3 / Grail tenant on its own terms. If you a
 | **Related topic series** | ALERT (detection, routing, destinations) · WFLOW (triggers, notification routing, incident management) · ORGNZ (security context, segments) · IAM (policy authoring, boundaries) · MZ2POL (migration from management zones) · AIOPS (Davis problem formation) |
 | **Related FAQs** | **FAQ-02** (tagging sources, standards, strategy) — the enrichment prerequisite · **FAQ-06** (can we trust Davis AI) · **FAQ-17** (planning a migration cutover) |
 
-> **Validation status.** The two DQL queries in [section 4](#right-stuff-denoise-before-you-route) were syntax-verified against a live Dynatrace tenant on 08/03/2026. They were **not executed** — the validating token lacked the `storage:events:read` scope. Treat their output shape as expected, not observed. Everything else in this entry is structural guidance and cross-references.
+> **Validation status.** The two DQL queries in [section 4](#right-stuff-denoise-before-you-route) and the ownership-coverage query in section 5 were executed against a live Dynatrace tenant on 09/28/2026 (an earlier 08/03/2026 pass could only syntax-verify them, for lack of the `storage:events:read` scope). Everything else in this entry is structural guidance and cross-references.
 
 <a id="short-answer"></a>
 ## 1. Short Answer
@@ -61,7 +61,7 @@ Everything below is written for a Gen3 / Grail tenant on its own terms. If you a
 - **Route on those tags.** Affected-entity tags are a first-class problem-trigger option, so a team's workflow filters on the ownership tag directly.
 - **Or carry `dt.owner` on the event and propagate it to the problem** via *Settings → Dynatrace Intelligence → Root cause analysis → **Problem fields***, then match it in the trigger.
 - **Look up contact details at run time** with the Ownership app's `get_owners` workflow action — it returns *"ownership team info with contact details for Slack/Teams/Email/JIRA."* One workflow can then route dynamically instead of one workflow per team.
-- **"Available" is not "populated."** The keys exist in every environment; that says nothing about whether a single entity carries an owner, whether team records exist, or whether contact details are filled in. Measure coverage before designing around it — on the tenant used to write this entry, the answer was zero.
+- **"Available" is not "populated."** The keys exist in every environment; that says nothing about whether a single entity carries an owner, whether team records exist, or whether contact details are filled in. Measure coverage before designing around it — on the validation tenant, 0 of 7 hosts carried `dt.owner` (09/28/2026; see § 5).
 
 > <sub>**Sources:**</sub>
 > - <sub>[Assign team ownership (DT docs)](https://docs.dynatrace.com/docs/deliver/ownership/assign-team-ownership) — *"Ownership assignment is based on tags. Tags are key-value pairs stored in Smartscape nodes"*; the `owner` / `dt.owner` default keys</sub>
@@ -165,13 +165,14 @@ Start from what the trigger exposes. A problem trigger is configured with:
 
 | Option | What it does |
 |---|---|
-| **Problem state** | Active only, or active and closed |
+| **Problem state** | Active (default), active or closed, or closed only |
 | **Event category** | Which Davis categories activate the workflow |
 | **Severity** | Filters by level threshold |
 | **Affected entities** | Tag-based — all entities, all defined tags, or any defined tag |
 | **Minimum duration** *(advanced)* | Postpone until the problem has been open a set duration — see [section 6](#right-time) |
 | **Updates** *(advanced)* | Re-trigger when selected fields change |
-| **Additional custom filter query** *(advanced)* | A DQL matcher over the problem record |
+| **Wait for root cause analysis** *(advanced)* | Start only after root cause analysis has completed for the problem — recommended, so routing fields are populated when the trigger evaluates |
+| **Additional custom filter query** *(advanced)* | A DQL matcher over the problem record; counts toward a 1,000-character limit across all trigger fields |
 
 There is no segment filter and no entity-selector filter. But there **is** a first-class concept of team ownership, and it plugs straight into the tag filter.
 
@@ -212,7 +213,7 @@ smartscapeNodes "HOST"
 | summarize hosts = count(), by:{has_owner = isNotNull(owner_tag)}
 ```
 
-Executed against a live tenant on 08/03/2026 this returned a **single row: `has_owner = false`, 8 hosts** — the keys were available and populated on nothing at all. That is the normal starting state, not an anomaly. Swap `"HOST"` for the entity types you intend to route on, and treat anything short of full coverage as scope for the enrichment work in [section 7](#three-ways-this-goes-wrong).
+Executed against the validation tenant on 09/28/2026 this returned a **single row: `has_owner = false`, 7 hosts** — 0 of 7 hosts carried `dt.owner`; the keys were available and populated on nothing at all. That is the normal starting state, not an anomaly. Swap `"HOST"` for the entity types you intend to route on, and treat anything short of full coverage as scope for the enrichment work in [section 7](#three-ways-this-goes-wrong).
 
 Ownership is still the right mechanism to reach for. It is simply not free, and the gap between "the platform supports this" and "our estate uses this" is where routing projects stall.
 
@@ -256,7 +257,7 @@ For anything ownership does not express, the additional custom filter query take
 > - <sub>[Ownership app (DT docs)](https://docs.dynatrace.com/docs/deliver/ownership/ownership-app) — `get_owners` and `import_teams`, and the contact-detail channels</sub>
 > - <sub>[Manage access to problem records (DT docs)](https://docs.dynatrace.com/docs/shortlink/dynatrace-intelligence-problems-use-cases#manage-the-access-to-problem-records) — record-permission fields are mapped onto problems automatically</sub>
 > - <sub>[Custom problem field examples (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/problems-app/problems-app-custom-problem-field-examples) — the `dt.owner` event property and the Problem fields mapping path</sub>
-> - <sub>[Problem and event triggers (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger/event-trigger)</sub>
+> - <sub>[Problem and event triggers (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger/event-trigger) — *"closed : Starts only when the problem closes."*; *"Wait for root cause analysis : When enabled, the trigger starts only after Dynatrace Intelligence has completed root cause analysis for the problem. Recommended: Enable this to avoid triggering on incomplete problem data."*; *"limited to 1,000 characters across all trigger fields"*</sub>
 > - <sub>[Alerting and notifications (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/alerting-and-notifications) — *"We recommend filtering based on the following attributes: Primary Grail fields, Security context, Custom attributes."*</sub>
 > - <sub>[DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline)</sub>
 > - <sub>**Derived:** the one-workflow-per-destination-versus-dynamic-lookup trade-off combines the trigger surface with the `get_owners` action; no single source frames it as a choice</sub>
@@ -296,7 +297,7 @@ For environments where SVG doesn't render
 
 It arrives greenfield as the question above and mid-migration as *"we moved to Segments, so our alerting profiles point at segments now."* Both survive because they are *almost* right — segments do scope anomaly detectors.
 
-But the documented problem-trigger options are problem state, event category, severity, affected entities, delay, updates, and the additional custom filter query. **There is no segment field among them.** Segments scope what a detector evaluates and what a query returns; they do not scope who gets notified.
+But the documented problem-trigger options are problem state, event category, severity, affected entities, minimum duration, updates, wait for root cause analysis, and the additional custom filter query. **There is no segment field among them.** Segments scope what a detector evaluates and what a query returns; they do not scope who gets notified.
 
 For a migrating estate the upgrade guide puts the filtering a management zone used to do into the trigger itself: *"A workflow's Problem trigger filters problems directly with DQL matchers on the problem."*
 
@@ -332,8 +333,8 @@ Sequenced, because the dependencies are real:
 
 1. **Enrich first.** Establish the tagging standard and confirm propagation before designing routing. Every dimension you intend to filter on must already exist as a tag or an attribute.
 2. **Decide the visibility model separately, and early.** If problems need access restriction, that is IAM work (**ORGNZ-06**, **IAM-05**) — settle it before workflows are built on top of it.
-3. **Route on the ownership tags first.** `owner` and `dt.owner` are default tag keys in every monitoring environment and affected-entity tags are a first-class trigger filter, so this needs no custom field and no DQL matcher (§ 1, § 9). Measure coverage before relying on it — *available* is not *populated*; on the validation tenant `dt.owner` resolved on 1 of 12 hosts (08/27/2026). **Only where ownership cannot be populated** for a given signal, standardize one custom attribute (e.g. `alert_group`), set it wherever those events are raised, and match it with a DQL matcher.
-4. **Build one workflow per destination.** Filter on affected-entity tags and severity where those suffice, and put anything finer in the additional custom filter query as a DQL matcher.
+3. **Route on the ownership tags first.** `owner` and `dt.owner` are default tag keys in every monitoring environment and affected-entity tags are a first-class trigger filter, so this needs no custom field and no DQL matcher (§ 1, § 9). Measure coverage before relying on it — *available* is not *populated*; on the validation tenant 0 of 7 hosts carried `dt.owner` (09/28/2026, § 5). **Only where ownership cannot be populated** for a given signal, standardize one custom attribute (e.g. `alert_group`), set it wherever those events are raised, and match it with a DQL matcher.
+4. **Build one workflow per destination.** Filter on affected-entity tags and severity where those suffice, and put anything finer in the additional custom filter query as a DQL matcher. Enable **Wait for root cause analysis** on the trigger, so the problem's routing fields are populated before the trigger evaluates them.
 5. **Set the Minimum duration option** where transient problems should not page, rather than filtering them out downstream — but verify it behaves as documented in your tenant first (see [section 6](#right-time)).
 6. **Pair every open-notification with a close-notification.**
 7. **Cut over on evidence.** Prove per-team volume parity across an agreed window before retiring whatever the workflows replace. **FAQ-17** covers the cutover discipline.

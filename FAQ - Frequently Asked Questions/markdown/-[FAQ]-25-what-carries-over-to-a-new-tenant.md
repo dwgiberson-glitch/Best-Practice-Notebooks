@@ -1,6 +1,6 @@
 # FAQ-25: What Actually Carries Over When We Migrate to a New Tenant?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 25 — What Carries Over to a New Tenant | **Created:** September 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 25 — What Carries Over to a New Tenant | **Created:** September 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -102,8 +102,8 @@ Configuration is the easy class, with one caveat: "moves" always means "moves **
 | Tool | Available for | Strength | Limit worth knowing |
 |---|---|---|---|
 | **SaaS Upgrade Assistant** | Managed → SaaS only | Purpose-built; rewrites entity IDs and dashboard ownership for you; per-row deploy results you can archive | Cannot resolve **name conflicts** — consolidating tenants with identically-named configurations needs Monaco instead |
-| **Monaco** | Any tenant pair | Handles consolidation and name conflicts; config-as-code | Does not cover Extensions 2.0 |
-| **Terraform** | Any tenant pair | Versioned, reviewable, good for the long term | Does not cover Extensions 2.0 |
+| **Monaco** | Any tenant pair | Handles consolidation and name conflicts; config-as-code | Extensions 2.0 coverage not verified for this FAQ — check the Monaco configuration-types page before relying on it |
+| **Terraform** | Any tenant pair | Versioned, reviewable, good for the long term | Covers Extensions 2.0 active version (`dynatrace_hub_extension_active_version`) and monitoring configurations (`dynatrace_hub_extension_v2_config`), but IDs of other resources referenced inside a configuration's `value` (credentials, for example) are not remapped for you |
 | **Configuration / Settings API** | Any tenant pair | Total control; the fallback when nothing else covers a type | You own the export/transform/import loop and the error handling |
 
 The Assistant is the default for a Managed → SaaS move. If you are consolidating several Managed tenants into one SaaS tenant, that is the case it cannot handle, and reaching for Monaco *after* the Assistant has produced a pile of name-conflict failures is a worse day than choosing it up front.
@@ -149,7 +149,7 @@ Two things to check before running it at scale. Rules whose conditions reference
 
 For anything beyond a one-off, prefer config-as-code over a bespoke script: the Terraform provider's [`dynatrace_request_naming`](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/request_naming) resource maps to this same endpoint, with [`dynatrace_request_namings`](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/request_namings) for ordering. Same effort, and the result is versioned rather than a migration-day artifact nobody can reproduce.
 
-> <sub>**Sources:** [Request naming API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/configuration-api/service-api/request-naming-api), [SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant) — *"imports your Dynatrace Managed environment configuration"*, [dynatrace_request_naming (Terraform Registry)](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/request_naming). **Derived:** the survives/does-not-survive table condenses M2S-06's repointing analysis; the rule-ordering caveat follows from naming rules being sequentially evaluated.</sub>
+> <sub>**Sources:** [Request naming API (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/configuration-api/service-api/request-naming-api), [SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant) — *"imports your Dynatrace Managed environment configuration"*, [dynatrace_request_naming (Terraform Registry)](https://registry.terraform.io/providers/dynatrace-oss/dynatrace/latest/docs/resources/request_naming), [hub_extension_v2_config (Terraform provider, dynatrace-oss GitHub)](https://raw.githubusercontent.com/dynatrace-oss/terraform-provider-dynatrace/main/docs/resources/hub_extension_v2_config.md) — *"manages monitoring configurations for Dynatrace Extensions 2.0"*; *"This type of cross-resource reference is **not automatically resolved or tracked** by this provider"*, [hub_extension_active_version (Terraform provider, dynatrace-oss GitHub)](https://raw.githubusercontent.com/dynatrace-oss/terraform-provider-dynatrace/main/docs/resources/hub_extension_active_version.md) — *"covers activating a specific version of an Extension"*. **Derived:** the survives/does-not-survive table condenses M2S-06's repointing analysis; the rule-ordering caveat follows from naming rules being sequentially evaluated.</sub>
 
 <a id="identity"></a>
 ## 4. Class 2 — Identity: Everything Gets a New ID
@@ -196,7 +196,7 @@ On the validation tenant this returned **28 mappings across 23 distinct classic 
 
 ### The bridge field, and the comparison that silently returns false
 
-Every Smartscape node carries **`id_classic`**, holding the classic `HOST-…` / `SERVICE-…` identifier. It is the natural thing to reconcile a migrated query against an unmigrated one — and the obvious way to use it does not work.
+Every Smartscape node that has a classic counterpart carries **`id_classic`**, holding the classic `HOST-…` / `SERVICE-…` identifier. Smartscape-native types have none: on the validation tenant (09/28/2026) `HOST` 7 of 7, `SERVICE` 35 of 35 and `K8S_POD` 1,667 of 1,667 carried it, while `ACTIVEGATE`, `ONEAGENT`, `K8S_DYNAKUBE` and cloud-resource types such as `AWS_EC2_INSTANCE` carried it on 0 nodes, and `PROCESS` on 210 of 215. On tenants before SaaS 1.348 some Kubernetes nodes were also missing it. Filter reconciliation queries with `isNotNull(id_classic)` so that nodes with no classic twin are not counted as unmatched. It is the natural thing to reconcile a migrated query against an unmigrated one — and the obvious way to use it does not work.
 
 `id` and `id_classic` are **different types**: `id` is a `smartscape_id`, `id_classic` is a `string`. Comparing them with `==` is always `false`, even when the two values print identically side by side. Grail never raises an error — at most it attaches an **INFO-severity notification**, and on a later re-run not even that — so a query runs, returns a full set of rows, and quietly answers the opposite of the question:
 
@@ -226,7 +226,7 @@ Reproduced on a second node type: `smartscapeNodes "SERVICE"` with `toString(id)
 
 The general rule this is an instance of: **in DQL, a comparison between two fields of different types is a false negative, not an error.** It belongs with the corpus's other silent-zero traps — an integer compared against a `duration`, or `==` against an array field.
 
-> <sub>**Dictionary:** `id` is typed `smartscape_id` and `id_classic` is typed `string` on `dt.smartscape.host` and `dt.smartscape.service`; read from the query result's own type metadata, 09/21/2026. **Sources:** behaviour reproduced against a live Dynatrace tenant 09/21/2026 — HOST (7 of 7 nodes) and SERVICE (23 of 23), with the `EQUALITY_COMPARISON_OF_INCOMPATIBLE_TYPES` notification quoted verbatim from the query response. Re-run 09/24/2026: same result (HOST 0 of 5 with `==`, 5 of 5 with `toString`; SERVICE 0 of 22 / 22 of 22), with an empty `notifications` array.</sub>
+> <sub>**Dictionary:** `id` is typed `smartscape_id` and `id_classic` is typed `string` on `dt.smartscape.host` and `dt.smartscape.service`; read from the query result's own type metadata, 09/21/2026. **Sources:** behaviour reproduced against a live Dynatrace tenant 09/21/2026 — HOST (7 of 7 nodes) and SERVICE (23 of 23), with the `EQUALITY_COMPARISON_OF_INCOMPATIBLE_TYPES` notification quoted verbatim from the query response. Re-run 09/24/2026: same result (HOST 0 of 5 with `==`, 5 of 5 with `toString`; SERVICE 0 of 22 / 22 of 22), with an empty `notifications` array. `id_classic` population by node type (`summarize countIf(isNotNull(id_classic)), by:{type}`) executed 09/28/2026. [SaaS 1.348 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"This field is now correctly written for all K8S_* entity types as part of the ongoing migration to OpenPipeline-based Smartscape ingest."*</sub>
 
 ### Can your estate even be reconciled by name?
 
@@ -311,7 +311,7 @@ These have no clock. They are simply absent in the new tenant until a human puts
 | **OAuth client secrets** | Same | Create new clients |
 | **Cloud integration credentials** | Tenant-scoped keys | New integration credentials per tenant |
 | **Private synthetic locations** | Bound to the source tenant's ActiveGates | Recreate against the target's ActiveGates |
-| **Extensions 2.0** | Covered by neither Monaco nor Terraform | Reinstall from the Hub |
+| **Extensions 2.0** | Monitoring configurations reference tenant-scoped IDs (credentials, ActiveGate groups) that do not exist in the target | Install and activate on the target — Terraform can manage the active version and the monitoring configuration (section 3) — then re-point every credential and ActiveGate-group reference by hand |
 | **Metric / log / trace history** | Stored in the source tenant's Grail | Keep the source tenant readable during the overlap |
 | **Problem history** | Same | Export the handful that matter as documentation |
 

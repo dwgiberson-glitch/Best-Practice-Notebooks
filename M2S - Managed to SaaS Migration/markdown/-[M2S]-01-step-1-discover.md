@@ -1,6 +1,6 @@
 # M2S-01: Step 1 — Discover: Understand SaaS Differences
 
-> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 1 of 9 | **Phase:** Plan | **Step:** Discover | **Created:** March 2026 | **Last Updated:** 07/30/2026
+> **Series:** M2S — Managed to SaaS Migration | **Notebook:** 1 of 9 | **Phase:** Plan | **Step:** Discover | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 The first step in any Managed-to-SaaS migration is understanding what you are moving to and why. This notebook helps you document the benefits of Dynatrace SaaS for your organization, take inventory of your current Managed environment, and confirm your use cases and goals for the upgrade.
 
@@ -217,9 +217,10 @@ smartscapeNodes "FRONTEND"
 ### Synthetic Test Inventory
 
 ```dql
-// Count synthetic monitors (browser monitors; add HTTP_MONITOR for a full synthetic inventory)
-smartscapeNodes "BROWSER_MONITOR"
-| summarize syntheticCount = count()
+// Count synthetic monitors by type (browser, HTTP, multi-protocol) — Step 9 repeats this count
+smartscapeNodes "BROWSER_MONITOR", "HTTP_MONITOR", "NETWORK_AVAILABILITY_MONITOR"
+| summarize syntheticCount = count(), by:{type}
+| sort type asc
 
 // Smartscape (preferred, verified 07/2026): dt.entity.synthetic_test maps to the BROWSER_MONITOR
 // node (individual steps are a separate BROWSER_MONITOR_STEP node). HTTP monitors are HTTP_MONITOR,
@@ -227,7 +228,7 @@ smartscapeNodes "BROWSER_MONITOR"
 // corrects an earlier note here that claimed no Smartscape equivalent existed. Unlike ActiveGate,
 // `fetch dt.entity.synthetic_test` does still work and remains a genuine fallback — it reads the
 // classic entity store, which can retain entities Smartscape (live topology) no longer lists.
-// Classic fallback: fetch dt.entity.synthetic_test | summarize syntheticCount = count()
+// Classic fallback (browser monitors only): fetch dt.entity.synthetic_test | summarize syntheticCount = count()
 ```
 
 ```dql
@@ -248,6 +249,10 @@ fetch dt.synthetic.events, from:-1h
 ### OneAgent Version Assessment
 
 Understanding your OneAgent version spread is important because SaaS supports a rolling 9-month (Standard) / 12-month (Enterprise) version window. Agents older than this window must be updated before or during migration.
+
+> **Breaking (SaaS 1.347 — staged tenant rollout from 09/08/2026; the release notes are still marked pre-release):** *"Starting with this release, Dynatrace rejects connections from OneAgent versions 1.241 and earlier."* Falling outside the support window stops fixes; being at or below 1.241 stops **data** once 1.347 reaches your tenant — an agent that old, redirected to SaaS, reports nothing. Managed estates are where agents this old survive, so find them with the query below and upgrade them on Managed **before** redirecting them in Step 5. Until 1.347 reaches your tenant, such agents still connect but are outside support, so the support-window check above remains the working rule. See FAQ-04 for managing OneAgent updates on SaaS.
+>
+> <sub>**Sources:** [What's new in Dynatrace SaaS 1.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-347) — *"Starting with this release, Dynatrace rejects connections from OneAgent versions 1.241 and earlier."*</sub>
 
 ```dql
 // OneAgent versions across hosts

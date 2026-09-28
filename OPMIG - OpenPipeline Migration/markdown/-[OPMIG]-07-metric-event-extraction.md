@@ -1,6 +1,6 @@
 # OPMIG-07: Metric & Event Extraction
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 7 of 10 | **Created:** December 2025 | **Last Updated:** 08/11/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 7 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ---
 
@@ -38,8 +38,8 @@ By completing this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
-| **Permissions** | `openpipeline.configurations.read`, `openpipeline.configurations.write`, `metrics.ingest` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
+| **Permissions** | `settings:read`, `settings:write` (OpenPipeline configuration), `metrics.ingest` |
 | **API Access** | `logs.read`, `logs.ingest`, `metrics.ingest` token scopes |
 | **Knowledge** | OPMIG-01 through OPMIG-06; understanding of processing/parsing concepts |
 
@@ -47,7 +47,9 @@ By completing this notebook, you will:
 
 ## Extraction Processors Overview
 
-> **Doc alignment (May 2026):** Per the official `/concepts/processing` documentation, **extraction is not a separate pipeline stage** — it is a category of processors that run *within* the Processing stage. Earlier versions of this notebook treated Extraction as the fourth stage between Processing and Storage; the corrected 4-stage model is `Ingest → Routing → Processing → Storage`, with the extraction processors below all executing inside Processing.
+> **Stage model:** Extraction runs in three dedicated stages after Bucket assignment — **Metric extraction**, **Davis** and **Data extraction** (business events, SDLC events). Smartscape node and edge extraction are their own stages too, straight after Processing. The stage sequence is fixed; OPMIG-02 § *Understanding Processing Order* has the full table.
+>
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"The sequence of stages is fixed for all pipelines and cannot be modified."*</sub>
 
 The extraction processors generate derived signals (metrics, events, business events, Smartscape topology) from records before they reach Storage:
 
@@ -91,7 +93,7 @@ Metric Type: Value
 Key: log.payment.amount
 Value: amount
 Dimensions: service.name, environment, status
-Matching: contains(content, "payment") AND isNotNull(amount)
+Matching: matchesPhrase(content, "payment") AND isNotNull(amount)
 ```
 
 ### Counter Metrics
@@ -239,7 +241,7 @@ Authentication failure for user {user_id} from IP {client_ip}
 Event Name: payment.failure
 Event Description: Payment failed for order {order_id}: {error_message}
 Event Type: ERROR
-Matching: contains(content, "payment") AND contains(content, "failed")
+Matching: matchesPhrase(content, "payment") AND matchesPhrase(content, "failed")
 ```
 
 ### Attribution — what the extracted event attaches to
@@ -299,7 +301,7 @@ Data Fields:
   - total_amount
   - currency
   - timestamp
-Matching: contains(content, "order placed successfully")
+Matching: matchesPhrase(content, "order placed successfully")
 ```
 
 ### Querying Business Events
@@ -370,7 +372,7 @@ Matching conditions determine which records trigger extraction.
 |---------|-----------|
 | Error logs | `loglevel == "ERROR"` |
 | Specific service | `service.name == "payment-service"` |
-| Contains text | `contains(content, "failed")` |
+| Contains text | `matchesPhrase(content, "failed")` (whole token) or `matchesValue(content, "*failed*")` (any substring) — `contains()` is not enabled in matchers |
 | Has field | `isNotNull(order_id)` |
 | Numeric threshold | `duration_ms > 1000` |
 
@@ -385,7 +387,7 @@ status == "failed" OR status == "error"
 
 // Complex conditions
 (loglevel == "ERROR" OR loglevel == "WARN") 
-  AND contains(content, "payment") 
+  AND matchesPhrase(content, "payment") 
   AND isNotNull(amount)
 ```
 
@@ -442,7 +444,7 @@ Matching: isNotNull(path)
 Event Name: payment.transaction.failed
 Event Description: Transaction failed for order {order_id}: {error_reason}
 Event Type: ERROR
-Matching: loglevel == "ERROR" AND contains(content, "Transaction failed")
+Matching: loglevel == "ERROR" AND matchesPhrase(content, "Transaction failed")
 ```
 
 ### Example 3: Login Business Events
@@ -457,7 +459,7 @@ Matching: loglevel == "ERROR" AND contains(content, "Transaction failed")
 Event Type: com.example.auth.login
 Event Provider: auth-service
 Data Fields: user_id, client_ip, timestamp
-Matching: contains(content, "login successful")
+Matching: matchesPhrase(content, "login successful")
 ```
 
 ### Example 4: Combined Extraction
@@ -475,12 +477,7 @@ From a single payment log line, extract:
 ## Validating Extractions
 After configuring extractions, verify they're working.
 
-```dql
-// List log-extracted metrics
-// Note: Use the Dynatrace UI (Observe > Metrics) to browse metrics
-// Or use timeseries to query a specific metric:
-// timeseries avg_value = avg(log.your_metric_name), from: now() - 24h
-```
+**List log-extracted metrics:** browse them in the Dynatrace UI (**Observe > Metrics**), or query a specific metric with `timeseries avg_value = avg(log.your_metric_name), from: now() - 24h`.
 
 ```dql
 // Query a specific extracted metric
@@ -591,7 +588,7 @@ Option 1: Store logs (35 days)
   - 35M log records × 500 bytes = 17.5 GB
   - Cost: ~$140/month
 
-Option 2: Extract metrics + drop logs
+Option 2: Extract metrics + No storage assignment for the logs
   - 10 time series, 10 years retention = ~10 MB
   - Cost: ~$1/month
   - Savings: 99.3% 🎉
@@ -640,11 +637,15 @@ Option 2: Extract metrics + drop logs
 
 ### Cost Optimization Pattern
 
-**Extract → Drop → Save**
+**Extract → Don't store → Save**
 
 1. Extract metrics and events from verbose logs
-2. Drop the original verbose logs
+2. Assign the original verbose logs **No storage assignment** (Bucket assignment stage) — the record still runs through the extraction stages but is not stored
 3. Keep only derived signals
+
+Do not use a **Drop record** processor for step 2: it runs in the Processing stage, before any extraction stage, so nothing would be extracted.
+
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — Drop record: *"Drops a record. The record isn't processed further and isn't stored."*; No storage assignment: *"The record continues through all configured pipeline stages and isn't stored only at the end of the pipeline."*</sub>
 
 This pattern reduces storage while preserving observability.
 
@@ -724,10 +725,6 @@ Now that you can extract metrics and events, continue with:
 - [Extract metrics from spans and distributed traces (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/tutorial-extract-metrics-from-spans)
 - [OpenPipeline use cases (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases)
 - [Dynatrace Intelligence Events](https://docs.dynatrace.com/docs/dynatrace-intelligence/root-cause-analysis/event-analysis-and-correlation)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

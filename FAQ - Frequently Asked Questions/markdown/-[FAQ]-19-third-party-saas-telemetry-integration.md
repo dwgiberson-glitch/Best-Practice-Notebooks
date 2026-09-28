@@ -1,6 +1,6 @@
 # FAQ-19: How Do I Bring a Third-Party SaaS Platform's Telemetry Into Dynatrace?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 19 — Integrating Third-Party SaaS Telemetry | **Created:** July 2026 | **Last Updated:** 08/31/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 19 — Integrating Third-Party SaaS Telemetry | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -143,48 +143,51 @@ OpenPipeline supports this directly — but **the processor you choose, and the 
 
 ### 4.1 The stage order, and the trap inside it
 
-Log records traverse OpenPipeline stages in a fixed order:
+Records traverse OpenPipeline stages in a fixed order — the one the docs list as *"ordered in the pipeline sequence of execution"*:
 
 | # | Stage | What you would use it for here |
 |---|---|---|
 | 1 | **Processing** | Parse, mask, hash, rename fields — and, if you choose, **Drop record** |
-| 2 | **Metric extraction** | Turn the record into a durable metric |
-| 3 | **Smartscape node extraction** | Calculate a Smartscape ID; optionally create/update the node (§ 5) |
-| 4 | **Smartscape edge extraction** | Record dynamic edges between nodes (§ 5) |
-| 5 | **Data extraction** | Emit business events or Davis events |
-| 6 | **Cost allocation** | Attribute consumption |
-| 7 | **Product allocation** | Attribute to a product |
-| 8 | **Permissions** | Set record-level permissions |
-| 9 | **Storage** | Assign a bucket — or **No storage assignment** |
+| 2 | **Smartscape node** | Calculate a Smartscape ID; optionally create/update the node (§ 5) |
+| 3 | **Smartscape edge** | Record dynamic edges between nodes (§ 5) |
+| 4 | **Permission** | Set record-level security context |
+| 5 | **Product allocation** | Attribute consumption to a product |
+| 6 | **Cost allocation** | Attribute consumption to a cost center |
+| 7 | **Bucket assignment** | Assign a bucket — or **No storage assignment** |
+| 8 | **Metric extraction** | Turn the record into a durable metric |
+| 9 | **Davis** | Emit Davis events |
+| 10 | **Data extraction** | Emit business events or SDLC events |
 
 Two processors both stop a record being retained, and they are **not** interchangeable:
 
-| Processor | Stage | Effect |
+| Processor | Stage | Effect (docs, verbatim) |
 |---|---|---|
-| **Drop record** | Processing (1) | "Drops a record. The record is not retained." |
-| **No storage assignment** | Storage (9) | "Skips storage assignment. The record is not retained." |
+| **Drop record** | Processing (1) | *"Drops a record. The record isn't processed further and isn't stored."* |
+| **No storage assignment** | Bucket assignment (7) | *"Doesn't store the record after processing. The record continues through all configured pipeline stages and isn't stored only at the end of the pipeline."* |
 
-**The trap:** *Drop record* sits in stage 1 — **before** metric extraction, Smartscape extraction, and data extraction. Use it for "extract then drop" and you drop the record before anything has been extracted from it. The pipeline reports healthy, the storage bill falls exactly as predicted, and the metrics you built the integration for never appear.
+**The trap:** *Drop record* sits in stage 1 — **before** Smartscape extraction, metric extraction, Davis and data extraction. Use it for "extract then drop" and you drop the record before anything has been extracted from it. The pipeline reports healthy, the storage bill falls exactly as predicted, and the metrics you built the integration for never appear.
+
+Note that metric extraction runs **after** bucket assignment. That ordering is safe only because *No storage assignment* does not end the record's journey — it marks the record as not-to-be-stored and lets it continue through every remaining stage.
 
 ![Drop record versus No storage assignment across the OpenPipeline stages](images/19-openpipeline-discard-stages_930x500.png)
 
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Processor | Stage | Effect | Correct use |
 |---|---|---|---|
-| Drop record | 1 — Processing | Record is gone before stages 2–5 run: no metric, no topology, no event. Pipeline still reports healthy and the storage bill falls as predicted | Records you want gone entirely |
-| No storage assignment | 9 — Storage | Record runs the full pipeline then is not persisted: metric yes, topology yes, event yes, storage no | The extract-then-discard pattern |
-Stage order: 1 Processing, 2 Metric extraction, 3-4 Smartscape node + edge, 5 Data extraction, 6-8 allocation and permissions, 9 Storage.
+| Drop record | 1 — Processing | Record is gone before stages 2–10 run: no topology, no metric, no event. Pipeline still reports healthy and the storage bill falls as predicted | Records you want gone entirely |
+| No storage assignment | 7 — Bucket assignment | Record continues through every remaining stage and is not stored at the end: topology yes, metric yes, event yes, storage no | The extract-then-discard pattern |
+Stage order: 1 Processing, 2-3 Smartscape node + edge, 4 Permission, 5-6 Product + cost allocation, 7 Bucket assignment, 8 Metric extraction, 9 Davis, 10 Data extraction.
 For environments where SVG doesn't render
 -->
 
-**Use `No storage assignment` in the Storage stage** for the extract-then-discard pattern. The record runs the full gauntlet — parsed, metricized, topology-tagged, event-emitting — and is then simply not persisted. Reserve `Drop record` for records you want *gone*: health-check noise, a chatty debug category, a feed you enabled by mistake.
+**Use `No storage assignment` in the Bucket assignment stage** for the extract-then-discard pattern. The record runs the full gauntlet — parsed, metricized, topology-tagged, event-emitting — and is then simply not persisted. Reserve `Drop record` for records you want *gone*: health-check noise, a chatty debug category, a feed you enabled by mistake.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — stage order and both processor definitions quoted above</sub>
-> - <sub>[Configure data storage and retention for logs (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-bucket-assignment) — "skip the storage of logs that match the route and pipeline conditions"; useful "when you parse log lines and extract metrics, and access to original records is not needed"</sub>
+> - <sub>[Configure data storage and retention for logs (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-bucket-assignment) — *"the record continues through all configured pipeline stages and is not stored only at the end of the pipeline. This means you can extract metrics and generate alerts from records that you won't store."*</sub>
 > - <sub>[Extraction stages in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/extraction)</sub>
 > - <sub>[Parse log lines and extract a metric (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/use-cases/tutorial-log-processing-pipeline) — worked extract-then-discard example</sub>
-> - <sub>**Derived:** the failure mode itself — that `Drop record` in stage 1 pre-empts the stage 2–5 extractors — follows from the documented stage order rather than from an explicit warning in the docs; validate on a narrow route before applying it broadly</sub>
+> - <sub>**Derived:** that `Drop record` in stage 1 pre-empts the extractors follows from its definition and the documented stage order; validate on a narrow route before applying it broadly</sub>
 
 ### 4.2 Decide what is worth keeping, by class
 
@@ -401,7 +404,7 @@ A defensible sequence. The ordering is deliberate — each step's output is the 
 
 | # | Gotcha | What to do |
 |---|---|---|
-| 1 | **`Drop record` used for extract-then-discard.** It sits in the Processing stage, ahead of every extractor — the record is gone before a metric is made from it | Use **No storage assignment** in the Storage stage. `Drop record` is for records you want gone entirely (§ 4.1) |
+| 1 | **`Drop record` used for extract-then-discard.** It sits in the Processing stage, ahead of every extractor — the record is gone before a metric is made from it | Use **No storage assignment** in the Bucket assignment stage. `Drop record` is for records you want gone entirely (§ 4.1) |
 | 2 | **Assuming every feed can go direct.** A vendor commonly uses HTTPS for one product line and raw TCP for another; only the first can reach the ingest API unaided | Route per feed, from the transport (§ 3) |
 | 3 | **Extraction is forward-only.** A metric added in month four has no history in months one through three | Extract the dimensions you might want from the start (§ 4.2) |
 | 4 | **Dynamic edges silently produce nothing** when both Smartscape IDs are not already on the record | Calculate both IDs with node processors in the node stage first, even where you do not want them to create nodes (§ 5.1) |

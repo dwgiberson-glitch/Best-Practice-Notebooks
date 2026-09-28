@@ -1,6 +1,6 @@
 # WEBRUM-08: Dashboards and Alerting
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 8 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 8 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -115,7 +115,8 @@ The threshold T is configurable per application. Common defaults:
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "page_summary"
+//   action.type == "Load"              -> characteristics.has_page_summary == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -128,7 +129,7 @@ The threshold T is configurable per application. Common defaults:
 // lcp.*'s 327,099 — it is not a different RUM generation, just a rarely-populated sibling.
 // Apdex calculation with T = 3 seconds for page loads
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_sec = duration / 1s
 | summarize total = count(),
     satisfied = countIf(duration_sec <= 3),
@@ -142,7 +143,7 @@ fetch user.events, from:-24h
 ```dql
 // Apdex trend over 7 days — daily Apdex score
 fetch user.events, from:-7d
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_sec = duration / 1s
 | fieldsAdd is_satisfied = if(duration_sec <= 3, 1.0, else: 0.0),
     is_tolerating = if(duration_sec > 3 and duration_sec <= 12, 0.5, else: 0.0)
@@ -156,7 +157,7 @@ fetch user.events, from:-7d
 ```dql
 // Apdex by page — which pages have the worst user satisfaction?
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_sec = duration / 1s
 | summarize total = count(),
     satisfied = countIf(duration_sec <= 3),
@@ -192,9 +193,13 @@ Operations teams need real-time visibility into errors, performance anomalies, a
 //   user_action.type == "RouteChange" -> "same_view"  (the New RUM SPA route-change value; the
 //                              only other value is "hard_navigation". "Custom" has NO equivalent.)
 //   connection.type         -> network.protocol.name
-// CLASSIFIER MATTERS AS MUCH AS THE FIELD: navigation-timing fields (performance.dom_interactive,
-// performance.load_event_end) live on classifier "navigation" and are 0 on "page_summary", so a
-// page_summary filter silently empties them. ttfb.* is the opposite — it lives on page_summary.
+// THE EVENT CHARACTERISTIC MATTERS AS MUCH AS THE FIELD: navigation-timing fields
+// (performance.dom_interactive, performance.load_event_end) live on navigation events
+// (characteristics.has_navigation) and are unpopulated on page summaries
+// (characteristics.has_page_summary), so a page-summary filter silently empties them.
+// ttfb.* is the opposite — it lives on page summaries. Select with the stable has_* flags, not
+// characteristics.classifier (corrected 09/28/2026): the docs call classifier "not intended for
+// query usage" and Semantic Dictionary 1.349 removes it from the user-event models.
 // Real-time error rate — errors per 15 minutes over the last 6 hours
 fetch user.events, from:-6h
 | filter characteristics.has_error == true
@@ -215,7 +220,7 @@ fetch user.events, from:-1h
 ```dql
 // Performance SLA — percentage of page loads under 3 seconds
 fetch user.events, from:-1h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_sec = duration / 1s
 | summarize total = count(),
     under_3s = countIf(duration_sec <= 3),
@@ -296,7 +301,7 @@ Detect when page load performance degrades beyond acceptable thresholds.
 ```dql
 // p75 page load duration per 15-minute window — performance alert data
 fetch user.events, from:-6h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_ms = duration / 1ms
 | makeTimeseries p75_duration = percentile(duration_ms, 75), interval:15m, by:{primary_tags.application}
 ```
@@ -304,7 +309,7 @@ fetch user.events, from:-6h
 ```dql
 // Apdex per 15-minute window — satisfaction alert data
 fetch user.events, from:-6h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | fieldsAdd duration_sec = duration / 1s
 | fieldsAdd apdex_score = if(duration_sec <= 3, 1.0,
     else: if(duration_sec <= 12, 0.5,
@@ -386,6 +391,8 @@ In this notebook, we covered:
 - [Apdex Standard](https://www.apdex.org/)
 - [Dynatrace RUM Dashboards](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/analyze-and-use)
 - [Metric Events for Alerting](https://docs.dynatrace.com/docs/dynatrace-intelligence/anomaly-detection/metric-events)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

@@ -1,6 +1,6 @@
 # BIZEV-99: Best Practice Summary
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 07/15/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 99 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -52,13 +52,13 @@ This notebook consolidates every actionable best practice from the BIZEV series 
 
 | # | Best Practice | Recommended Setting/Value | Priority | Category |
 |---|---------------|-----------------|----------|----------|
-| 9 | Start with OneAgent auto-capture for web apps | Configure capture rules in **Settings > Business Analytics > OneAgent > Capture rules** | Critical | Ingestion |
+| 9 | Start with OneAgent auto-capture for web apps | Configure capture rules in **Settings > Collect and Capture > Business events** | Critical | Ingestion |
 | 10 | Use CloudEvents format for API ingestion | `Content-Type: application/cloudevents+json` with `specversion`, `type`, `source`, `data` fields | Critical | Ingestion |
 | 11 | Use batch ingestion for high-volume scenarios | `Content-Type: application/cloudevents-batch+json` — send arrays of events in a single POST | Recommended | Ingestion |
 | 12 | Implement retry logic with exponential backoff | Required when sustained throughput exceeds 1,000 events/second | Recommended | Ingestion |
-| 13 | Use the SDK for code-level instrumentation | `sendBizEvent()` in Java, JavaScript, Python — provides automatic PurePath/trace correlation | Recommended | Ingestion |
-| 14 | Use OpenPipeline for span-to-bizevent mapping | Route span data to `bizevents` via processing rules instead of double-instrumenting | Recommended | Ingestion |
-| 15 | Never double-instrument | If spans already carry business data, use OpenPipeline routing — do not add SDK calls on top | Critical | Ingestion |
+| 13 | Use the RUM and mobile APIs for client-side capture | `dynatrace.sendBizEvent(type, fields)` (RUM JavaScript API) or the mobile agents' equivalent; backend code without a capture rule uses the ingest API — there is no OneAgent SDK method for business events | Recommended | Ingestion |
+| 14 | Use OpenPipeline for span-to-bizevent mapping | A **Business event** processor in the OpenPipeline **Data extraction** stage emits a new bizevent per matching span — no second instrumentation | Recommended | Ingestion |
+| 15 | Never double-instrument | If spans already carry business data, extract it with a Business event processor (Data extraction stage) — do not add a second telemetry call in code | Critical | Ingestion |
 | 16 | Verify ingestion health with a 15-minute interval timeseries | Run `makeTimeseries event_count = count(), interval:15m` daily to detect ingestion gaps | Recommended | Monitoring |
 | 17 | Validate required field completeness after instrumentation | Query `countIf(isNotNull(event.type))` / `total` to confirm >99% field population | Critical | Monitoring |
 
@@ -122,7 +122,7 @@ This notebook consolidates every actionable best practice from the BIZEV series 
 | 48 | Track these five core KPIs at minimum | Transaction Volume (`count()`), AOV (`avg(amount)`), Conversion Rate, Error Rate, Revenue per Hour (`sum(amount)` per hour) | Critical | KPI Design |
 | 49 | Distinguish business error rates from HTTP error rates | A payment can fail (business error) with HTTP 200 — use `event.type` to identify business failures, not HTTP status | Critical | KPI Design |
 | 50 | Require minimum sample size before calculating error rates | `filter total > 10` before computing error percentages to avoid misleading rates | Recommended | Data Quality |
-| 51 | Extract critical KPIs as Dynatrace metrics via OpenPipeline | Use `metric_extraction` processing rules for order counts and revenue gauges | Critical | Metric Extraction |
+| 51 | Extract critical KPIs as Dynatrace metrics via OpenPipeline | Counter metric / Value metric processors in the OpenPipeline **Metric extraction** stage for order counts and revenue values | Critical | Metric Extraction |
 | 52 | Set metric dimensions to low-cardinality fields only | Dimensions: `event.provider`, `product_category` — never `order_id` or `user_id` | Critical | Metric Extraction |
 | 53 | Use extracted metrics for alerting and SLOs | Extracted metrics enable native Dynatrace Intelligence alerting and SLO definitions — DQL on bizevents does not | Critical | Alerting |
 | 54 | Build a composite business health score | Weight: Transaction Volume 30%, Error Rate 30%, AOV 20%, Conversion Rate 20% — thresholds: Green/Yellow/Red | Recommended | Health Scoring |
@@ -176,7 +176,7 @@ This notebook consolidates every actionable best practice from the BIZEV series 
 | 80 | Define a Business Availability SLO | Target: 99.9% — Formula: hours with at least 1 business event / total hours * 100 | Critical | SLO |
 | 81 | Define an MTTR SLO | Target: < 2 hours — Formula: `avg(resolved_problem_duration)` in hours, excluding duplicates and frequent events | Recommended | SLO |
 | 82 | Define a Revenue Impact per Incident SLO | Target: < $5,000 — Formula: baseline revenue minus incident-period revenue | Recommended | SLO |
-| 83 | Calculate weekly SLA availability from problem duration | `(40 - total_downtime_hours) / 40 * 100` using 8h x 5d = 40 business hours/week | Recommended | SLA |
+| 83 | Do not derive SLA availability from summed problem durations | Problems overlap, so summed durations are entity-hours of impact, not downtime — they can exceed the period many times over (BIZEV-04 §6). Define availability as an SLO on good ÷ total events (SLO-02/03) | Critical | SLA |
 | 84 | Include SLO status indicator in every report | `if(success_rate >= 99.5, then: "MET", else: "MISSED")` | Critical | Reporting |
 | 85 | Track MTTR with `avg`, `median`, and `p95` | Report all three — avg shows the mean, median shows the typical case, p95 shows worst cases | Recommended | Metrics |
 
@@ -190,8 +190,8 @@ Practices from BIZEV-07 for environments that have not (fully) moved to the Gen3
 | 86 | Confirm the platform generation before designing business analytics | Dynatrace Managed = no business events in any form (classic toolchain only); SaaS with Grail = adopt business events, regardless of how classic the day-to-day operation is | Critical | Adoption |
 | 87 | On Grail-enabled SaaS tenants, build new business analytics on business events, not classic mechanisms | Calculated service metrics are closed to new customers and superseded by OpenPipeline metric extraction — new classic investment is migration debt | Critical | Adoption |
 | 88 | Use the minimal Gen3 footprint for hybrid adoption | Capture via Settings (OneAgent rules — Full-Stack mode required), report in Notebooks + the new Dashboards app, grant `storage:bizevents:read` — nothing else has to move | Recommended | Adoption |
-| 89 | Bridge business KPIs to classic dashboards with metric extraction | `bizevents.`-prefixed extracted metrics are readable in Data Explorer, classic dashboards, and classic metric-event alerting | Recommended | Adoption |
-| 90 | Create metric-extraction rules at capture time, not reporting time | Extraction is forward-only — no backfill; late-timestamped events land in a `.failed`-suffixed key | Critical | Adoption |
+| 89 | Bridge business KPIs to classic dashboards with metric extraction | `bizevents.`-prefixed extracted metrics are readable in Data Explorer, classic dashboards, and classic metric-event alerting (classic pipeline: not available to accounts created from September 2026 and to be deactivated in a future release — build new extraction in OpenPipeline) | Recommended | Adoption |
+| 90 | Create metric-extraction rules at capture time, not reporting time | Extraction is forward-only — no backfill; with classic-pipeline extraction, late-timestamped events land in a `.failed`-suffixed key | Critical | Adoption |
 | 91 | Capture must-not-miss events server-side, not (only) via RUM | `sendBizEvent` is dropped for unmonitored sessions (cost and traffic controls) — orders and payments belong on OneAgent capture rules or the ingest API | Critical | Adoption |
 | 92 | On Managed, apply reverse-domain naming to classic artifacts | Name request attributes, session properties, and log metrics in `com.<company>.<domain>.<action>` style so the eventual migration is a mapping exercise | Recommended | Adoption |
 | 93 | Size business events against your actual license model before rollout | Classic DDU: 100 DDUs/GB ingest, 0.30 DDUs/GB-day retain, 1.70 DDUs/GB query, 200,000 DDUs/year free tier; DPS: Events powered by Grail capability | Recommended | Adoption |

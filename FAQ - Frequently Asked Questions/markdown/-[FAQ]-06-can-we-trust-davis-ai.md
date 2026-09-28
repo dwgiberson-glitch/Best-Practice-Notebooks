@@ -1,6 +1,6 @@
 # FAQ-06: Can We Trust Davis AI? A Risk and Controls Walkthrough
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 06 — Can We Trust Davis AI? A Risk and Controls Walkthrough | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 06 — Can We Trust Davis AI? A Risk and Controls Walkthrough | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -185,15 +185,15 @@ The fourth concern in most security reviews: *can the AI take destructive action
 |---------|-------------------|
 | Causal AI | Detect a problem, open a problem card, attribute root cause within tenant topology |
 | Predictive AI | Emit a forecast, raise an anomaly event, populate a baseline |
-| Generative AI (read-mode) | Answer a question; generate a DQL query for the user to review |
+| Generative AI (Dynatrace Assist) | Answer a question; generate a DQL query — and run it: the documentation says Assist *is capable of auto-executing generated DQL queries*. DQL reads data; it runs with the asking user's permissions |
+| Agentic root cause analysis (SaaS 1.348 — pre-release, staged tenant rollout planned from 09/22/2026) | When a problem is detected, investigate contributing factors across metrics, logs, and traces and surface findings on the problem. Verify it has reached your tenant; until then, Causal AI's root-cause attribution above is the unattended surface |
 
-None of these write to your infrastructure. They produce findings and suggestions inside the Dynatrace tenant.
+None of these write to your infrastructure or change tenant configuration. They read data and produce findings and suggestions inside the Dynatrace tenant — so the review question for Generative AI is *what data can the asking user read*, not *whether a human clicks Run*.
 
 ### What requires human-in-the-loop
 
 | Action | Why it requires HITL |
 |--------|----------------------|
-| Executing a generated DQL query | The operator runs it explicitly — the model does not auto-execute. |
 | Acting on a Workflow remediation action | Workflows are configured deliberately; the AI may *suggest* a workflow, but execution is governed by the workflow's own access scoping and trigger rules. |
 | Modifying tenant configuration (settings, IAM policies, alerting rules) | These are explicit operator actions through configured pathways. CoPilot may help author the change; the change is applied through the same audit and IAM path as any other config change. |
 | Triggering external systems (ticketing, paging, ChatOps) | Handled by Workflows with their own credentials, scopes, and policies. |
@@ -204,7 +204,7 @@ The platform's autonomy posture is: **AI surfaces produce findings and suggestio
 
 In community practice, the agentic-workflow conversation often comes up here: *can Davis act autonomously through Workflows?* The honest answer is *yes, if the customer configures it that way, and within the scopes the customer grants*. Davis CoPilot suggesting a workflow that, when executed, takes an automatic remediation is the same as any other workflow in the platform — governed by the workflow's own credentials, IAM scope, and configured triggers. The autonomy lives in the *customer's workflow configuration*, not in the AI.
 
-> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the "AI proposes, humans/workflows dispose" framing is community / engagement guidance — the underlying mechanics are documented; the explicit autonomy boundary is the synthesis.</sub>
+> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai) — *"is capable of auto-executing generated DQL queries."*, [SaaS 1.348 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"Dynatrace Intelligence can now run agentic workflows for problem root cause analysis."* (pre-release, read 09/28/2026), [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows). **Derived:** the "AI proposes, humans/workflows dispose" framing is community / engagement guidance — the underlying mechanics are documented; the explicit autonomy boundary is the synthesis.</sub>
 
 <a id="audit"></a>
 ## 7. Audit Trail and Explainability
@@ -223,10 +223,19 @@ Forecasts and anomaly detections come with their confidence ranges and the data 
 
 CoPilot interactions are auditable in two complementary ways:
 
-1. **Platform-level audit events.** Significant CoPilot interactions surface as platform events that follow the same audit-logging path as other platform interactions (consistent with the platform's general audit posture).
+1. **Queryable GenAI events.** Generative AI interactions are recorded in `dt.system.events` as `GENAI_EVENT` records — skill invocations from Dynatrace Assist, and tool invocations through the Dynatrace MCP gateway — each carrying the user who made it. Reading them needs the `storage:system:read` permission:
+
+   ```dql
+   fetch dt.system.events, from:-30d
+   | filter event.kind == "GENAI_EVENT"
+   | summarize events = count(), users = countDistinct(user.id), with_prompt = countIf(isNotNull(user_input)), by:{event.provider, event.type}
+   | sort events desc
+   ```
+
+   On the validation tenant (09/28/2026, 30 days) this returned 179 `GenAI Skill Invocation` events from `DAVIS_COPILOT` — 177 of them carrying the prompt text verbatim in `user_input` — plus 363 `MCP Tool Invocation` and 188 `MCP Init` events from `MCP_GATEWAY`, which carry no prompt. **Prompts are stored as typed**, so anything a user pastes into a prompt is retained in these events: treat access to them as access to potentially sensitive data (§3).
 2. **Operator-visible context.** The grounding (which docs, which tenant entities) and the generated output are visible to the user who asked. There is no hidden "private" answer that differs from what was shown.
 
-For procurement reviews that ask "can we audit who asked Davis CoPilot what, and what answer it gave?" — the answer is yes, within the bounds of platform audit retention and the auditing surface Dynatrace provides. The exact retention windows and event schemas evolve sprint-to-sprint; verify against current docs at review time.
+For procurement reviews that ask "can we audit who asked Davis CoPilot what?" — the query above answers who asked and what they asked. Whether the *answer* is retained, and for how long these events are kept, is not settled by the event records themselves; verify against current docs at review time.
 
 ### What you can do with the audit trail
 
@@ -234,7 +243,7 @@ For procurement reviews that ask "can we audit who asked Davis CoPilot what, and
 - Detect over-use of CoPilot for sensitive prompts (data egress monitoring on the prompt side).
 - Demonstrate to a regulator that AI-assisted actions trace back to human operators who reviewed them.
 
-> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [Dynatrace audit log (DT docs)](https://docs.dynatrace.com/docs/manage/account-management/audit-logs). **Derived + Softened:** the exact audit-event schemas for CoPilot interactions evolve — community-level guidance is "treat CoPilot interactions as auditable platform events"; the precise event names and retention should be verified against current docs.</sub>
+> <sub>**Sources:** [Davis CoPilot (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai), [Dynatrace audit log (DT docs)](https://docs.dynatrace.com/docs/manage/account-management/audit-logs). **Dictionary:** `event.kind` (`stable`), `event.type` (`stable`), `user.id` (`stable`); no row for `user_input` under `filter in(name, {…})`, read 09/28/2026 (control: the same filter returned the three `stable` rows) — `user_input` was read from the event records themselves. The `GENAI_EVENT` query executed against a live tenant 09/28/2026.</sub>
 
 <a id="access-control"></a>
 ## 8. Access Control
@@ -366,7 +375,7 @@ No. Customer tenant data is not used to train the foundation models that back Da
 Hallucination applies to the Generative AI surface, not to Causal or Predictive AI. The mitigation is the same pattern that applies to any GenAI tool: read the output, verify, use as draft. The most-used outputs (DQL queries) are *verifiable by execution* — a feature most LLM products don't offer.
 
 **"The AI could take destructive action without us knowing."**
-Davis AI does not execute writes against your infrastructure. The only path to write-action is through Workflows that the customer configures and scopes with the customer's own credentials. The autonomy is configured, not implicit.
+Davis AI does not write to your infrastructure or configuration outside Workflows that the customer configures and scopes with the customer's own credentials. It does act unattended on the *read* side — Assist can run the DQL it generates, and agentic root cause analysis (SaaS 1.348, staged rollout) investigates problems on its own — always within the permissions of the user or the platform (§6). The write autonomy is configured, not implicit.
 
 **"We can't audit what the AI did."**
 Causal AI is explainable by construction (the causal chain is the explanation). Predictive AI is versioned with the platform and surfaces confidence. CoPilot interactions are auditable as platform events. The exact audit retention and schema should be verified against current docs.
@@ -378,12 +387,12 @@ Then the right move is to adopt the non-Generative surfaces (Causal, Predictive)
 The platform's inherited compliance covers most of these. EU AI Act applicability for the Generative surface is *Limited Risk* in the community-level read — verify with your legal team. SOC 2 / ISO 27001 / FedRAMP are inherited from the platform's existing certifications.
 
 **"We don't want AI features on, period."**
-The Causal AI and Predictive AI surfaces are core platform features and broadly always-on. The Generative AI surface (CoPilot) has a more explicit enablement and IAM model — you can choose not to grant the `davis-copilot:*` capability to any user, and the surface stays unused in your tenant.
+The Causal AI and Predictive AI surfaces are core platform features and broadly always-on. The Generative AI surface (CoPilot) has an explicit environment switch — **Settings → Dynatrace Intelligence → Generative and agentic AI → Enable generative AI** — which is on by default for tenants created from Dynatrace 1.335 onwards. Turn it off to opt out for the whole environment; independently, you can choose not to grant the `davis-copilot:*` capability to any user.
 
 **"AI Observability — does that mean Dynatrace AI is looking at our AI apps?"**
 No. AI Observability is *your team* observing *your own* GenAI apps using Dynatrace as the observability platform — same as you would use Dynatrace to observe any other application stack. No Dynatrace AI is operating on your customer-facing AI app outputs; it's standard OpenTelemetry-based instrumentation surfaced in Dynatrace.
 
-> <sub>**Sources:** All claims map back to the Sources blocks in §§3–10 above. **Softened** throughout — these are summary responses; the load-bearing verifications happen in the cited sections.</sub>
+> <sub>**Sources:** [Get started with agentic and generative AI (DT docs)](https://docs.dynatrace.com/docs/dynatrace-intelligence/agentic-and-generative-ai/agentic-and-generative-ai-getting-started) — *"You can see and change the setting in Settings > Dynatrace Intelligence > Generative and agentic AI > Enable generative AI if you'd like to opt out."* The other claims map back to the Sources blocks in §§3–10 above. **Softened** throughout — these are summary responses; the load-bearing verifications happen in the cited sections.</sub>
 
 <a id="evolving"></a>
 ## 13. What's Still Evolving
@@ -408,7 +417,7 @@ For a customer evaluating Davis AI risk posture, a workable plan:
 
 1. **Walk the four surfaces explicitly.** Causal, Predictive, Generative, AI Observability — don't let "AI" collapse into one decision. The risk profiles differ; the controls differ; the adoption decisions differ.
 2. **Adopt Causal AI and Predictive AI immediately.** They come with the platform, carry low incremental risk, and provide most of the platform's AI value.
-3. **Pilot CoPilot in read-mode first.** Q&A, DQL generation — the surfaces where the value is high and the risk is "wrong answer that a human reviews," not "destructive action."
+3. **Pilot CoPilot on read-only use first.** Q&A, DQL generation and execution — the surfaces where the value is high and the risk is "wrong answer, or a query that reads what the user was already allowed to read," not "destructive action."
 4. **Govern write-action workflows explicitly.** Where CoPilot suggests workflows that execute changes, treat each workflow as an explicit governance decision: which scopes, which approvals, which audit.
 5. **Adopt AI Observability for your own GenAI apps.** If your team is shipping LLM-backed applications, this surface *reduces* your AI risk by giving you cost/latency/quality/security visibility.
 6. **Verify version-specific claims at review time.** Trust Center language, IAM policy statement names, audit event schemas, EU AI Act applicability — all evolve sprint-to-sprint. Treat this FAQ as the orientation; verify the load-bearing claims against current docs and your contract before signing off.

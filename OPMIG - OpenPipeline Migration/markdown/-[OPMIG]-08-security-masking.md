@@ -1,6 +1,6 @@
 # OPMIG-08: Security, Masking & Compliance
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 8 of 10 | **Created:** December 2025 | **Last Updated:** 07/20/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 8 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ---
 
@@ -37,8 +37,8 @@ By completing this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and OpenPipeline access |
-| **Permissions** | `openpipeline.configurations.read` and `openpipeline.configurations.write` |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and OpenPipeline access — Managed is not covered by this series |
+| **Permissions** | `settings:read` and `settings:write` (OpenPipeline configuration) |
 | **API Access** | `logs.read` token scope |
 | **DPL Architect** | Access to `https://{env}.apps.dynatrace.com/ui/apps/dynatrace.dpl.architect` |
 | **Knowledge** | OPMIG-01 through OPMIG-07; understanding of compliance requirements (PCI, HIPAA, GDPR) |
@@ -47,7 +47,9 @@ By completing this notebook, you will:
 
 ## Security Stage Overview
 
-Masking executes **first** in the Processing stage, ensuring sensitive data is redacted before any other processing occurs.
+Place masking processors **first within the Processing stage**, before any processor that copies or parses the sensitive field. Masking is not automatic: a processor listed ahead of the masking processor sees the raw value.
+
+**Routing runs before any pipeline processor**, so routing matchers always see the raw value — keep PII out of routing conditions, or mask at capture (OneAgent-side masking) when the value must never reach Dynatrace.
 
 ![Masking Executes First](images/masking-order.png)
 
@@ -64,9 +66,11 @@ Masking executes **first** in the Processing stage, ensuring sensitive data is r
 | Order | Reason |
 |-------|--------|
 | **Before parsing** | Sensitive data never extracted to fields |
-| **Before routing** | Can't route based on unmasked PII |
+| **Not before routing** | Routing precedes every pipeline processor — keep PII out of routing conditions |
 | **Before storage** | Compliance-safe from the start |
 | **Before extraction** | Metrics/events don't contain PII |
+
+> <sub>**Sources:** [Data flow (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/data-flow) — *"After data is ingested (and optionally pre-processed), it's routed to pipelines."*; [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"The processor order in the stage; each processor output becomes the input for the next one."*</sub>
 
 ---
 
@@ -86,15 +90,18 @@ User email: john.doe@example.com, card: 4111-1111-1111-1111
 User email: [EMAIL_REDACTED], card: [CC_REDACTED]
 ```
 
-### Masking Processor Configuration
+### Masking with a DQL processor
+
+Masking is done with a **DQL** processor (`replacePattern`, or `fieldsRemove` for whole fields); there is no dedicated masking processor type. A masking processor is configured as:
 
 | Field | Description |
 |-------|-------------|
+| **Processor type** | DQL |
 | **Name** | Descriptive name for the mask |
-| **Matching Condition** | When to apply masking |
-| **Fields** | Which fields to mask (or all) |
-| **Pattern** | DPL pattern to match sensitive data |
-| **Replacement** | Text to replace matches with |
+| **Matching condition** | When to apply masking (`true` for all records) |
+| **Definition** | One `fieldsAdd <field> = replacePattern(<field>, "<DPL pattern>", replacement: "<text>")` per field to mask, joined with `\|` |
+
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"The following table lists alphabetically all available processors in a pipeline."* **Derived:** none of the processors in that table is a masking type; DQL is the one that runs `replacePattern`.</sub>
 
 ### Masking vs. Dropping
 
@@ -121,12 +128,11 @@ CREDITCARD
 - `4111-1111-1111-1111`
 - `4111 1111 1111 1111`
 
-**Masking Processor:**
-```
-Name: Mask Credit Cards
-Pattern: CREDITCARD:cc
-Replacement: [CC_REDACTED]
-Fields: content, message
+**Masking Processor (DQL):**
+```dql
+// Name: Mask Credit Cards · Matching condition: true
+fieldsAdd content = replacePattern(content, "CREDITCARD", replacement: "[CC_REDACTED]")
+| fieldsAdd message = replacePattern(message, "CREDITCARD", replacement: "[CC_REDACTED]")
 ```
 
 ### Email Addresses
@@ -145,12 +151,11 @@ Fields: content, message
 - `first.last@company.org`
 - `a-b_c%d+e@sub.domain.co.uk`
 
-**Masking Processor:**
-```
-Name: Mask Emails
-Pattern: [a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+
-Replacement: [EMAIL_REDACTED]
-Fields: content, message
+**Masking Processor (DQL):**
+```dql
+// Name: Mask Emails · Matching condition: true
+fieldsAdd content = replacePattern(content, "[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+", replacement: "[EMAIL_REDACTED]")
+| fieldsAdd message = replacePattern(message, "[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+", replacement: "[EMAIL_REDACTED]")
 ```
 
 > **Note:** the domain class includes `.`, so a sentence-final period is absorbed into the
@@ -166,12 +171,12 @@ IPV4ADDR
 IPV6ADDR
 ```
 
-**Masking Processor:**
-```
-Name: Mask IP Addresses
-Pattern: IPADDR:ip
-Replacement: [IP_REDACTED]
-Fields: content, client_ip, remote_addr
+**Masking Processor (DQL):**
+```dql
+// Name: Mask IP Addresses · Matching condition: true
+fieldsAdd content = replacePattern(content, "IPADDR", replacement: "[IP_REDACTED]")
+| fieldsAdd client_ip = replacePattern(client_ip, "IPADDR", replacement: "[IP_REDACTED]")
+| fieldsAdd remote_addr = replacePattern(remote_addr, "IPADDR", replacement: "[IP_REDACTED]")
 ```
 
 ### Phone Numbers (Custom Pattern)
@@ -455,7 +460,7 @@ Before deploying masking rules, test them:
 
 | Practice | Reason |
 |----------|--------|
-| Mask before routing | Routing rules shouldn't see PII |
+| Keep PII out of routing conditions | Routing runs before any pipeline processor, so routing matchers see the raw value |
 | Use descriptive placeholders | Aids troubleshooting |
 | Test patterns thoroughly | Avoid over/under masking |
 | Document masking rules | Compliance audits |
@@ -492,13 +497,10 @@ Before deploying masking rules, test them:
 ## Complete Security Pipeline Example
 ### Pipeline: `payment-logs-secure`
 
-**Masking Processor 1: Credit Cards**
-```
-Name: Mask Credit Cards
-Pattern: CREDITCARD
-Replacement: [CC_REDACTED]
-Fields: content, card_number
-Matching: (all records)
+**Masking Processor 1: Credit Cards** (DQL processor, matching condition `true`)
+```dql
+fieldsAdd content = replacePattern(content, "CREDITCARD", replacement: "[CC_REDACTED]")
+| fieldsAdd card_number = replacePattern(card_number, "CREDITCARD", replacement: "[CC_REDACTED]")
 ```
 
 **Masking Processor 2: CVV Codes**
@@ -506,22 +508,17 @@ Matching: (all records)
 fieldsAdd content = replacePattern(content, "('cvv='|'cvc=') [0-9]{3,4}", replacement: "cvv=[REDACTED]")
 ```
 
-**Masking Processor 3: Emails**
-```
-Name: Mask Emails
-Pattern: [a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+
-Replacement: [EMAIL_REDACTED]
-Fields: content, customer_email
-Matching: (all records)
+**Masking Processor 3: Emails** (DQL processor, matching condition `true`)
+```dql
+fieldsAdd content = replacePattern(content, "[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+", replacement: "[EMAIL_REDACTED]")
+| fieldsAdd customer_email = replacePattern(customer_email, "[a-zA-Z0-9._%+-]+ '@' [a-zA-Z0-9.-]+", replacement: "[EMAIL_REDACTED]")
 ```
 
-**Masking Processor 4: IP Addresses**
-```
-Name: Mask IPs
-Pattern: IPADDR
-Replacement: [IP_REDACTED]
-Fields: content, client_ip, remote_addr
-Matching: (all records)
+**Masking Processor 4: IP Addresses** (DQL processor, matching condition `true`)
+```dql
+fieldsAdd content = replacePattern(content, "IPADDR", replacement: "[IP_REDACTED]")
+| fieldsAdd client_ip = replacePattern(client_ip, "IPADDR", replacement: "[IP_REDACTED]")
+| fieldsAdd remote_addr = replacePattern(remote_addr, "IPADDR", replacement: "[IP_REDACTED]")
 ```
 
 **Masking Processor 5: Auth Tokens**
@@ -535,7 +532,8 @@ fieldsAdd content = replacePattern(content, "'Bearer ' NSPACE", replacement: "Be
 ```dql
 // Verify complete masking for payment-logs pipeline
 fetch logs, from: now() - 1h
-| filter dt.openpipeline.pipelines == "payment-logs-secure"
+// dt.openpipeline.pipelines is an array of "<scope>:<pipeline id>" strings, so == never matches
+| filter matchesValue(dt.openpipeline.pipelines, "*payment-logs-secure*")
 | summarize {
     total = count(),
     with_cc = countIf(contains(content, "[CC_REDACTED]")),
@@ -563,10 +561,6 @@ Now that security is configured, complete your migration:
 - [DPL replacePattern](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language)
 - [Data Privacy in Dynatrace](https://docs.dynatrace.com/docs/manage/data-privacy-and-security)
 - [Compliance Best Practices](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/data-privacy)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

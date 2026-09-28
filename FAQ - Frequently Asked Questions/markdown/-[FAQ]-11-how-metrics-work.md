@@ -1,6 +1,6 @@
 # FAQ-11: How Do Metrics Work in Dynatrace?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 11 — How Metrics Work in Dynatrace | **Created:** July 2026 | **Last Updated:** 09/18/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 11 — How Metrics Work in Dynatrace | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -400,7 +400,15 @@ The Metrics API v2 (`/api/v2/metrics/query`) and Data Explorer consume **metric 
 Query-size ceilings differ by an order of magnitude and change what is *feasible*: Classic caps a query at 20 million data points; Grail at **500 million** — high-cardinality, long-window analyses that Classic rejects are routine in Notebooks.
 
 
-> **Forthcoming/rolling out (SaaS 1.343, July 2026):** metric **metadata becomes queryable via DQL** — available metrics with their dimensions and descriptions can be listed directly from a query, extending the `metrics` discovery command described above. SaaS 1.343 released July 7, 2026 with a **staged tenant rollout** (from mid-July 2026) — verify the feature has reached your tenant before relying on it; the `metrics` discovery command described above remains the working surface until then. Useful for building self-documenting dashboards and for auditing which dimensions a metric actually carries before writing `by:{...}` clauses.
+> **Metric metadata via DQL (SaaS 1.343, staged rollout from 07/14/2026).** `load "/dt/platform/metrics.metadata"` returns one row per metric available in the environment — `metric.key`, `name`, `description`, `kind`, `unit`, `dimensions` — as a **separate surface** from the `metrics` command, not an extension of it. Useful for building self-documenting dashboards and for auditing which dimensions a metric actually carries before writing `by:{...}` clauses. On a tenant that has not yet taken 1.343, the `metrics` discovery command above remains the working surface.
+>
+> ```dql
+> load "/dt/platform/metrics.metadata"
+> | filter startsWith(metric.key, "dt.host.cpu")
+> | limit 2
+> ```
+>
+> *(Executed 09/28/2026: returned rows with `metric.key`, `name`, `description`, `kind`, `unit` and `dimensions`.)*
 
 > <sub>**Sources:**</sub>
 > - <sub>[Metric commands — timeseries, metrics (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language/commands/metric-commands)</sub>
@@ -409,6 +417,7 @@ Query-size ceilings differ by an order of magnitude and change what is *feasible
 > - <sub>[Metrics API v2 (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/metric-v2)</sub>
 > - <sub>[Metric selector conversion (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/preserve-metrics-and-service-visibility/metrics/metric-selector-conversion)</sub>
 > - <sub>[Metric limits (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics/limits) — 20M vs 500M query ceilings</sub>
+> - <sub>[SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343) — *"You can now query metric metadata via DQL with load"* (rollout from Jul 14, 2026)</sub>
 > - <sub>[Metrics powered by Grail capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics) — timeseries queries always included</sub>
 
 > **New in the classic Metrics API (Dynatrace API 1.346, released 08/25/2026): an `asHistogram` transformation.** The API changelog adds an `asHistogram` enum value to the `transformations` property on `GET /metrics` and `GET /metrics/{metricKey}` (Environment API v2), and to `metricsMetadata` on the Early-Access `POST /ua/entity` and `POST /ua/list`.
@@ -436,7 +445,7 @@ Scale intuition from the docs' own example: one series reporting every minute is
 ### 9.2 What's included / non-billable
 
 - *"The following metric keys are non-billable: `dt.*`"* — with documented exceptions (certain `dt.cloud.aws.*` / `dt.cloud.azure.*` and `dt.osservice.*` metrics, and `dt.service.*` when originating from non-Full-Stack sources). In short: the OneAgent/Dynatrace-produced catalog you get with host monitoring is generally free; *"some built-in metrics are not billed — this includes, for example, host monitoring metrics included in Full-Stack Monitoring and Infrastructure Monitoring."*
-- `legacy.*` metrics and everything in the `dt_system_metrics` bucket are non-billable.
+- Three `legacy.*` families — `legacy.containers.*`, `legacy.dotnet.perform.*` and `legacy.tomcat.*` — and everything in the `dt_system_metrics` bucket are non-billable.
 - Custom metrics draw first on an included allotment: *"the number of included Custom Metric data points is dependent on the total monitored GiB-hours of your deployment and the OneAgent mode."*
 - During a licensing transition there is no double-billing: *"only the consumption related to your active license applies, whether it's DDUs, DPS Custom Metrics Classic, or DPS Metrics powered by Grail."*
 
@@ -446,7 +455,7 @@ Retain's unit is *"the gibibyte-day (GiB-day)"* — storage volume, not data poi
 
 For querying your *own* tenant's metric consumption, FINOPS-01 documents the `dt.system.events` billing-event schema; FINOPS-02/03 cover forecasting and optimization levers.
 
-> <sub>**Sources:** [Metrics Ingest & Process capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics/dps-metrics-ingest) — data-point definition, counting rules, non-billable keys, included allotment, [Metrics Retain capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics/dps-metrics-retain) — GiB-day unit, 462 days included, worked example, [Metrics powered by Grail capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics) — capability structure, query always included.</sub>
+> <sub>**Sources:** [Metrics Ingest & Process capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics/dps-metrics-ingest) — data-point definition, counting rules, non-billable keys (the page lists `legacy.containers.*`, `legacy.dotnet.perform.*` and `legacy.tomcat.*`, and states *"Metrics stored in the bucket dt_system_metrics are non-billable."*), included allotment, [Metrics Retain capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics/dps-metrics-retain) — GiB-day unit, 462 days included, worked example, [Metrics powered by Grail capability (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/metrics) — capability structure, query always included.</sub>
 
 <a id="recommended-approach"></a>
 ## 10. Recommended Approach
@@ -478,7 +487,7 @@ For querying your *own* tenant's metric consumption, FINOPS-01 documents the `dt
 | Custom count metric key "changed" | Count-type metrics automatically get a `.count` suffix | Query the suffixed key |
 | New hosts/pods missing from an old custom metric, existing ones fine | Cardinality limit reached — new tuples rejected, existing series continue | Reduce dimensions; the limit evaluates a 30-day sliding window, so trimmed cardinality recovers on its own |
 | OTLP metric arrives without a unit | Instrument unit exceeded 63 characters and was dropped | Shorten the unit string |
-| Year-over-year Classic comparison looks "smoothed" | Classic downsampling: data older than 400 days is stored at 1-day resolution | Use Grail (`dt.*` via DQL) — 1-minute granularity over the entire retention window |
+| Year-over-year Classic comparison looks "smoothed" | Classic downsampling: data older than 28 days is stored at 1-hour resolution (1-day beyond 400 days) | Use Grail (`dt.*` via DQL) — 1-minute granularity over the entire retention window |
 | Extracted metric has no history before its creation date | Metric extraction is forward-only; records are not backfilled | Create extraction rules early; scan records for the historical portion |
 | Duplicate dimension key on one ingest line | Protocol accepts only one value per key | Deduplicate keys in the producer |
 

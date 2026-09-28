@@ -1,6 +1,6 @@
 # FAQ-16: How Do I Migrate Classic Entity Selectors to Smartscape?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 16 — Migrating Classic Entity Selectors to Smartscape | **Created:** July 2026 | **Last Updated:** 09/24/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 16 — Migrating Classic Entity Selectors to Smartscape | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -68,7 +68,7 @@ For environments where SVG doesn't render
 
 An entity subquery makes the engine resolve a topology lookup before it can filter the data. When the mass data already carries a dimension expressing the same condition, filtering on it directly skips that work entirely.
 
-```
+```dql
 // Situation 1 — classic: entity selector inline in the filter
 timeseries avg(dt.host.cpu.usage), from:-1h,
   filter: { in(dt.entity.host, classicEntitySelector("type(HOST),hostGroupName(prod-web)")) }
@@ -98,10 +98,6 @@ Two vocabularies, and they differ in case. **Field names are lowercase dotted; n
 | Classic field | Smartscape field | `smartscapeNodes` type |
 |---|---|---|
 | `dt.entity.host` | `dt.smartscape.host` | `"HOST"` |
-
-> **The transition is now underway in-product, starting with Cost Intelligence (SaaS 1.347 — staged rollout from 09/08/2026).** Verbatim: *"Dynatrace is transitioning customers from the Dynatrace Classic Monitored Entity (ME) model to the latest Dynatrace Smartscape IDs."* The release note names the same three mappings this table already carries — `dt.entity.host` → `dt.smartscape.host`, `dt.entity.kubernetes_cluster` → `dt.smartscape.k8s_cluster`, `dt.entity.cloud_application_namespace` → `dt.smartscape.k8s_namespace`.
->
-> Two things this does and does not mean. It **does** confirm the direction of travel this entry describes, and it makes the migration concrete in one surface first — so a Cost Intelligence query written against classic IDs is the one to re-check now. It **does not** retire classic entity IDs corpus-wide: the rest of the platform still accepts them, and the dimension-first strategy in §2 remains the right default for mass-data queries. Migrate where the product has moved, not everywhere at once.
 | `dt.entity.service` | `dt.smartscape.service` | `"SERVICE"` |
 | `dt.entity.process_group_instance` | `dt.smartscape.process` | `"PROCESS"` |
 | `dt.entity.container_group_instance` | `dt.smartscape.container` | `"CONTAINER"` |
@@ -117,9 +113,13 @@ Two vocabularies, and they differ in case. **Field names are lowercase dotted; n
 | `dt.entity.http_check` | `dt.smartscape.http_monitor` | `"HTTP_MONITOR"` |
 | `dt.entity.multiprotocol_monitor` | `dt.smartscape.network_availability_monitor` | `"NETWORK_AVAILABILITY_MONITOR"` |
 | `dt.entity.synthetic_location` | `dt.smartscape.synthetic_location` | `"SYNTHETIC_LOCATION"` |
-| `dt.entity.aws_lambda_function` | `dt.smartscape.aws.lambda_function` | `"AWS_LAMBDA_FUNCTION"` |
+| `dt.entity.aws_lambda_function` | `dt.smartscape.aws_lambda_function` | `"AWS_LAMBDA_FUNCTION"` |
 | `dt.entity.cloud_application` | several workload fields | several K8s workload types |
 | *no classic entity type* | *no model* | `"ACTIVEGATE"` — see below |
+
+> **The transition is now underway in-product, starting with Cost Intelligence (SaaS 1.347 — staged rollout from 09/08/2026).** Verbatim: *"Dynatrace is transitioning customers from the Dynatrace Classic Monitored Entity (ME) model to the latest Dynatrace Smartscape IDs."* The release note names the same three mappings this table already carries — `dt.entity.host` → `dt.smartscape.host`, `dt.entity.kubernetes_cluster` → `dt.smartscape.k8s_cluster`, `dt.entity.cloud_application_namespace` → `dt.smartscape.k8s_namespace`.
+>
+> Two things this does and does not mean. It **does** confirm the direction of travel this entry describes, and it makes the migration concrete in one surface first — so a Cost Intelligence query written against classic IDs is the one to re-check now. It **does not** retire classic entity IDs corpus-wide: the rest of the platform still accepts them, and the dimension-first strategy in §1 remains the right default for mass-data queries. Migrate where the product has moved, not everywhere at once.
 
 `dt.entity.cloud_application` is the awkward one — it fans out to multiple Kubernetes workload types rather than mapping to one. Check the target type before translating it.
 
@@ -135,7 +135,7 @@ The practical consequence: **migrating ActiveGate work may mean replacing a REST
 
 **`synthetic_test` splits, and `multiprotocol_monitor` is renamed.** Monitor and step are **separate node types** — `BROWSER_MONITOR_STEP` and `HTTP_MONITOR_STEP` exist alongside their parents. A classic query that read steps as attributes of the test needs a `traverse` to the step nodes ([section 5](#topology-navigation)), not a field read. And `dt.entity.multiprotocol_monitor` becomes `NETWORK_AVAILABILITY_MONITOR` — a genuine rename, not a transliteration, so pattern-matching the classic name to derive the node type produces a type that does not exist.
 
-> <sub>**Sources:** [What's new in Dynatrace SaaS 1.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-347) — the Cost Intelligence classic-ME to Smartscape transition quoted above, [Dynatrace Query Language reference (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language), [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343), [Entities API v2 — GET entities (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/entity-v2/get-entities-list). Mappings read from `fetch dt.semantic_dictionary.models` and confirmed against a live tenant, 07/30/2026 — including the three failing `dt.entity.*active_gate*` spellings, `smartscapeNodes "ACTIVEGATE"` returning 4 nodes, and `frontend.type` returning `web` (25) and `mobile` (6) despite its absence from the model's `fields` array.</sub>
+> <sub>**Sources:** [What's new in Dynatrace SaaS 1.347 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-347) — the Cost Intelligence classic-ME to Smartscape transition quoted above, [Dynatrace Query Language reference (DT docs)](https://docs.dynatrace.com/docs/platform/grail/dynatrace-query-language), [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343), [Entities API v2 — GET entities (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/entity-v2/get-entities-list). Mappings read from `fetch dt.semantic_dictionary.models` and confirmed against a live tenant, 07/30/2026 — including the three failing `dt.entity.*active_gate*` spellings, `smartscapeNodes "ACTIVEGATE"` returning 4 nodes, and `frontend.type` returning `web` (25) and `mobile` (6) despite its absence from the model's `fields` array. **Dictionary:** `dt.smartscape.aws_lambda_function` (`stable`), read 09/28/2026.</sub>
 
 <a id="migrating-the-constructs"></a>
 ## 3. Migrating the Constructs
@@ -257,7 +257,7 @@ Each of these was hit while validating this document.
 
 **`getNodeField()` returns null inside `smartscapeNodes`.** It resolves a node id held in *mass data* — it is not for the node you are already iterating. Inside `smartscapeNodes`, read the field directly.
 
-```
+```dql
 // Wrong — returns null, no error
 smartscapeNodes "HOST" | fieldsAdd tags = getNodeField(dt.smartscape.host, "tags")
 
@@ -273,11 +273,11 @@ The same applies to `getNodeName()` versus `name`. Both `getNode*` functions bel
 
 **`traverse` uses named parameters.** `edgeTypes:`, `targetTypes:`, `direction:` — not a `{ }` block after the edge name, which fails to parse.
 
-**`id_classic` is the bridge between the two id spaces — and you cannot compare it with `==`.** Every Smartscape node carries it, holding the classic `HOST-…` / `SERVICE-…` identifier, which makes it the obvious key for joining migrated and unmigrated queries. The obvious way to use it does not work.
+**`id_classic` is the bridge between the two id spaces — and you cannot compare it with `==`.** Every Smartscape node that has a classic counterpart carries it, holding the classic `HOST-…` / `SERVICE-…` identifier, which makes it the obvious key for joining migrated and unmigrated queries. The obvious way to use it does not work. (Smartscape-native types such as `ACTIVEGATE`, `ONEAGENT` and cloud resources like `AWS_EC2_INSTANCE` carry no `id_classic` at all, and `PROCESS` carried it on 210 of 215 nodes on the validation tenant, 09/28/2026 — so filter reconciliation queries with `isNotNull(id_classic)` before counting unmatched nodes.)
 
 `id` and `id_classic` are **different types**: `id` is a `smartscape_id`, `id_classic` is a `string`. Comparing them directly is **always false**, even when the two values print identically side by side. Grail never raises an error — on 09/21/2026 it attached an **INFO-severity notification** to the otherwise-successful result, and on 09/24/2026 not even that — so the query runs, returns a full set of rows, and answers the opposite of the question:
 
-```
+```dql
 // Wrong — "no" on every row, and no error. Both columns print the SAME value.
 smartscapeNodes "SERVICE"
 | fieldsAdd same = if(id == id_classic, then: "yes", else: "no")
@@ -293,13 +293,13 @@ On the validation tenant (09/21/2026) `toString(id) == id_classic` matched **23 
 
 The values being identical on `HOST` and `SERVICE` is also not something to generalize to every node type. Inspect before you rely on it:
 
-```
+```dql
 smartscapeNodes "SERVICE" | fields id, id_classic, name
 ```
 
 **A zero-row result is ambiguous.** A wrong edge-type case, a genuinely absent relationship, a wrong traversal direction, and a missing read scope all return nothing. Work down that list before assuming the query is wrong.
 
-> <sub>**Sources:** all five behaviours reproduced against a Dynatrace tenant, 07/23/2026 — `getNodeField` null result, `"RUNS_ON"` zero-row return, `NO_PARAMETERS_FOR_COMMAND` on bare `smartscapeEdges`, `PARSE_ERROR` on the `traverse` block form, and identical `id`/`id_classic` values on HOST and SERVICE nodes. The `==` type-mismatch behaviour was reproduced separately on 09/21/2026 — SERVICE 23 of 23 and HOST 7 of 7 matched with `toString(id)`, 0 of each without, with the `EQUALITY_COMPARISON_OF_INCOMPATIBLE_TYPES` notification quoted verbatim from the query response. Re-run 09/24/2026: same result, with an empty `notifications` array.</sub>
+> <sub>**Sources:** all five behaviours reproduced against a Dynatrace tenant, 07/23/2026 — `getNodeField` null result, `"RUNS_ON"` zero-row return, `NO_PARAMETERS_FOR_COMMAND` on bare `smartscapeEdges`, `PARSE_ERROR` on the `traverse` block form, and identical `id`/`id_classic` values on HOST and SERVICE nodes. The `==` type-mismatch behaviour was reproduced separately on 09/21/2026 — SERVICE 23 of 23 and HOST 7 of 7 matched with `toString(id)`, 0 of each without, with the `EQUALITY_COMPARISON_OF_INCOMPATIBLE_TYPES` notification quoted verbatim from the query response. Re-run 09/24/2026: same result, with an empty `notifications` array. `id_classic` population by node type executed 09/28/2026.</sub>
 
 <a id="summary-and-next-steps"></a>
 ## 8. Summary and Next Steps

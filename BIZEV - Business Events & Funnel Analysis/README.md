@@ -11,7 +11,7 @@ Turning business transactions into first-class observability data with Dynatrace
 
 ## Notebook Lineup
 1. [Business Events Fundamentals](markdown/-[BIZEV]-01-business-events-fundamentals.md) — Business events data model, ingestion methods, and DQL patterns
-2. [Instrumentation](markdown/-[BIZEV]-02-instrumentation.md) — Capturing transactional events through APIs, frameworks, and custom instrumentation
+2. [Instrumentation](markdown/-[BIZEV]-02-instrumentation.md) — Capturing transactional events through OneAgent capture rules, the ingest API, RUM/mobile APIs, and OpenPipeline extraction
 3. [Funnel Analysis](markdown/-[BIZEV]-03-funnel-analysis.md) — Analyzing conversion flows, identifying drop-off points, and measuring user journeys
 4. [Revenue Impact Analysis](markdown/-[BIZEV]-04-revenue-impact.md) — Correlating business events with financial outcomes and quantifying impact
 5. [KPIs and Metrics](markdown/-[BIZEV]-05-kpis-and-metrics.md) — Defining business metrics, calculating KPIs, and creating metric events

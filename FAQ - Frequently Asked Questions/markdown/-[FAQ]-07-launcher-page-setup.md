@@ -1,6 +1,6 @@
 # FAQ-07: How Do I Set Up a Launcher Page? (Default + Persona-Based)
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 07 — Launcher Page Setup (Default + Persona-Based) | **Created:** May 2026 | **Last Updated:** 08/27/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 07 — Launcher Page Setup (Default + Persona-Based) | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -10,7 +10,7 @@ The product name for the landing experience is **Launchpads** — built and mana
 
 This FAQ unpacks the model: the three layers (tenant default → group override → user personal), the admin mechanism, persona-content recommendations for seven common roles, and the parts of the model that are first-class features versus parts that are community discipline.
 
-> **Scope:** Dynatrace SaaS. Launchpads shipped in SaaS 1.314 (May 2025) and have been broadly available since. The admin mechanism and IAM-group binding are first-class features; persona-specific content recommendations are community guidance.
+> **Scope:** Dynatrace SaaS. Home launchpads — admin-set start pages for teams and user groups — arrived in SaaS 1.314 (May 2025) and have been broadly available since. The admin mechanism and IAM-group binding are first-class features; persona-specific content recommendations are community guidance.
 
 ---
 
@@ -34,7 +34,7 @@ This FAQ unpacks the model: the three layers (tenant default → group override 
 |-------------|---------|
 | **Audience** | Tenant admins, platform leads, IAM owners; secondary: persona/role leads (SRE, Security, AppDev, etc.) |
 | **Format** | Decision-support document — describes the model, admin path, and persona patterns; no hands-on lab |
-| **Deployment** | Dynatrace SaaS. Launchpads shipped in SaaS 1.314 (May 2025); broadly available since. |
+| **Deployment** | Dynatrace SaaS. Home launchpads arrived in SaaS 1.314 (May 2025); broadly available since. |
 | **Related topic series** | IAM (group management and policy DSL), DASH (dashboard design that feeds Launchpad link cards), ORGNZ (persona/security-context naming that often parallels IAM group naming), ONBRD (where Launchpad setup fits in the rollout sequence) |
 | **Related FAQ** | FAQ-01 (host-group naming), FAQ-02 (tagging strategy) — both touch on persona axes that often align with Launchpad personas |
 
@@ -108,7 +108,7 @@ Practical implication: ship this *first*. A solid "Everyone" Launchpad sets a ba
 
 Admins can assign a Home Launchpad to a specific IAM user group. Users in that group land on the group's Launchpad instead of the "Everyone" one. Multiple groups can each have their own Home Launchpad — this is the mechanism for "different teams see different home pages."
 
-What is documented: the assignment binds a Launchpad to a group. What is **not** explicitly documented: the resolution behavior when a user belongs to multiple groups each with a Home Launchpad. Before relying on multi-group resolution for governance (e.g., "this user should see the Security Launchpad because they are in both SRE and Security groups"), verify the behavior in your tenant.
+The assignment binds a Launchpad to a group, and the admin-set Home launchpads are **ranked**. When a user belongs to several groups that each have a Home Launchpad, the one with the **highest rank** wins; the others are next in line. So the order of the entries in *Settings → General → Launcher → Home launchpad* is a governance decision — put the launchpad that should win for overlapping members (for example, Security over SRE) above the other.
 
 ### Layer 3 — Personal Home Launchpad (user override)
 
@@ -116,11 +116,16 @@ Any user can set their own personal Home Launchpad. When they do, the admin's gr
 
 ### Resolution order
 
-When a user logs in, the platform resolves their Home Launchpad in this order: **Personal → Group → Everyone**. The highest-precedence layer present wins. The admin-set layers fall to the "Suggested" list when overridden.
+The documented Home launchpad priority is:
 
-*In community practice multi-group resolution behaves as described above; the documentation does not state it explicitly, so verify it in your own tenant before relying on the precedence order.*
+1. The user's **personal** Home launchpad.
+2. The admin-set Home launchpad with the **highest rank**.
+3. Other admin-set Home launchpads with lower ranks, and those of other groups the user is a member of.
+4. **Getting started with Dynatrace**, the default Home launchpad.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — verbatim on per-user override: users can set personal home launchpads that *"override any home launchpad set by your admin"* and admin-set launchpads then appear under *"Suggested"*. Group binding documented as *"select a user group, or select 'Everyone' to change the start page for all users."* **Derived:** the explicit three-layer precedence model with resolution order is community framing — the three primitives are documented, the layered model is the synthesis.</sub>
+**A launchpad that fails to load is skipped silently** — *"If a home launchpad fails to load (for example, due to failing permissions), the next in line opens."* A group-bound launchpad that the group's members cannot read therefore never errors: they simply land on the next launchpad in line, which is why § 4 makes sharing the launchpad with the group a step of its own. The admin-set layers fall to the "Suggested" list when a user sets a personal Home launchpad.
+
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — verbatim on per-user override: users can set personal home launchpads that *"override any home launchpad set by your admin"* and admin-set launchpads then appear under *"Suggested"*. Group binding documented as *"select a user group, or select 'Everyone' to change the start page for all users."* Priority documented under *Home launchpad priority*: *"Home launchpad set by your admin with highest rank"*, then *"Other home launchpads set by your admin with lower ranks and other groups you're member of"*, then the default Getting started launchpad; *"If a home launchpad fails to load (for example, due to failing permissions), the next in line opens."* **Derived:** the three-layer framing is this entry's synthesis of that priority list.</sub>
 
 <a id="admin-mechanism"></a>
 ## 4. Setting the Home Launchpad — Admin Mechanism
@@ -134,15 +139,16 @@ The admin path is short and the same for tenant-default and group-bound assignme
 ### Steps
 
 1. **Build the Launchpad first** in the Launcher app. The assignment step references an existing Launchpad — you cannot create a Launchpad as a side effect of assignment.
-2. Navigate to **Settings → General → Launcher → Home launchpad**.
-3. Select **Add home launchpad**.
-4. Pick a Launchpad from the list of existing Launchpads.
-5. Select either **Everyone** (tenant default) or a specific IAM **user group**.
-6. Save.
+2. **Share the Launchpad with the target group** (or with everyone, for the tenant default). Launchpads are documents with document sharing; a Home launchpad the group's members cannot open fails to load, and they silently land on the next launchpad in line (§ 3).
+3. Navigate to **Settings → General → Launcher → Home launchpad**.
+4. Select **Add home launchpad**.
+5. Pick a Launchpad from the list of existing Launchpads.
+6. Select either **Everyone** (tenant default) or a specific IAM **user group**.
+7. Save, and check the entry's **rank** against the other group entries (§ 3).
 
 ### For per-group bindings
 
-Repeat steps 3–6 for each group that should have its own Home Launchpad. There is no "clone this Launchpad to a new group" shortcut — each binding is an explicit admin action.
+Repeat steps 2 and 4–7 for each group that should have its own Home Launchpad. There is no "clone this Launchpad to a new group" shortcut — each binding is an explicit admin action.
 
 ### Sequencing implication
 
@@ -152,7 +158,7 @@ This is the trap most new tenants hit: the admin tries to bind a Launchpad befor
 
 The binding takes effect immediately for new sessions. Users with an active session may need to refresh or re-navigate to the home page to see the change. Users who already have a personal Home Launchpad set will continue to see their personal one — the admin's binding lands in their "Suggested" list.
 
-> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents the admin path *"Settings → General → Launcher → Home launchpad"*, the **Add home launchpad** action, and the *Everyone / user group* selection. **Derived:** the "build the content scaffold first" sequencing guidance is community practice — the docs describe each step but do not call out the dependency between content existence and binding.</sub>
+> <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) — documents the admin path *"Settings → General → Launcher → Home launchpad"*, the **Add home launchpad** action, and the *Everyone / user group* selection. **Derived:** the "share with the group" step follows from launchpads being shared documents (*"For details on sharing Dynatrace documents (including launchpads), see Share documents"*) and from the fail-to-load rule quoted in § 3; the "build the content scaffold first" sequencing guidance is community practice — the docs describe each step but do not call out the dependency between content existence and binding.</sub>
 
 <a id="persona-examples"></a>
 ## 5. Persona Worked Examples
@@ -253,7 +259,7 @@ An adoption order that produces good results in community practice:
 
 - **Building Launchpads before IAM groups exist.** Without groups, you can only target "Everyone." That is fine for a starting tenant but doesn't unlock the persona-based value.
 - **Treating the Launchpad as a dashboard substitute.** Cards can deep-link to dashboards; cards cannot render data themselves. If you want a chart on the home screen, the right answer is a dashboard, not a Launchpad.
-- **Skipping the "Everyone" Launchpad.** Building only persona Launchpads means new users, contractors, and anyone outside your persona groups land on whatever the platform default is — usually a generic Dynatrace screen with no team context.
+- **Skipping the "Everyone" Launchpad.** Building only persona Launchpads means new users, contractors, and anyone outside your persona groups land on the platform default — *Getting started with Dynatrace* — with no team context.
 - **Owner-less Launchpads.** Every persona Launchpad needs a named maintainer. Otherwise it goes stale and you end up with the worst of both worlds: the binding exists, but the content is wrong.
 
 > <sub>**Sources:** [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads), [Dynatrace launchpads — customizable home pages (Dynatrace News)](https://www.dynatrace.com/news/blog/dynatrace-launchpads-focus-on-what-matters-with-customizable-home-pages/). **Derived:** the seven-step adoption order and the anti-pattern list are community / engagement guidance — Dynatrace docs describe the mechanism but do not prescribe an adoption sequence.</sub>
@@ -264,16 +270,15 @@ An adoption order that produces good results in community practice:
 Naming the moving parts explicitly is more credible than pretending everything is settled. The Launchpad **mechanism** is solid; the **content and governance discipline** are where the work happens, and several pieces are still maturing:
 
 - **Launchpad IAM scope catalog is implicit.** Launchpads inherit Document Service scoping (`document:documents:*` is the likely control), but there is no published Launchpad-specific policy DSL (e.g., `launchpad:*`). For most customers this is fine; for tightly-governed tenants, it means the access-control story is implicit rather than explicit.
-- **Multi-group resolution behavior is not explicitly documented.** When a user belongs to multiple groups each with their own Home Launchpad, the resolution order is not stated in the docs. Verify in your tenant before relying on it for governance.
 - **Persona content discipline is community practice.** Dynatrace ships the mechanism; what goes on the SRE Launchpad versus the Exec Launchpad versus the Migration Launchpad is engagement / community framing, not a built-in feature. Treat the persona matrix in §5 as a starting point, not a spec.
-- **Launchpad templates / starter kits.** There is no first-class "persona Launchpad template" feature. Each customer builds Launchpad content from scratch (or by copying exported JSON from another customer or another tenant). A future template marketplace would change this.
+- **Launchpad templates / starter kits.** There is no persona-specific template. The starting points that do exist are the **Ready-made** launchpads, **Duplicate** (copy a launchpad and edit the copy), and download/upload of launchpad JSON — persona content itself is still yours to write.
 - **Content type is link-first.** Dashboards and notebooks appear on Launchpads as *links*, not as embedded widgets. If you want a "page with a chart on it," that is a dashboard. Many new customers conflate the two and are briefly surprised; the link-first model is by design.
 - **Versioning and source control.** Launchpads support export/import via the Document Service API — that is the primary version-control mechanism. Native Git-backed versioning is not first-class today; the community pattern is to export Launchpad JSON periodically and check it into source control.
 - **Cross-tenant content sharing.** Launchpads are tenant-scoped. There is no built-in "share this Launchpad with my partner's tenant" feature; the workaround is export from one tenant and import to the other.
 
-These are *moving parts*, not red flags. The mechanism has been stable since SaaS 1.314 (May 2025) and is broadly available. The right posture is to ship the parts that are solid (mechanism, group binding, per-user override) and treat the parts that are evolving (IAM scope catalog, multi-group resolution, content templates) as items to verify at the time you depend on them.
+These are *moving parts*, not red flags. The Home launchpad mechanism has been stable since SaaS 1.314 (May 2025) and is broadly available. The right posture is to ship the parts that are solid (mechanism, group binding, per-user override) and treat the parts that are evolving (IAM scope catalog, content templates) as items to verify at the time you depend on them.
 
-> <sub>**Sources:** Community-derived observations across customer engagements; no single Dynatrace doc enumerates these gaps. [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) for the mechanism baseline. **Derived + Softened** throughout — these are current-state observations as of May 2026; expect some items to be addressed in future SaaS releases.</sub>
+> <sub>**Sources:** Community-derived observations across customer engagements; no single Dynatrace doc enumerates these gaps. [Launchpads (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/get-started/dynatrace-ui/launchpads) for the mechanism baseline — *"Duplicate makes a copy of the current launchpad so you can build a new launchpad based on the current launchpad."* **Derived + Softened** throughout — these are current-state observations as of May 2026; expect some items to be addressed in future SaaS releases.</sub>
 
 <a id="objections"></a>
 ## 9. Common Objections and Responses
@@ -298,7 +303,7 @@ The Apps-menu favorites are *per-user* preferences for the left-nav. A Launchpad
 
 **"What if Dynatrace changes Launchpads in the future?"**
 
-Launchpads have been broadly available since SaaS 1.314 (May 2025) and the mechanism is stable. Major changes typically arrive via release notes; minor UI evolution is normal. The bigger risk is *content drift in the Launchpads themselves* — links to dashboards that no longer exist, markdown that references deprecated docs — and that is operational practice, not platform risk.
+Home launchpads have been broadly available since SaaS 1.314 (May 2025) and the mechanism is stable. Major changes typically arrive via release notes; minor UI evolution is normal. The bigger risk is *content drift in the Launchpads themselves* — links to dashboards that no longer exist, markdown that references deprecated docs — and that is operational practice, not platform risk.
 
 **"Can I version-control Launchpads?"**
 
@@ -326,7 +331,7 @@ Setting up "launcher pages" in Dynatrace means setting up **Launchpads** — cus
 - Read the **DASH** topic series for the dashboard design patterns that feed Launchpad link cards (dashboards are the visualization surface; Launchpads are the navigation hub).
 - Read the **ORGNZ** topic series for persona / security-context naming — often the same axes that work for Launchpad bindings.
 - Read the **ONBRD** topic series for where Launchpad setup fits in the rollout sequence (typically once tenants are stood up and IAM groups exist).
-- Verify multi-group Home Launchpad resolution behavior in your tenant before relying on it for governance.
+- Share each group-bound Launchpad with its group, and set the rank order of Home launchpad entries deliberately — overlapping group members get the highest-ranked one.
 - Build the tenant "Everyone" Home Launchpad before going wider — resist the temptation to ship seven persona Launchpads on day one.
 
 ---

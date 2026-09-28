@@ -1,6 +1,6 @@
 # K8S-04: Cluster Health Monitoring
 
-> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 4 of 13 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** K8S — Kubernetes Monitoring | **Notebook:** 4 of 13 | **Created:** January 2026 | **Last Updated:** 09/25/2026
 
 ## Deep-Dive into Kubernetes Cluster Metrics
 Cluster health monitoring provides visibility into the infrastructure layer of Kubernetes: nodes, control plane, and cluster-wide resources. This notebook covers key metrics, thresholds, and DQL queries for proactive cluster management.
@@ -131,8 +131,10 @@ smartscapeNodes "K8S_NODE"
 // Node CPU utilization — container usage summed per node, against node allocatable
 // There is no dt.kubernetes.node.cpu_usage metric: node-level usage is derived
 // by summing the per-container metric. Allocatable is a genuine node-grain metric.
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
 timeseries {
-    used = sum(dt.kubernetes.container.cpu_usage),
+    used = sum(dt.kubernetes.container.cpu_usage, rollup: avg),
     allocatable = avg(dt.kubernetes.node.cpu_allocatable)
   }, from:-1h, by:{k8s.cluster.name, k8s.node.name}
 | fieldsAdd cpuPercent = round(100 * arrayAvg(used) / arrayAvg(allocatable), decimals: 1)
@@ -144,8 +146,10 @@ timeseries {
 ```dql
 // Node memory utilization — working-set memory summed per node, against node allocatable
 // Same derivation as CPU above: no dt.kubernetes.node.memory_usage metric exists.
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
 timeseries {
-    used = sum(dt.kubernetes.container.memory_working_set),
+    used = sum(dt.kubernetes.container.memory_working_set, rollup: avg),
     allocatable = avg(dt.kubernetes.node.memory_allocatable)
   }, from:-1h, by:{k8s.cluster.name, k8s.node.name}
 | fieldsAdd memPercent = round(100 * arrayAvg(used) / arrayAvg(allocatable), decimals: 1)
@@ -206,7 +210,9 @@ For environments where SVG doesn't render
 ```dql
 // CPU requests by namespace — requests are a container-grain metric, summed to namespace
 // (there is no dt.kubernetes.workload.requests_cpu; requests live under container.*)
-timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgReqMillicores = round(arrayAvg(cpuReq), decimals: 0)
 | fields k8s.namespace.name, avgReqMillicores
 | sort avgReqMillicores desc
@@ -215,7 +221,9 @@ timeseries cpuReq = sum(dt.kubernetes.container.requests_cpu), from:-1h, by:{k8s
 
 ```dql
 // Memory requests by namespace (GiB) — container-grain metric summed to namespace
-timeseries memReq = sum(dt.kubernetes.container.requests_memory), from:-1h, by:{k8s.namespace.name}
+// rollup: avg averages each container within a time bucket before the cross-container sum;
+// without it, sum() also adds the 1-min points in each bucket and wide timeframes read ~10x high.
+timeseries memReq = sum(dt.kubernetes.container.requests_memory, rollup: avg), from:-1h, by:{k8s.namespace.name}
 | fieldsAdd avgReqGiB = round(arrayAvg(memReq) / 1073741824, decimals: 2)
 | fields k8s.namespace.name, avgReqGiB
 | sort avgReqGiB desc

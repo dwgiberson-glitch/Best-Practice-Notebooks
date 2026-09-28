@@ -1,6 +1,6 @@
 # S2S-08: Step 8 — Enable: Parallel Operation and Stakeholder Handover
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 8 of 9 | **Phase:** Run | **Step:** Enable | **Created:** March 2026 | **Last Updated:** 08/04/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 8 of 9 | **Phase:** Run | **Step:** Enable | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -42,7 +42,7 @@ With data pipelines, SLOs, and alerting configured in the target tenant (Step 7)
 
 ## 1. Parallel Operation Strategy
 
-During parallel operation, both the source and target tenants receive monitoring data. This period exists to validate the target tenant, build Dynatrace Intelligence baselines, and give users confidence before cutover.
+During parallel operation, both the source and target tenants are live. Each host's OneAgent reports to exactly one of them — a single OneAgent has one destination — so hosts move from source to target in waves, while cloud integrations, synthetics and log forwarders can feed both tenants at once. This period exists to validate the target tenant, build Dynatrace Intelligence baselines, and give users confidence before cutover.
 
 ### Parallel Operation Timeline
 
@@ -53,18 +53,20 @@ During parallel operation, both the source and target tenants receive monitoring
 | **Week 3** | SLO evaluation | 7-day rolling SLOs have full data; compare source vs target values |
 | **Week 4** | User acceptance | Key users validate dashboards, workflows, and alerts in target |
 | **Weeks 5–6** | Cutover preparation | Go/no-go decision, communication, maintenance window scheduled |
-| **Weeks 7–8** | Post-cutover buffer | Source tenant in read-only for historical queries |
+| **Weeks 7–8** | Post-cutover buffer | Source tenant no longer ingesting; data stays queryable for its bucket retention |
 | **Week 9+** | Decommission | Source tenant deactivated and deprovisioned |
 
 ### Operation Models
 
 | Model | Description | Best For | Duration |
 |-------|-------------|----------|----------|
-| **Full Parallel** | Both tenants receive all data from all agents | High-risk environments, regulatory requirements | 4–6 weeks |
+| **Full Parallel** | Both tenants live; each host reports to exactly one — pending waves to source, migrated waves to target. Cloud integrations, synthetics and log forwarders feed both | High-risk environments, regulatory requirements | 4–6 weeks |
 | **Phased** | Migrate groups of hosts/services incrementally | Large environments (1000+ hosts) | 6–10 weeks |
 | **Reference** | Source receives data, target receives from a representative subset only | Cost-constrained, low-risk migrations | 2–4 weeks |
 
-> **Cost impact:** Full parallel doubles your DPS consumption. Work with your Dynatrace account team to negotiate temporary parallel licensing.
+> **Cost impact:** overlap cost comes from the integrations, synthetics and forwarders you point at both tenants, plus the per-wave window — not from agents, because a host reports to one tenant at a time. Work with your Dynatrace account team to negotiate temporary parallel licensing.
+>
+> **Agents cannot dual-report.** Do not plan for a host to send to both tenants: a single OneAgent per host is required, and one OneAgent has one destination (**S2S-02**, and **FAQ-25** §6).
 
 ### Validate Host Count Parity
 
@@ -204,7 +206,7 @@ Include this table in your stakeholder communication:
 |------|--------|----------|------------|
 | **Dynatrace Intelligence** | Increased false positives in target tenant | 2–4 weeks | Alerts routed to staging channel |
 | **SLOs** | Incomplete evaluation in target tenant | 1–4 weeks (depends on window) | Dual reporting from both tenants |
-| **Historical data** | Not available in target tenant | Permanent | Source tenant available as read-only during buffer period |
+| **Historical data** | Not available in target tenant | Permanent | Source tenant stays queryable during the buffer period (no new ingest) |
 | **Dashboards** | New URLs, possible layout differences | One-time | User training and URL redirect documentation |
 | **API tokens** | All tokens regenerated | One-time | Token distribution before cutover |
 
@@ -212,24 +214,26 @@ Include this table in your stakeholder communication:
 
 ## 5. Cost Management During Parallel Period
 
-Parallel operation is expensive. Both tenants consume DPS for every monitored host, log record, metric, and span.
+Parallel operation is expensive — but only for what actually reaches both tenants. A host reports to one tenant at a time, so agent-sourced data is not doubled; integrations, synthetics and forwarders that you deliberately point at both tenants are.
 
 ### Dual Licensing Impact
 
-| Cost Component | Impact During Parallel | Optimization |
+| DPS Capability | Impact During Parallel | Optimization |
 |---------------|----------------------|---------------|
-| **Host units** | 2x (agents report to both) | Phased migration reduces overlap |
-| **Log ingest** | 2x (same logs to both tenants) | Route verbose logs to source only |
-| **Span ingest** | 2x | Reduce span sampling ratio in source |
-| **Metric ingest** | 2x for custom metrics | Minimal for built-in metrics |
-| **DEM units** | 2x for RUM/synthetic | Disable synthetic in source once target is validated |
+| **Full-Stack / Infrastructure Monitoring (host-hours)** | 1x per host — each host reports to one tenant | Keep wave windows short |
+| **Log Management & Analytics (ingest & retain)** | 1x for agent-collected logs; 2x only for forwarders you deliberately dual-feed | Dual-feed only the sources you must compare |
+| **Traces** | 1x per host (agent-sourced) | — |
+| **Metrics** | 1x for agent metrics; 2x for cloud-integration and API-ingested metrics sent to both | Enable cloud integrations in the target per wave |
+| **Real User Monitoring / Synthetic Monitoring** | 2x only for synthetics and RUM you run in both tenants | Disable synthetic in source once target is validated |
+
+See **FINOPS-01** for the current DPS capability names and how to query consumption per tenant.
 
 ### Cost Optimization Strategies
 
 | Strategy | Savings | Risk |
 |----------|---------|------|
 | Shorten parallel period (2 weeks vs 4 weeks) | 50% reduction | Less baseline time for Dynatrace Intelligence |
-| Phased migration (migrate by group) | Only migrated hosts are dual-cost | Longer total timeline |
+| Phased migration (migrate by group) | Dual-fed integrations are enabled per wave, not all at once | Longer total timeline |
 | Reduce source tenant data collection | 20–40% on source during parallel | Reduced source visibility |
 | Negotiate temporary parallel licensing | Cost-neutral | Requires account team engagement |
 

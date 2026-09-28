@@ -1,6 +1,6 @@
 # S2S-03: Step 3 — Design: Target Tenant Architecture
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 3 of 9 | **Phase:** Plan | **Step:** Design | **Created:** March 2026 | **Last Updated:** 09/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 3 of 9 | **Phase:** Plan | **Step:** Design | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -278,8 +278,8 @@ This is the single most important reference for Step 4 (Prepare) and Step 5 (Exe
 | Order | Category | Dependencies | Monaco Type | Terraform Resource |
 |-------|----------|-------------|-------------|--------------------|
 | 1 | Grail buckets | None — routing needs these first | `bucket` | `dynatrace_platform_bucket` |
-| 2 | Enrichment rules (K8s labels → tags) | None — tags feed everything downstream | `settings` | `dynatrace_k8s_metadata_enrichment` |
-| 3 | OpenPipeline processing rules | Buckets must exist as routing targets | `openpipeline` | `dynatrace_openpipeline` |
+| 2 | Enrichment rules (K8s labels → tags) | None — tags feed everything downstream | `settings` | `dynatrace_kubernetes_enrichment` |
+| 3 | OpenPipeline processing rules | Buckets must exist as routing targets | `openpipeline` | `dynatrace_openpipeline_v2_*` (e.g. `dynatrace_openpipeline_v2_logs_pipelines`) |
 | 4 | Segments | None | `segment` | `dynatrace_segment` |
 
 ### Phase 2: Gen2 (Classic) Configuration
@@ -362,7 +362,7 @@ Entity IDs (e.g., `HOST-1A2B3C4D`, `SERVICE-5E6F7A8B`) are **not portable** betw
 
 The best strategy is to eliminate hardcoded entity IDs **before** migration by replacing them with tag-based selectors:
 
-```
+```text
 # BEFORE (entity ID — breaks on migration)
 filter = "type(SERVICE),entityId(SERVICE-5E6F7A8B)"
 

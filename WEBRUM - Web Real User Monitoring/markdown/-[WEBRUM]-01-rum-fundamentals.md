@@ -1,6 +1,6 @@
 # WEBRUM-01: Web RUM Fundamentals
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 1 of 10 | **Created:** March 2026 | **Last Updated:** 09/09/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 1 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -231,7 +231,8 @@ Let's explore the most common user actions:
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "page_summary"
+//   action.type == "Load"              -> characteristics.has_page_summary == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -253,6 +254,10 @@ fetch user.events, from:-1h
 
 For load-type actions, Dynatrace captures detailed timing milestones:
 
+> **Select `user.events` with the `characteristics.has_*` flags, not `characteristics.classifier`.** The User events semantic-dictionary page describes `characteristics.classifier` as the single characteristic picked by priority when an event has several, and says it is *"Used for internal optimization when storing the data and not intended for query usage."* **Semantic Dictionary 1.349** (published 09/04/2026) removes it from the user-event models, with a **staged tenant rollout** — a tenant that has not reached 1.349 still returns the field, so a classifier filter keeps working until the change arrives and then silently matches nothing. The stable flags (`has_page_summary`, `has_navigation`, `has_error`, `has_request`, …) are the documented selectors and work on both sides of the change.
+>
+> The flags can **overlap** where the classifier picked one winner. A navigation that also carried an error was classified `error`, so `classifier == "navigation"` silently dropped it; `characteristics.has_navigation == true` keeps it. On the validation tenant (24 h, 09/28/2026) that is **7,387** navigations against **6,235** — the 1,152 recovered page loads have full navigation timing. For page summaries the two filters select the same 7,268 events.
+
 ```dql
 // Error / navigation vocabulary corrected 08/12/2026 (New RUM):
 //   filter type == "Error"  -> filter characteristics.has_error == true  (11,909 events; identical
@@ -261,12 +266,16 @@ For load-type actions, Dynatrace captures detailed timing milestones:
 //   user_action.type == "RouteChange" -> "same_view"  (the New RUM SPA route-change value; the
 //                              only other value is "hard_navigation". "Custom" has NO equivalent.)
 //   connection.type         -> network.protocol.name
-// CLASSIFIER MATTERS AS MUCH AS THE FIELD: navigation-timing fields (performance.dom_interactive,
-// performance.load_event_end) live on classifier "navigation" and are 0 on "page_summary", so a
-// page_summary filter silently empties them. ttfb.* is the opposite — it lives on page_summary.
+// THE EVENT CHARACTERISTIC MATTERS AS MUCH AS THE FIELD: navigation-timing fields
+// (performance.dom_interactive, performance.load_event_end) live on navigation events
+// (characteristics.has_navigation) and are unpopulated on page summaries
+// (characteristics.has_page_summary), so a page-summary filter silently empties them.
+// ttfb.* is the opposite — it lives on page summaries. Select with the stable has_* flags, not
+// characteristics.classifier (corrected 09/28/2026): the docs call classifier "not intended for
+// query usage" and Semantic Dictionary 1.349 removes it from the user-event models.
 // Page load timing breakdown — average timings for the top 10 pages
 fetch user.events, from:-1h
-| filter characteristics.classifier == "navigation"
+| filter characteristics.has_navigation == true
 | summarize action_count = count(),
     avg_duration = avg(duration),
     avg_dom_interactive = avg(performance.dom_interactive),
@@ -328,6 +337,8 @@ In this notebook, we covered:
 - [Dynatrace RUM Overview](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications)
 - [RUM JavaScript version (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum/web-frontends/additional-configuration/rum-javascript-version)
 - [Monitor web performance with DQL (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum/analyze-and-alert/rum-dql-web-performance)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

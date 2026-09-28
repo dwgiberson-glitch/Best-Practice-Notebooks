@@ -1,6 +1,6 @@
 # FAQ-17: How Do I Plan a Migration Cutover?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 17 — Planning a Migration Cutover | **Created:** July 2026 | **Last Updated:** 07/23/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 17 — Planning a Migration Cutover | **Created:** July 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -85,21 +85,22 @@ For the migration-specific detail — what to inventory, what translates, what d
 <a id="the-validation-ladder"></a>
 ## 2. The Validation Ladder
 
-Two series document a three-tier validation model under different names. They are the same ladder, and the naming difference is worth collapsing because the tiers are what matter:
+Two series document a three-tier validation model, but they cut the tiers at different places. The underlying ladder has four questions; each series places them in its own tiers:
 
-| Tier | SL2DT-09 calls it | NR2DT-08 calls it | The question it answers |
+| Rung | The question it answers | NR2DT-08 | SL2DT-09 |
 |---|---|---|---|
-| 1 | Technical parity (automated) | Syntax | Does it parse and run? |
-| 2 | Functional equivalence (semi-automated) | Tenant | Does it run *here*, against real data, without erroring? |
-| 3 | Business signoff (human) | Output parity (behavioral) | Does it produce the **same answer** as the thing it replaces? |
+| Runs | Does it parse and run? | Tier 1 — Syntax | Implicit in Tier 1 |
+| Runs *here* | Does it run against real data in the target tenant, without erroring? | Tier 2 — Tenant | Implicit in Tier 1 |
+| Same answer | Does it produce the **same answer** as the thing it replaces? | Tier 3 — Output parity (behavioral) | Tier 1 — Technical parity (sampled query results, ingest volume, monitor firing, alert routing) |
+| Accepted | Do the people who use it accept it? | — | Tier 2 — Functional equivalence; Tier 3 — Business signoff |
 
-**Tier 3 is the one that gets skipped**, because tiers 1 and 2 are automatable and tier 3 usually is not. It is also the only tier that catches the failure mode that matters: a query that runs perfectly and returns different numbers.
+Read the tier numbers inside each series; compare rungs across them. **The same-answer rung is the one that gets skipped**, because the rungs before it are automatable and it usually is not. It is also the only rung that catches the failure mode that matters: a query that runs perfectly and returns different numbers.
 
-A worked example of exactly that lives in FAQ-16 § 4 — a classic and a Smartscape query return **the same four entities** with **different `name` strings**, because classic host names carry a `[host-group] - ` prefix that Smartscape names do not. Row counts match; every downstream string match breaks. Tier 1 and tier 2 both pass.
+A worked example of exactly that lives in FAQ-16 § 4 — a classic and a Smartscape query return **the same four entities** with **different `name` strings**, because classic host names carry a `[host-group] - ` prefix that Smartscape names do not. Row counts match; every downstream string match breaks. The "runs" and "runs here" rungs both pass.
 
-**Compare values, not row counts.** A count-only parity check is a tier-1 check wearing a tier-3 costume.
+**Compare values, not row counts.** A count-only parity check is a "runs" check wearing a "same answer" costume.
 
-> <sub>**Sources:** SL2DT-09 (three-tier validation model), NR2DT-08 (three-tier validation pass), FAQ-16 § 4 (the name-prefix divergence, verified against a live tenant 07/23/2026).</sub>
+> <sub>**Sources:** SL2DT-09 (three-tier validation model — its Tier 1 includes sampled query-result parity), NR2DT-08 (three-tier validation pass), FAQ-16 § 4 (the name-prefix divergence, verified against a live tenant 07/23/2026).</sub>
 
 <a id="the-parallel-run-window"></a>
 ## 3. The Parallel-Run Window
@@ -126,7 +127,7 @@ The generic shape, drawn from SL2DT-09. Adjust the intervals; keep the ordering.
 | Phase | What happens | What must be true to proceed |
 |---|---|---|
 | **T-14** | Pre-cutover prep; freeze scope; confirm rollback path is tested, not just written | Rollback has been *exercised* at least once |
-| **T-3** | Final validation pass; Go/No-Go gate; stakeholder confirmation | All tier-3 checks pass or are explicitly waived, in writing |
+| **T-3** | Final validation pass; Go/No-Go gate; stakeholder confirmation | All same-answer (output-parity) checks pass or are explicitly waived, in writing |
 | **T-0** | Cutover; alerting silence window; escalation criteria live | Named owner present with authority to call rollback |
 | **T+1** | Post-cutover validation; first-day parity checks | Same checks as T-3, re-run against the new authority |
 | **T+30** | Stabilization complete; decommission proceeds | Tuning backlog is shrinking, not growing |
@@ -161,6 +162,8 @@ Take this inventory before cutover and again after. A type whose count drops is 
 ```dql
 // Entity inventory by type — run before cutover, save it, run again after.
 // A type that drops is a coverage regression regardless of migration type.
+// Uses the default timeframe (nodes seen recently) — keep the timeframe
+// identical between the before and after runs.
 smartscapeNodes "*"
 | summarize entity_count = count(), by:{type}
 | sort entity_count desc
@@ -170,8 +173,9 @@ Then check for entities that have stopped reporting. `lifetime[end]` is the last
 
 ```dql
 // Hosts that stopped reporting — the post-cutover check that catches
-// agents which were moved but never came back.
-smartscapeNodes "HOST"
+// agents which were moved but never came back. The from: is required:
+// a node not seen inside the query timeframe is not returned at all.
+smartscapeNodes "HOST", from:-7d
 | fieldsAdd last_seen = lifetime[end]
 | fieldsAdd stale = last_seen < now() - 1h
 | summarize hosts = count(), by:{stale}
@@ -182,16 +186,18 @@ Widen it to name the specific stragglers once the count tells you there are some
 
 ```dql
 // Name the stragglers so they can be chased individually.
-smartscapeNodes "HOST"
+smartscapeNodes "HOST", from:-7d
 | fieldsAdd last_seen = lifetime[end]
 | filter last_seen < now() - 1h
 | fields id, name, last_seen, dt.host_group.id
 | sort last_seen asc
 ```
 
+> **On the timeframe.** `smartscapeNodes` returns only nodes seen inside the query timeframe, and the default is short. Without `from:`, a host that went silent before the window started is **not returned at all**, so the check reports "none stale" exactly when hosts have been lost. Set `from:` to reach back before the cutover began — on the validation tenant (09/28/2026) the default window returned 7 hosts, none stale; `from:-7d` returned the same 7 plus **4 stale hosts** last seen three days earlier.
+
 > **On thresholds.** `now() - 1h` is a starting point, not a recommendation. Set it from your own reporting interval and the length of your cutover window — too tight and normal restarts look like losses, too loose and you finish cutover before the check can tell you anything.
 
-> <sub>**Sources:** all three queries executed against a Dynatrace tenant, 07/23/2026 — the inventory returned 15+ node types led by BROWSER_MONITOR_STEP (1,342), CONTAINER (437), PROCESS (353); the staleness check returned 11 hosts, none stale.</sub>
+> <sub>**Sources:** all three queries executed against a Dynatrace tenant, 07/23/2026 — the inventory returned 15+ node types led by BROWSER_MONITOR_STEP (1,342), CONTAINER (437), PROCESS (353); the staleness check returned 11 hosts, none stale. Re-executed 09/28/2026: without `from:`, 7 hosts none stale; with `from:-7d`, 7 current + 4 stale (last seen 09/25/2026).</sub>
 
 <a id="decommission-and-the-stabilization-window"></a>
 ## 7. Decommission and the Stabilization Window
@@ -213,7 +219,7 @@ SL2DT-09 breaks the stabilization window into weeks — stabilize, tune, hand of
 
 Use the eight invariants as the outline for the final step, and cite this entry plus the canonical treatments rather than restating them. Three things are worth getting right:
 
-1. **Name the tier-3 check explicitly.** Every series documents tiers 1 and 2 well because they are mechanical. Say what output parity means for *your* migration, and what evidence closes it.
+1. **Name the same-answer check explicitly.** Every series documents the mechanical rungs well. Say what output parity means for *your* migration, and what evidence closes it.
 2. **State the parallel-run end condition, not just its length.** "Two weeks" is a budget. "Zero unexplained divergences across three consecutive daily checks" is a criterion.
 3. **Put rollback triggers before the rollback runbook,** in that order on the page. The ordering signals which one gets read under pressure.
 
@@ -225,7 +231,7 @@ What belongs in your series rather than here: the inventory, what translates cle
 **Four things to carry away:**
 
 1. **Eight invariants, every migration.** Check yours against the list; the gaps are usually 5 (rollback triggers) and 7 (stabilization).
-2. **Tier 3 is the tier that matters** — and comparing row counts is not tier 3.
+2. **The same-answer rung is the one that matters** — and comparing row counts is not it.
 3. **The parallel-run window needs an end date decided at the start.** Otherwise it becomes the architecture.
 4. **Decommission gates on stabilization, not cutover.** Keep the rollback path alive through the window.
 

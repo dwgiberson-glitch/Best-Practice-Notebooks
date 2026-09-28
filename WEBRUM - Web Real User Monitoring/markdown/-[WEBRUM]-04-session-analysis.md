@@ -1,6 +1,6 @@
 # WEBRUM-04: Session Analysis
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 4 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 4 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -129,7 +129,8 @@ Understanding the sequence of actions within sessions reveals common navigation 
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "page_summary"
+//   action.type == "Load"              -> characteristics.has_page_summary == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -142,7 +143,7 @@ Understanding the sequence of actions within sessions reveals common navigation 
 // lcp.*'s 327,099 — it is not a different RUM generation, just a rarely-populated sibling.
 // Top entry pages — where do users start their journey?
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | summarize first_action = takeFirst(page.detected_name), by:{dt.rum.session.id}
 | summarize entry_count = count(), by:{first_action}
 | sort entry_count desc
@@ -152,7 +153,7 @@ fetch user.events, from:-24h
 ```dql
 // Top exit pages — where do users leave?
 fetch user.events, from:-24h
-| filter characteristics.classifier == "page_summary"
+| filter characteristics.has_page_summary == true
 | summarize last_action = takeLast(page.detected_name), by:{dt.rum.session.id}
 | summarize exit_count = count(), by:{last_action}
 | sort exit_count desc
@@ -192,7 +193,7 @@ fetch user.sessions, from:-24h
     by:{primary_tags.application}
 | append [
     fetch user.events, from:-24h
-    | filter characteristics.classifier == "page_summary"
+    | filter characteristics.has_page_summary == true
     | filter contains(page.detected_name, "confirmation") or contains(page.detected_name, "thank-you") or contains(page.detected_name, "checkout-success")
     | summarize converted_sessions = countDistinct(dt.rum.session.id), by:{primary_tags.application}
   ]
@@ -319,6 +320,8 @@ In this notebook, we covered:
 
 - [Define user action and session properties (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/define-user-action-and-session-properties)
 - [USQL — custom session queries (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/session-segmentation/custom-queries-segmentation-and-aggregation-of-session-data)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

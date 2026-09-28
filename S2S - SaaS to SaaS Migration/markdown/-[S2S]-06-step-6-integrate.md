@@ -1,6 +1,6 @@
 # S2S-06: Step 6 — Integrate: Cloud, Dashboards, and Workflows
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 6 of 9 | **Phase:** Upgrade | **Step:** Integrate | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 6 of 9 | **Phase:** Upgrade | **Step:** Integrate | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -42,7 +42,7 @@ This step completes the Upgrade phase. After this step, the target tenant is ful
 | **Target Tenant Access** | API token with `WriteConfig`, `settings.write`, `credentialVault.write` scopes |
 | **Notification Channel Access** | Admin access to Slack, PagerDuty, ServiceNow, Teams, or email systems |
 | **Synthetic Private Locations** | Network access from private location hosts to target tenant |
-| **Extension Host** | Host-based ActiveGate available for Extensions 2.0 (not K8s-based) |
+| **Extension Host** | ActiveGate group for remote extensions; SQL extensions may alternatively run in Kubernetes via Dynatrace Operator — verify per extension |
 
 ### Order of Operations
 
@@ -84,7 +84,7 @@ Cloud integrations are tenant-specific. Credentials, IAM trust policies, and mon
     {
       "Effect": "Allow",
       "Principal": {
-        "AWS": "arn:aws:iam::root"
+        "AWS": "arn:aws:iam::<dynatrace-aws-account-id-from-connection-wizard>:root"
       },
       "Action": "sts:AssumeRole",
       "Condition": {
@@ -97,6 +97,8 @@ Cloud integrations are tenant-specific. Credentials, IAM trust policies, and mon
 }
 ```
 
+> **Copy the principal and external ID from the target tenant's AWS connection setup** — an IAM principal ARN needs the 12-digit account ID (`arn:aws:iam::<account-id>:root`), and AWS rejects a policy without it. See **CLOUD-02** for the connection model.
+>
 > **The external ID changes per tenant.** The target tenant generates a new external ID. Update the IAM role's trust policy with this new ID. The old external ID (source tenant) should be removed after migration validation.
 
 ### Azure Integration
@@ -136,7 +138,7 @@ fetch dt.davis.problems, from:-2h
 ```dql
 // Target tenant: verify deployment events are being captured
 fetch events, from:-24h
-| filter event.kind == "CUSTOM_DEPLOYMENT"
+| filter event.kind == "DAVIS_EVENT" and event.type == "CUSTOM_DEPLOYMENT"
 | summarize deployment_count = count()
 | fieldsAdd status = if(deployment_count > 0, then: "Deployment events flowing", else: "No deployment events — check CI/CD integration")
 ```
@@ -178,8 +180,8 @@ Dashboards were imported in Step 5 as part of the Monaco deploy. This section co
 | Type | Monaco Type | Migration Path | Post-Import Work |
 |------|------------|----------------|------------------|
 | **Classic dashboards** | `api` (dashboard) | Monaco deploy | Entity ID remapping, ownership reset |
-| **Gen3 dashboards** | `document` | Monaco deploy | Minimal — DQL queries are entity-independent |
-| **Gen3 notebooks** | `document` | Monaco deploy | Minimal — DQL queries are entity-independent |
+| **Gen3 dashboards** | `document` | Monaco deploy | Search the exported `document` JSON for `HOST-`/`SERVICE-`/`PROCESS_GROUP-` literals (S2S-05 §4 grep) — DQL tiles that filter on entity IDs render empty after migration |
+| **Gen3 notebooks** | `document` | Monaco deploy | Same entity-ID search as dashboards — a DQL cell filtering on an entity ID returns nothing, without an error |
 
 ### Entity ID Remediation
 
@@ -191,7 +193,7 @@ Classic dashboards frequently contain hardcoded entity IDs in tile filters. Thes
 | SLO reference | `sloId("slo-abc-123")` | New SLO ID from target tenant |
 | Management zone filter | `mzId(12345)` | New MZ ID from target tenant |
 
-> **Gen3 advantage:** Gen3 dashboards use DQL queries that reference data by field values (tags, names), not entity IDs. If you are migrating to Gen3, consider rebuilding classic dashboards as Gen3 documents instead of remapping entity IDs.
+> **Gen3 advantage — when the DQL is written for it:** DQL that filters on names or tags survives migration; DQL that filters on entity IDs (`dt.entity.host == "HOST-…"`) does not, and fails silently. If you rebuild classic dashboards as Gen3 documents, filter on names or tags rather than remapping entity IDs.
 
 ### Ownership Reset
 
@@ -222,17 +224,22 @@ Workflows (Dynatrace Workflows, formerly AutomationEngine) require special handl
 ### Terraform Export/Import
 
 ```bash
-# Export workflows from source tenant
-terraform import dynatrace_automation_workflow.my_workflow <workflow-id>
+# Export workflows from the source tenant (source-tenant credentials in the environment).
+# The workflow resource is excluded from a default export, so name it explicitly.
+terraform-provider-dynatrace -export dynatrace_automation_workflow
 
-# Update configuration for target tenant
+# Edit the generated configuration for the target tenant:
 # - Change trigger entity selectors
-# - Update webhook URLs
+# - Update webhook URLs and connection references
 # - Reassign actor
 
-# Apply to target tenant
-terraform apply -var-file="target-tenant.tfvars"
+# Apply with target-tenant credentials
+terraform init && terraform apply
 ```
+
+`terraform import` is not an export: it binds an existing object into Terraform state and writes no configuration, so importing from the source and applying to the target copies nothing. The provider's `-export` mode writes the configuration.
+
+> <sub>**Sources:** [dynatrace_automation_workflow (Dynatrace GitHub)](https://github.com/dynatrace-oss/terraform-provider-dynatrace/blob/main/docs/resources/automation_workflow.md) — *"This resource is excluded by default in the export utility, please explicitly specify the resource to retrieve existing configuration."*</sub>
 
 ### Trigger Reconfiguration
 
@@ -245,12 +252,12 @@ terraform apply -var-file="target-tenant.tfvars"
 
 ### Actor Permissions
 
-Every workflow has an **actor** — the identity (user or service account) under which the workflow executes. The actor must have appropriate permissions in the target tenant:
+Every workflow has an **actor** — the identity (user or service account) under which the workflow executes. The actor is authorized by IAM policies in the target tenant, not by token scopes:
 
 ```
 Source actor: user@company.com (admin in source tenant)
 Target actor: Same user, or dedicated service account
-Required scopes: Depends on workflow actions (settings.write, events.ingest, etc.)
+Required access: IAM permissions for each action the workflow runs (see the IAM series)
 ```
 
 > **Best practice:** Use a dedicated **service account** as the workflow actor instead of a personal user account. Service accounts survive employee turnover and can be scoped precisely.
@@ -321,10 +328,13 @@ Synthetic monitors are imported via Monaco but require post-import validation fo
 After migration, verify synthetic monitors are executing in the target tenant:
 
 ```dql
-// Target tenant: count active synthetic monitors
+// Target tenant: count active synthetic monitors, by monitor type
 smartscapeNodes "BROWSER_MONITOR"
 | summarize monitor_count = count()
-| fieldsAdd validation = "Compare against source tenant synthetic monitor count"
+| fieldsAdd monitor_type = "browser"
+| append [smartscapeNodes "HTTP_MONITOR" | summarize monitor_count = count() | fieldsAdd monitor_type = "http"]
+| append [smartscapeNodes "NETWORK_AVAILABILITY_MONITOR" | summarize monitor_count = count() | fieldsAdd monitor_type = "network availability"]
+| fieldsAdd validation = "Compare each type against the source tenant count"
 
 // Smartscape (preferred, verified 07/2026): dt.entity.synthetic_test maps to the BROWSER_MONITOR
 // node (individual steps are a separate BROWSER_MONITOR_STEP node). HTTP monitors are HTTP_MONITOR,
@@ -333,12 +343,14 @@ smartscapeNodes "BROWSER_MONITOR"
 // `fetch dt.entity.synthetic_test` does still work and remains a genuine fallback — it reads the
 // classic entity store, which can retain entities Smartscape (live topology) no longer lists.
 // Classic fallback: fetch dt.entity.synthetic_test | summarize monitor_count = count()
+// Count all three monitor types: a browser-only count passes a parity check even if no HTTP
+// or network availability monitor migrated.
 ```
 
 <a id="extension-migration"></a>
 ## 7. Extension Migration
 
-Extensions 2.0 provide monitoring for technologies not covered by OneAgent (databases, network devices, cloud APIs). They run on host-based ActiveGates.
+Extensions 2.0 provide monitoring for technologies not covered by OneAgent (databases, network devices, cloud APIs). Remote extensions run on an ActiveGate group; SQL monitoring extensions can alternatively run in Kubernetes through Dynatrace Operator.
 
 ### Extension Migration Steps
 
@@ -346,9 +358,9 @@ Extensions 2.0 provide monitoring for technologies not covered by OneAgent (data
 |------|--------|-------|
 | 1 | Inventory extensions from source tenant | List all active extensions and their versions |
 | 2 | Verify extension availability in target tenant | Extensions are published to the Dynatrace Hub — verify same version exists |
-| 3 | Install extensions in target tenant | Via Hub or API |
+| 3 | Install extensions in target tenant | Via Hub, API, or Terraform (`dynatrace_hub_extension_active_version`) |
 | 4 | Configure monitoring settings | Recreate endpoint configurations |
-| 5 | Assign to host-based ActiveGate | Must be host-based AG (not K8s-based) |
+| 5 | Assign to the ActiveGate group (or Kubernetes runtime) the extension supports | Verify per extension |
 | 6 | Validate data collection | Check for new metrics from extension |
 
 ### Extension Types
@@ -360,7 +372,9 @@ Extensions 2.0 provide monitoring for technologies not covered by OneAgent (data
 | **JMX extensions** | Port JMX configuration file, update endpoint references |
 | **SNMP extensions** | Port SNMP configuration, update device IP addresses if changed |
 
-> **Host-based ActiveGate required.** Extensions 2.0 cannot run on Kubernetes-based ActiveGates. Ensure at least one host-based AG is deployed in the target tenant (as prepared in Step 4, Section 4).
+> **Plan the extension runtime per extension.** Remote extensions run on an ActiveGate group; SQL monitoring extensions can alternatively run in Kubernetes through Dynatrace Operator (see the K8S series). Make sure the runtime each extension needs exists in the target tenant (as prepared in Step 4, Section 4). Monaco does not export extension installations; Terraform can install and activate them (`dynatrace_hub_extension_active_version`) and configure them (`dynatrace_hub_extension_v2_config`).
+>
+> <sub>**Sources:** [Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions) — *"Run SQL monitoring extensions on Kubernetes using Dynatrace Operator."*, [dynatrace_hub_extension_active_version (Dynatrace GitHub)](https://github.com/dynatrace-oss/terraform-provider-dynatrace/blob/main/docs/resources/hub_extension_active_version.md) — *"In case the extension has not yet gotten installed for the specified version the installation happens automatically."*</sub>
 
 <a id="step-completion-checklist"></a>
 ## 8. Step Completion Checklist

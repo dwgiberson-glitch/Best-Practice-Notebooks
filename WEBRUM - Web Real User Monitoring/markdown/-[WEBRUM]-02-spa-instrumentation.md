@@ -1,6 +1,6 @@
 # WEBRUM-02: SPA Instrumentation
 
-> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 2 of 10 | **Created:** March 2026 | **Last Updated:** 08/12/2026
+> **Series:** WEBRUM — Web Real User Monitoring | **Notebook:** 2 of 10 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -120,13 +120,18 @@ Let's query route change actions to validate detection:
 //   user_action.type == "RouteChange" -> "same_view"  (the New RUM SPA route-change value; the
 //                              only other value is "hard_navigation". "Custom" has NO equivalent.)
 //   connection.type         -> network.protocol.name
-// CLASSIFIER MATTERS AS MUCH AS THE FIELD: navigation-timing fields (performance.dom_interactive,
-// performance.load_event_end) live on classifier "navigation" and are 0 on "page_summary", so a
-// page_summary filter silently empties them. ttfb.* is the opposite — it lives on page_summary.
+// THE EVENT CHARACTERISTIC MATTERS AS MUCH AS THE FIELD: navigation-timing fields
+// (performance.dom_interactive, performance.load_event_end) live on navigation events
+// (characteristics.has_navigation) and are unpopulated on page summaries
+// (characteristics.has_page_summary), so a page-summary filter silently empties them.
+// ttfb.* is the opposite — it lives on page summaries. Select with the stable has_* flags, not
+// characteristics.classifier (corrected 09/28/2026): the docs call classifier "not intended for
+// query usage" and Semantic Dictionary 1.349 removes it from the user-event models.
 // Field vocabulary corrected 08/12/2026 — this series targets **New RUM**, but was written
 // against names that are null on New RUM data, so these cells returned nothing while erroring
 // nowhere. Verified against 5,556,127 user.events records (schema 0.24.0, javascript agent):
-//   action.type == "Load"              -> characteristics.classifier == "page_summary"
+//   action.type == "Load"              -> characteristics.has_page_summary == true
+//                                        (was characteristics.classifier — "not intended for query usage", SD 1.349)
 //   action.type                        -> user_action.type      (hard_navigation | same_view)
 //   action.name                        -> page.detected_name
 //   web_vitals.largest_contentful_paint-> lcp.start_time        (327,099 populated)
@@ -502,7 +507,7 @@ WebView performance typically differs from desktop browsers due to device constr
 ```dql
 // Compare page load performance: mobile WebView vs desktop browser
 fetch user.events, from:-24h
-| filter characteristics.classifier == "navigation"
+| filter characteristics.has_navigation == true
 | filter dt.rum.application.id == "MyApp Desktop" or dt.rum.application.id == "MyApp Mobile"
 | summarize
     p50_duration = percentile(duration, 50),
@@ -538,6 +543,8 @@ In this notebook, we covered:
 - [Web applications in RUM Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications)
 - [Customize RUM with the JavaScript API (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/customize-rum)
 - [Customize RUM with the JavaScript API (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/web-applications/additional-configuration/customize-rum)
+- [User events — semantic dictionary (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/model/rum/user-events) — *"Used for internal optimization when storing the data and not intended for query usage."*
+- [Semantic Dictionary changelog 1.349 (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/changelog/version-1-349)
 
 ---
 

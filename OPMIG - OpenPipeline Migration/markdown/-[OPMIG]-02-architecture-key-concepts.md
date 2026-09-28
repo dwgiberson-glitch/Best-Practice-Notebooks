@@ -1,6 +1,6 @@
 # OPMIG-02: OpenPipeline Migration Guide: Part 2
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 2 of 10 | **Created:** December 2025 | **Last Updated:** 09/24/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 2 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Architecture & Key Concepts
 ---
@@ -39,7 +39,7 @@ By the end of this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail enabled |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail — OpenPipeline runs in the SaaS environment; Managed is not covered by this series |
 | **API Access** | `logs.read` token scope for DQL validation |
 | **Knowledge** | OPMIG-01 or familiarity with Classic log ingestion concepts |
 
@@ -109,26 +109,28 @@ The routing stage determines which pipeline(s) process each incoming record.
 ```
 k8s.namespace.name == "production"
 log.source == "nginx"
-contains(content, "payment")
+matchesPhrase(content, "payment")
 dt.openpipeline.source == "oneagent"
 ```
 
-### Stage 4: Processing
+Matchers accept a subset of DQL — use `matchesPhrase` (whole tokens or phrases) or `matchesValue` with `*` wildcards (any substring, e.g. `matchesValue(content, "*/health*")`); `contains()` and `in()` are not enabled in matchers and the configuration will not save. Validate a matcher before saving it. (`contains()` remains valid *inside* a DQL processor definition — only matcher positions reject it.)
 
-All in-pipeline work happens here. Processors execute in the order defined in the pipeline. Functional groups within Processing:
+> <sub>**Sources:** [DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline) — *"With Dynatrace powered by Grail, you can use Dynatrace Query Language (DQL) functions and logical operators in matchers."* The page documents `matchesPhrase`, `matchesValue`, `isNull`/`isNotNull` and `duration`; `contains()` rejected by the OpenPipeline matcher validator with *The function `contains()` isn't enabled.* (09/28/2026).</sub>
 
-| Group | Processors | Purpose |
-|-------|-----------|---------|
-| **Masking** | DQL with `replacePattern` | Redact PII before anything else |
-| **Filtering** | Drop record | Remove unwanted records early |
-| **Field & record manipulation** | Add/Remove/Rename fields, DQL, Parse, Technology | Transform and enrich |
-| **Metric extraction** | Counter, Value, Histogram (Preview); sampling-aware variants for spans | Generate timeseries from records |
-| **Smartscape topology** | Smartscape node, Smartscape edge | Populate the Smartscape topology graph |
-| **Event extraction** | Business event, SDLC event, Davis event | Convert records into events |
-| **Cost & security** | DPS Cost Allocation — Cost Center, DPS Cost Allocation — Product, Set dt.security_context | Attribute cost / apply record-level access |
-| **Storage assignment** | Bucket assignment, No storage assignment | Place the record in a bucket, or skip retention |
+### Stage 4: Pipeline — the Processing stage first
 
-> Recommended order *within* Processing: mask → drop → transform/parse → extract → assign cost/security → bucket assignment.
+A pipeline is a fixed sequence of stages (full table in [Understanding Processing Order](#understanding-processing-order)). The first stage, **Processing**, holds the processors that edit the record:
+
+| Purpose | Processing-stage processors |
+|---------|-----------|
+| **Masking** | DQL with `replacePattern` (or Remove fields) |
+| **Filtering** | Drop record |
+| **Field & record manipulation** | DQL (incl. `parse`), Add fields, Remove fields, Rename fields, Technology bundle |
+| **Enrichment** | Inline lookup, GeoIP lookup (Early Access) |
+
+Metric extraction, Smartscape node/edge, event extraction, cost allocation, `dt.security_context` and bucket assignment are **not** part of the Processing stage — each is its own later stage in the fixed sequence.
+
+> Recommended order *within* the Processing stage: mask → drop → parse → enrich. Everything else runs in a later, fixed stage.
 
 ### Stage 5: Storage
 
@@ -193,7 +195,7 @@ The DQL processor uses DQL commands to transform data. Available commands:
 | fieldsAdd message_length = stringLength(content)
 
 // From existing field
-| fieldsAdd short_host = substring(host.name, 0, 10)
+| fieldsAdd short_host = substring(host.name, from: 0, to: 10)
 ```
 
 ### Drop Processor
@@ -265,7 +267,7 @@ DPL is a powerful pattern matching language used in the `parse` command.
 | parse content, "('user='|'userId='|'user_id=')LD:user_id"
 
 // Parse Apache-style log
-| parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:timestamp ']"
+| parse content, "IPADDR:client_ip SPACE '-' SPACE LD:user SPACE '[' LD:log_time ']'"
 
 // Extract JSON payload
 | parse content, "LD JSON:payload"
@@ -299,36 +301,36 @@ This comprehensive reference contains ALL OpenPipeline limits you need to know f
 
 | Limit | Value | Behavior When Exceeded |
 |-------|-------|------------------------|
-| **Max record size (after processing)** | 16 MB | Record is **dropped**, logged in audit |
-| **Max record size (before processing)** | 10 MB | Ingestion rejected with 413 error |
-| **Working memory per record** | 16 MB | Processing fails, record dropped |
-| **Log attribute size** | 32 KB | Attribute value **truncated** |
-| **Max field name length** | 255 characters | Field creation fails |
-| **Max string field length** | 32 KB | Content truncated |
-| **Max array size** | 1000 elements | Array truncated |
-| **Max nesting depth (JSON)** | 10 levels | Deeper levels flattened |
+| **Max record size (after processing)** | 16 MB | Record is **dropped** |
+| **Max request payload** | 10 MB per configuration scope | Request rejected (status code not stated on the limits page) |
+| **Working memory per record** | Limited — no figure published † | Record dropped once processing memory is exhausted (reported as `buffer_overflow`) |
+| **Log attribute size** | 32 KB (4,096 characters per attribute in an event template) | Attribute value **truncated** |
+| **Max field name length** | 255 characters † | Field creation fails |
+| **Max string field length** | 32 KB † | Content truncated |
+| **Max array size** | 1000 elements † | Array truncated |
+| **Max nesting depth (JSON)** | 10 levels † | Deeper levels flattened |
 
 ### Processing Limits
 
 | Limit | Value | Impact |
 |-------|-------|--------|
 | **Max pipelines per record** | 5 | A record can be processed by up to 5 different pipelines. After 5, data extraction stops but the record is still persisted. |
-| **Max processors per pipeline** | 1,000 | Cannot add more processors to pipeline |
-| **Max DQL commands per processor** | 10 commands | Split complex logic into multiple processors |
-| **Max parse operations per processor** | 100 patterns | Create additional parse processors |
-| **Max fields per record** | 500 fields | Additional fields ignored |
-| **Processing timeout per record** | 30 seconds | Record dropped if exceeded |
-| **Max processor name length** | 100 characters | Validation error |
+| **Max processors per pipeline** | 1,000 (100 in a base pipeline) | Cannot add more processors to pipeline |
+| **Max DQL commands per processor** | 10 commands † | Split complex logic into multiple processors |
+| **Max parse operations per processor** | 100 patterns † | Create additional parse processors |
+| **Max fields per record** | 500 fields † | Additional fields ignored |
+| **Processing timeout per record** | 30 seconds † | Record dropped if exceeded |
+| **Max processor name length** | 100 characters † | Validation error |
 
 ### Timestamp Constraints
 
-| Data Type | Accepted Range | Records Outside Range |
+| Data Type | Earliest accepted timestamp (older → **dropped** before processing) | Timestamp more than 10 min in the future |
 |-----------|---------------|----------------------|
-| **Logs** | 24 hours past to 10 minutes future | **Dropped** |
-| **Spans** | 60 minutes past (end time) | **Dropped** |
-| **Events** | 24 hours past to 10 minutes future | **Dropped** |
-| **Business Events** | 24 hours past to 10 minutes future | **Dropped** |
-| **Metrics** | 1 hour past to 1 minute future | **Dropped** |
+| **Logs** | Ingest time minus 24 hours. From **SaaS 1.348** (pre-release; staged tenant rollout planned from 09/22/2026): 72 hours — verify the new window has reached your tenant; 24 hours remains the working value until then | **Adjusted** to ingest time + 10 min |
+| **Spans** | 60 minutes past (end time) † | Not adjusted (the adjustment doesn't apply to spans) |
+| **Events** | Ingest time minus 24 hours | **Adjusted** to ingest time + 10 min |
+| **Business Events** | Ingest time minus 24 hours | **Adjusted** to ingest time + 10 min |
+| **Metrics** | Ingest time minus 1 hour | **Adjusted** to ingest time + 10 min |
 
 > ⚠️ **Critical:** Historical data imports require workarounds. Contact Dynatrace support for backfilling options.
 
@@ -344,21 +346,23 @@ This comprehensive reference contains ALL OpenPipeline limits you need to know f
 | Limit | Value | Scope |
 |-------|-------|-------|
 | **Max custom pipelines** | 100 pipelines | Per configuration scope (logs, spans, etc.) |
-| **Max dynamic routes** | 3,000 routes | Per configuration scope |
-| **Max conditions per route** | 10 conditions | Combine with AND/OR operators |
-| **Max pipeline name length** | 100 characters | Validation error |
-| **Max route name length** | 100 characters | Validation error |
+| **Max pipeline groups** | 100 | Per configuration scope |
+| **Max dynamic routes** | 100 routes | Per configuration scope |
+| **Max ingest sources** | 100 | Per configuration scope |
+| **Max conditions per route** | 10 conditions † | Combine with AND/OR operators |
+| **Max pipeline name length** | 100 characters † | Validation error |
+| **Max route name length** | 100 characters † | Validation error |
 
 ### Extraction Limits
 
 | Limit | Value | Notes |
 |-------|-------|-------|
-| **Max metric extractions per pipeline** | 10 | Value + counter metrics combined |
-| **Max event extractions per pipeline** | 5 | All event types combined |
-| **Max bizevent extractions per pipeline** | 3 | Business events only |
-| **Max dimensions per metric** | 10 dimensions | Keep cardinality low |
-| **Metric key length** | 250 characters | Validation error |
-| **Event type name length** | 100 characters | Validation error |
+| **Max metric extractions per pipeline** | 10 † | Value + counter metrics combined |
+| **Max event extractions per pipeline** | 5 † | All event types combined |
+| **Max bizevent extractions per pipeline** | 3 † | Business events only |
+| **Max dimensions per metric** | 10 dimensions † | Keep cardinality low |
+| **Metric key length** | 250 characters † | Validation error |
+| **Event type name length** | 100 characters † | Validation error |
 
 ### DQL & DPL Limits
 
@@ -366,28 +370,28 @@ This comprehensive reference contains ALL OpenPipeline limits you need to know f
 |-------|-------|------|
 | **DQL processor script length** | 8,192 characters | Per `/reference/limits` (May 2026 doc) |
 | **Processor matching condition length** | 4,096 characters (Settings API); 1,500 for legacy Configurations API / Classic pipelines | Per `/reference/limits` (Jun 17, 2026 doc) |
-| **Max DPL pattern length** | 4 KB | Per parse pattern |
-| **Max captured groups per parse** | 100 groups | Use multiple parse operations |
-| **Max alternatives in pattern** | 50 alternatives | `(opt1\|opt2\|...\|opt50)` |
+| **Max DPL pattern length** | 4 KB † | Per parse pattern |
+| **Max captured groups per parse** | 100 groups † | Use multiple parse operations |
+| **Max alternatives in pattern** | 50 alternatives † | `(opt1\|opt2\|...\|opt50)` |
 
 ### Bucket & Storage Limits
 
 | Limit | Value | Notes |
 |-------|-------|-------|
 | **Max custom buckets** | 80 by default; 250 from SaaS 1.346 (staged tenant rollout from 08/25/2026) | Per environment. The upgrade guide still states 80, the Grail *organize data* page and the 1.346 release note state 250 — check which default your tenant has before planning to either number |
-| **Min retention period** | 1 day | Per bucket |
-| **Max retention period** | 2555 days (~7 years) | Per bucket |
-| **Bucket name length** | 100 characters | Alphanumeric + underscore |
+| **Min retention period** | 1 day | Per custom bucket |
+| **Max retention period** | 10 years, with an additional week | Per custom bucket |
+| **Bucket name length** | 100 characters † | Alphanumeric + underscore |
 
-> <sub>**Sources:** [Data partitioning — upgrade best practices (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/best-practices/stage-05-partition-data/data-partitioning) — *"The default bucket limit per environment is 80 buckets, which is typically sufficient for up to 5 TB/day per table."*; [Organize data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data) — *"The default limit per environment is 250 custom buckets."*; [SaaS 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-346) — *"Dynatrace now supports up to 250 custom Grail buckets by default"*.</sub>
+> <sub>**Sources:** [Data partitioning — upgrade best practices (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/best-practices/stage-05-partition-data/data-partitioning) — *"The default bucket limit per environment is 80 buckets, which is typically sufficient for up to 5 TB/day per table."*; [Organize data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data) — *"The default limit per environment is 250 custom buckets."*; [SaaS 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-346) — *"Dynatrace now supports up to 250 custom Grail buckets by default"*. Retention: [Organize data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data) — *"For custom buckets, the possible retention periods range from 1 day to 10 years, with an additional week."*</sub>
 
 ### Rate Limits
 
 | Endpoint | Limit | Per |
 |----------|-------|-----|
-| **Log Ingest API** | 500 requests/min | Per token |
-| **OTLP Endpoint** | 1000 requests/min | Per token |
-| **Config API** | 100 requests/min | Per token |
+| **Log Ingest API** | 500 requests/min † | Per token |
+| **OTLP Endpoint** | 1000 requests/min † | Per token |
+| **Config API** | 100 requests/min † | Per token |
 
 ### Field & Matching Restrictions
 
@@ -430,12 +434,18 @@ dt.entity.cloud_application_namespace
 
 | Problem | Workaround |
 |---------|------------|
-| **>50 processors needed** | Split into multiple pipelines, use multi-pipeline routing |
+| **>1,000 processors needed (>100 in a base pipeline)** | Split the processing across pipelines — for example member pipelines in a pipeline group |
 | **>10 DQL commands** | Break into multiple processors (order matters!) |
 | **>100 parse patterns** | Use multiple parse processors in sequence |
 | **>16MB after processing** | Drop unnecessary fields, reduce field sizes |
 | **>5 pipelines needed** | Consolidate processing logic, use conditional processors |
 | **>10 metric dimensions** | Reduce cardinality, use separate metrics |
+
+† Not stated on the *OpenPipeline limits* page (read 09/28/2026) — treat as community-reported and verify in your tenant before planning to it. Every unmarked number in the tables above is on that page.
+
+> <sub>**Sources:**</sub>
+> - <sub>[OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — *"If the timestamp is more than 10 minutes in the future, it's adjusted to the ingest server time plus 10 minutes."*; *"The request payload size maximum limit is 10 MB per configuration scope."*; *"Once the available processing memory is exhausted, the record is dropped."*</sub>
+> - <sub>[What's new in SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"The log ingestion pipeline now accepts log records with timestamps up to 72 hours in the past, extended from the previous 24-hour limit."*</sub>
 
 ---
 
@@ -469,7 +479,7 @@ Why: Entity fields not available during routing
 ```
 
 #### ❌ WRONG - Cannot use entity in processing
-```dql
+```text
 DQL Processor:
   fieldsAdd service_name = dt.entity.service  ❌ FAILS
   
@@ -527,9 +537,13 @@ Extraction: Dimensions: app_tier, dt.entity.service  ✅
 
 | Field | Description | Example Value |
 |-------|-------------|---------------|
-| `dt.openpipeline.source` | Data source identifier | `oneagent`, `generic`, `otlp` |
-| `dt.openpipeline.pipelines` | Pipeline(s) that processed record | `["custom-pipeline-1"]` |
+| `dt.openpipeline.source` | Data source identifier — for built-in API sources, the endpoint path | `oneagent`, `/api/v2/logs/ingest`, `/api/v2/otlp/v1/logs` |
+| `dt.openpipeline.pipelines` | Pipeline(s) that processed record — an **array** of `"<scope>:<pipeline id>"` strings | `["logs:<pipeline id>"]` |
 | `dt.system.bucket` | Grail storage bucket | `default_logs`, `custom_logs` |
+
+Run the first query in [Exploring Your Pipeline Configuration](#exploring-your-pipeline-configuration) to see the source values in your own tenant. Because `dt.openpipeline.pipelines` is an array, `dt.openpipeline.pipelines == "name"` is always false — filter with `matchesValue(dt.openpipeline.pipelines, "*name*")` instead.
+
+> <sub>**Sources:** [Data flow (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/data-flow) — ingest sources *"are defined by a name and a path (dt.openpipeline.source)"*.</sub>
 
 ### Log Fields
 
@@ -692,10 +706,6 @@ Now that you understand OpenPipeline architecture, continue with:
 - [Dynatrace Pattern Language](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language)
 - [OpenPipeline Limits](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits)
 - [DPL Architect Tool](https://docs.dynatrace.com/docs/platform/grail/dynatrace-pattern-language/dpl-architect)
-
----
-
-*Last Updated: September 24, 2026*
 
 ---
 

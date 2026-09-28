@@ -1,6 +1,6 @@
 # S2S-09: Step 9 — Optimize: Cutover Validation and Decommission
 
-> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 9 of 9 | **Phase:** Run | **Step:** Optimize | **Created:** March 2026 | **Last Updated:** 07/24/2026
+> **Series:** S2S — SaaS to SaaS Migration | **Notebook:** 9 of 9 | **Phase:** Run | **Step:** Optimize | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -105,10 +105,10 @@ Execute these steps in order during the scheduled maintenance window. Each step 
 | 1 | **Announce** — Send cutover start notification to all stakeholders | 5 min | N/A |
 | 2 | **Suppress** — Enable maintenance window in source tenant | 5 min | Disable maintenance window |
 | 3 | **Redirect** — Update DNS/proxy for API endpoints to target tenant | 15 min | Revert DNS/proxy |
-| 4 | **Verify** — Confirm agents are reporting to target tenant only | 15 min | Re-enable dual reporting |
+| 4 | **Verify** — Confirm agents are reporting to target tenant only | 15 min | Redirect the affected wave back to source |
 | 5 | **Enable** — Activate alerting in target tenant (remove staging routing) | 10 min | Re-route to staging |
 | 6 | **Validate** — Run post-cutover validation queries (Section 3) | 30 min | If validation fails, rollback |
-| 7 | **Disable** — Stop data collection in source tenant (set to read-only) | 10 min | Re-enable collection |
+| 7 | **Disable** — Stop ingest into the source tenant (disable its integrations, revoke its ingest tokens); its data stays queryable for its bucket retention | 10 min | Re-enable integrations |
 | 8 | **Communicate** — Send cutover complete notification | 5 min | N/A |
 | 9 | **Monitor** — Active monitoring for 4–24 hours post-cutover | Ongoing | Full rollback if critical issues |
 
@@ -235,7 +235,7 @@ If critical issues are discovered during or after cutover, follow these rollback
 | Severity | Criteria | Action |
 |----------|----------|--------|
 | **Critical** | >25% of hosts not reporting, or no log/span flow | Full rollback immediately |
-| **High** | Key SLOs evaluating at 0%, or critical alerts not firing | Partial rollback, keep agents dual-reporting |
+| **High** | Key SLOs evaluating at 0%, or critical alerts not firing | Partial rollback — redirect the affected wave back to source |
 | **Medium** | Minor data gaps, non-critical dashboards missing data | Continue with remediation plan |
 | **Low** | Cosmetic issues, minor configuration differences | Fix forward |
 
@@ -243,8 +243,8 @@ If critical issues are discovered during or after cutover, follow these rollback
 
 | Component | Rollback Action | Time to Rollback |
 |-----------|----------------|------------------|
-| **OneAgent** | Update `host_group` or connection endpoint back to source tenant | 5–15 min per host (automated via deployment tool) |
-| **DynaKube** | Update DynaKube CR `apiUrl` to source tenant | 5 min + pod restart |
+| **OneAgent** | Re-run `oneagentctl --set-server=<source-url>/communication --set-tenant=<source-env-id> --set-tenant-token=<source-token> --restart-service` (a host group change does not move an agent between tenants) | 5–15 min per host (automated via deployment tool) |
+| **DynaKube** | Delete the target DynaKube and re-apply the source CR saved in S2S-04 (`apiUrl` is immutable — see S2S-05 §6) | 5 min + pod restart |
 | **Cloud integrations** | Re-enable in source tenant, disable in target | 15 min |
 | **Alerting** | Disable target alerting, re-enable source | 10 min |
 | **SLOs** | No rollback needed — source SLOs still evaluating during parallel | N/A |
@@ -260,7 +260,7 @@ After a successful cutover and monitoring buffer period, the source tenant can b
 
 | Week | Action | Notes |
 |------|--------|-------|
-| **Week 0** | Cutover complete — source set to read-only | No new data ingested |
+| **Week 0** | Cutover complete — ingest into source stopped (agents and integrations redirected, ingest tokens revoked) | No new data ingested; existing data stays queryable for its bucket retention |
 | **Week 1–2** | Active monitoring buffer — source available for historical queries | Keep source accessible |
 | **Week 3–4** | Export any remaining artifacts (problem reports, session replay screenshots) | Document what was exported |
 | **Week 5–6** | Disable source tenant monitoring agents (remove OneAgents, delete DynaKube CRs) | Confirm no data flowing to source |
@@ -325,7 +325,7 @@ Capture lessons learned while the migration is still fresh. Organize by category
 | baselines need at least 2 full weeks | Plan parallel operation accordingly |
 | Credential recreation is a bottleneck | Involve cloud and security teams early |
 | Stakeholder fatigue is real | Keep communication concise and predictable |
-| Extensions 2.0 must be reinstalled from Hub | Neither Monaco nor Terraform can export them |
+| Extensions 2.0 need their own migration path | Monaco does not export extension installations; Terraform can install/activate (`dynatrace_hub_extension_active_version`) and configure (`dynatrace_hub_extension_v2_config`) them — otherwise reinstall from Hub |
 | Webhook URLs are easily missed | Audit all notification integrations systematically |
 
 <a id="series-conclusion"></a>
@@ -371,7 +371,7 @@ This completes the 9-step SaaS-to-SaaS migration framework.
 | detected problem volume within normal range | [ ] |
 | MTTR baseline established in target tenant | [ ] |
 | Rollback plan confirmed not needed (or rollback executed and re-cutover scheduled) | [ ] |
-| Source tenant set to read-only | [ ] |
+| Source tenant ingest stopped (agents and integrations redirected, ingest tokens revoked) | [ ] |
 | Source tenant decommission timeline agreed | [ ] |
 | All documentation updated (runbooks, architecture, DR, security) | [ ] |
 | Lessons learned captured and shared | [ ] |

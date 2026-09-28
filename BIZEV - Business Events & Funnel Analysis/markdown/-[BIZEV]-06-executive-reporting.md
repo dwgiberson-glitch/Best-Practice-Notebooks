@@ -1,6 +1,6 @@
 # BIZEV-06: Executive Reporting
 
-> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 6 of 7 | **Created:** March 2026 | **Last Updated:** 08/04/2026
+> **Series:** BIZEV — Business Events & Funnel Analysis | **Notebook:** 6 of 7 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -83,10 +83,12 @@ fetch dt.davis.problems, from:-7d
 | filter event.status == "CLOSED"
 | filter dt.davis.is_duplicate == false
 | fieldsAdd duration_hours = resolved_problem_duration / 1h
+// total_entity_impact_hours counts overlapping problems separately — it is entity-hours
+// of impact, NOT wall-clock downtime, and can exceed the 168 hours in the week (see BIZEV-04 §6)
 | summarize {problem_count = count(),
            avg_resolution_hours = avg(duration_hours),
            max_resolution_hours = max(duration_hours),
-           total_impact_hours = sum(duration_hours)}, by:{event.category}
+           total_entity_impact_hours = sum(duration_hours)}, by:{event.category}
 | sort problem_count desc
 ```
 
@@ -192,30 +194,13 @@ fetch bizevents, from:bin(now(), 24h) - 24h, to:bin(now(), 24h)
 To schedule these reports in Dynatrace:
 
 1. Navigate to **Workflows** in the Dynatrace UI
-2. Create a new workflow with a **Time trigger** (e.g., daily at 8:00 AM)
-3. Add a **DQL query** action with the report query
-4. Add a **Send notification** action (email, Slack, Teams) with the query results
+2. Create a new workflow with a **Schedule** trigger — for example, weekdays at 8:00 AM (cron `0 8 * * 1-5`)
+3. Add an **Execute DQL Query** action (`dynatrace.automations:execute-dql-query`) with the report query above
+4. Add a notification action for the channel you want — each channel is its own action: the Slack Connector **Send message** action (`dynatrace.slack:message`), Email **Send email** (`dynatrace.email:send-email`), or the Microsoft Teams action — and reference the query result in the message, for example `{{ result("execute_dql_query_1").records }}` (use the task name of your DQL action)
 
-```yaml
-# Example workflow definition
-trigger:
-  type: time
-  schedule: "0 8 * * 1-5"  # Weekdays at 8 AM
+There is no single "Send notification" action. For complete scheduled-report workflow definitions, including connection setup and message formatting, see the **WFLOW** series.
 
-actions:
-  - name: "Run daily report"
-    type: dql_query
-    query: |
-      fetch bizevents, from:bin(now(), 24h) - 24h, to:bin(now(), 24h)
-      | summarize total_events = count(), by:{event.type}
-      | sort total_events desc
-      | limit 10
-
-  - name: "Send to Slack"
-    type: notification
-    channel: "#business-reports"
-    template: "daily_business_summary"
-```
+> <sub>**Sources:** [Workflow triggers (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/trigger) — *"Runs on a fixed interval or at a set time, for example for a nightly report or weekly cleanup."*; [Workflow actions (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions) — *"Use the Execute DQL Query action for executing DQL queries."*; [Slack Connector (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/actions/slack), [Email (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/actions/email).</sub>
 
 <a id="business-value-dashboards"></a>
 
@@ -232,11 +217,15 @@ fetch bizevents, from:-15m
 | fieldsAdd tx_per_minute = round(toDouble(tx_count) / 15.0, decimals: 1)
 ```
 
+### Tile 2: Transaction Trend
+
 ```dql
 // Dashboard tile: transaction trend (last 6 hours, 15-min intervals)
 fetch bizevents, from:-6h
 | makeTimeseries tx_count = count(), interval:15m
 ```
+
+### Tile 3: Event Distribution by Provider
 
 ```dql
 // Dashboard tile: event distribution by provider (pie chart)
@@ -311,7 +300,7 @@ This is the last of the core analysis notebooks in the BIZEV series. Across the 
 | Notebook | Key Capability |
 |----------|----------------|
 | **BIZEV-01** | Business events data model and exploration |
-| **BIZEV-02** | Instrumentation methods (OneAgent, API, SDK, OpenPipeline) |
+| **BIZEV-02** | Instrumentation methods (OneAgent capture rules, API, RUM/mobile APIs, OpenPipeline) |
 | **BIZEV-03** | Conversion funnel analysis and drop-off detection |
 | **BIZEV-04** | Revenue impact analysis and incident correlation |
 | **BIZEV-05** | Business KPI definition, metric extraction, health scoring |
@@ -329,7 +318,7 @@ This is the last of the core analysis notebooks in the BIZEV series. Across the 
 ### References
 
 - [Dynatrace Business Analytics](https://docs.dynatrace.com/docs/observe/business-observability)
-- [Dynatrace Dashboards](https://docs.dynatrace.com/docs/analyze-explore-automate/dashboards-classic)
+- [Dashboards (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/dashboards-and-notebooks/dashboards-new)
 - [Workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows)
 - [Service-level objectives (DT docs)](https://docs.dynatrace.com/docs/deliver/service-level-objectives)
 

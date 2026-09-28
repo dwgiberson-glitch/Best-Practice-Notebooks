@@ -1,6 +1,6 @@
 # OPMIG-03: OpenPipeline Migration Guide: Part 3
 
-> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 3 of 10 | **Created:** December 2025 | **Last Updated:** 06/23/2026
+> **Series:** OPMIG — OpenPipeline Migration | **Notebook:** 3 of 10 | **Created:** December 2025 | **Last Updated:** 09/28/2026
 
 ## Migration Assessment & Planning
 ---
@@ -41,7 +41,7 @@ By the end of this notebook, you will:
 
 | Requirement | Details |
 |-------------|---------|
-| **Dynatrace Environment** | SaaS or Managed with Grail and existing log ingestion |
+| **Dynatrace Environment** | Dynatrace SaaS with Grail and existing log ingestion — OpenPipeline runs in the SaaS environment; Managed is not covered by this series |
 | **API Access** | `logs.read` token scope |
 | **Existing Logs** | At least 7 days of classic log data for assessment queries |
 | **Knowledge** | OPMIG-01 and OPMIG-02 concepts |
@@ -60,13 +60,14 @@ If you have access to the Dynatrace MCP Server, you can use Dynatrace Assist to 
 
 ### Dynatrace Assist Capabilities
 
+Tool names differ between Dynatrace MCP server versions. The names below are the ones the tenant-hosted Dynatrace MCP server exposed on 09/28/2026 — check your own server's tool list.
+
 | Tool | Purpose | Example Use Case |
 |------|---------|------------------|
-| **chat_with_davis_copilot** | Ask any Dynatrace question | "What log sources exist in my environment?" |
-| **generate_dql_from_natural_language** | Natural language → DQL | "Show me error logs from the last week" |
-| **explain_dql_in_natural_language** | Explain complex queries | Understand existing queries |
-| **verify_dql** | Validate DQL syntax | Check queries before running |
-| **execute_dql** | Run queries against tenant | Get real data |
+| **ask-dynatrace-docs** | Ask a Dynatrace documentation question | "How does OpenPipeline dynamic routing work?" |
+| **create-dql** | Natural language → DQL | "Show me error logs from the last week" |
+| **explain-dql** | Explain complex queries | Understand existing queries |
+| **execute-dql** | Run queries against tenant (a syntax error is reported in the response) | Get real data |
 
 ### Example: Discovery with Dynatrace Assist
 
@@ -111,25 +112,11 @@ fetch logs, from: now() - 1h
 
 ### Discovery Workflow with MCP
 
-```
-1. ASK DAVIS
-   └─ "What log sources exist?"
-   
-2. DAVIS GENERATES DQL
-   └─ fetch logs | summarize...
-   
-3. VERIFY SYNTAX
-   └─ mcp verify_dql(query)
-   
-4. EXECUTE
-   └─ mcp execute_dql(query)
-   
-5. ANALYZE RESULTS
-   └─ Identify patterns, volumes
-   
-6. REFINE
-   └─ Ask follow-up questions
-```
+1. **Ask** in natural language — *"What log sources exist?"*
+2. **Generate DQL** with `create-dql` — e.g. `fetch logs | summarize …`
+3. **Execute** with `execute-dql` — read the whole response: a syntax error comes back as an error, not as zero rows
+4. **Analyze results** — identify patterns and volumes
+5. **Refine** — ask follow-up questions and repeat
 
 ---
 
@@ -668,10 +655,11 @@ fetch logs, from: now() - 1h
 
 ```dql
 // Look for IP addresses in logs (may need masking for GDPR)
+// DPL IPADDR matches IPv4 and IPv6 addresses anywhere in the content
 fetch logs, from: now() - 1h
-| filter contains(toString(content), ".")
-| summarize {logs_with_dots = count()}, by: {log.source}
-| sort logs_with_dots desc
+| filter matchesPattern(content, "LD IPADDR LD")
+| summarize {logs_with_ip = count()}, by: {log.source}
+| sort logs_with_ip desc
 | limit 20
 ```
 
@@ -693,15 +681,7 @@ fetch logs, from: now() - 7d
 ## Migration Priority Matrix
 Based on your assessment, prioritize sources for migration using this framework:
 
-### Priority Scoring Criteria
-
-| Factor | Weight | High Score | Low Score |
-|--------|--------|------------|------------|
-| **Volume** | 30% | >1M logs/day | <10K logs/day |
-| **Cost Savings Potential** | 25% | >30% droppable | <5% droppable |
-| **Security Risk** | 25% | Contains PII | No sensitive data |
-| **Parsing Complexity** | 10% | Simple JSON/structured | Complex multi-format |
-| **Business Criticality** | 10% | Core business app | Development/test |
+Score each source with the weights and tiers in [Migration Priority Scoring Matrix](#migration-priority-scoring-matrix) (Volume 25%, Cost Savings 25%, Security Risk 25%, Parsing Complexity 10%, Business Criticality 15%), then place it in a wave:
 
 ### Recommended Migration Waves
 
@@ -830,10 +810,6 @@ With your assessment complete, continue with:
 - [OpenPipeline Configuration Tutorial](https://docs.dynatrace.com/docs/platform/openpipeline/get-started/tutorial-configure-processing)
 - [Log Management Limits](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-limits)
 - [organize-data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data)
-
----
-
-*Last Updated: May 6, 2026*
 
 ---
 

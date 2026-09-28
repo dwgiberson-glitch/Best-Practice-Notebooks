@@ -1,6 +1,6 @@
 # FAQ-04: How to manage OneAgent updates on Dynatrace SaaS
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 04 — Managing OneAgent Updates (SaaS) | **Created:** May 2026 | **Last Updated:** 09/18/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 04 — Managing OneAgent Updates (SaaS) | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -101,9 +101,9 @@ Three scopes, in increasing specificity:
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Scope | Where set | Wins over |
 |-------|-----------|-----------|
-| Tenant default | Settings → Preferences → OneAgent updates | (baseline) |
-| Host group override | Settings → Preferences → OneAgent updates → Host group settings | Tenant default |
-| Per-host override | Host settings page → OneAgent updates | Host group + tenant default |
+| Tenant default | Latest Dynatrace: Settings → Fleet management → OneAgent version and updates. Classic: Settings → Updates → OneAgent updates | (baseline) |
+| Host group override | Latest Dynatrace: Fleet Management → host group details → Configure updates. Classic: Host group settings page → OneAgent updates | Tenant default |
+| Per-host override | Latest Dynatrace: Fleet Management → host details → Configure updates. Classic: host settings page → OneAgent updates | Host group + tenant default |
 For environments where SVG doesn't render
 -->
 
@@ -115,7 +115,7 @@ For environments where SVG doesn't render
 
 **Where this lives operationally:** the host-group setting is the right granularity for almost every real-world policy. Per-host overrides are escape hatches. If you find yourself setting per-host overrides repeatedly across the same group of hosts, that group is telling you it wants to be its own host group.
 
-> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update) — three-level precedence: environment / host group / individual host., [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups) — host-group as the canonical scoping boundary for update settings, alerting overrides, and thresholds., [oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl) — `--set-host-group` and related auto-update CLI controls, persistent across reinstalls.</sub>
+> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update) — three-level precedence: environment / host group / individual host; Latest Dynatrace: *"go to Settings > Fleet management > OneAgent version and updates"* and *"For host-group- or host-level overrides, open Configure updates from the entity's details in Fleet Management"*; Classic: *"go to Settings > Updates > OneAgent updates"*., [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups) — host-group as the canonical scoping boundary for update settings, alerting overrides, and thresholds., [oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl) — `--set-host-group` and related auto-update CLI controls, persistent across reinstalls.</sub>
 
 <a id="modes"></a>
 ## 4. The Three Update Modes — Decision Framework
@@ -159,7 +159,7 @@ Two related-but-distinct mechanisms are easy to confuse:
 
 | Concept | What it does | Where to set |
 |---------|--------------|--------------|
-| **Update window** | Defines *when* automatic OneAgent updates may execute. Only applies when the update mode is `Automatic updates during update windows`. | Settings → Preferences → OneAgent updates → Update windows |
+| **Update window** | Defines *when* automatic OneAgent updates may execute. Only applies when the update mode is `Automatic updates during update windows`. | Latest Dynatrace: Settings → Fleet management → OneAgent version and updates → *Manage update windows* tab |
 | **Maintenance window** | Suppresses *alerting* on monitored entities during the window. Does **not** govern OneAgent updates. | Settings → Maintenance windows |
 
 In community practice, the confusion goes both directions: teams set a Maintenance Window expecting it to delay OneAgent updates (it does not), or they set an Update Window expecting alerts to be suppressed during it (they are not). Maintenance windows govern alerting; update windows govern the update mechanic itself. They are independent tools and often used together.

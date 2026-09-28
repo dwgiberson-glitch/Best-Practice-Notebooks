@@ -1,6 +1,6 @@
 # FAQ-23: How Do I Monitor Box With Dynatrace?
 
-> **Series:** FAQ — Frequently Asked Questions | **Reference:** 23 — Monitoring Box With Dynatrace | **Created:** August 2026 | **Last Updated:** 08/27/2026
+> **Series:** FAQ — Frequently Asked Questions | **Reference:** 23 — Monitoring Box With Dynatrace | **Created:** August 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -99,7 +99,7 @@ Box does publish webhooks, which is exactly why this goes wrong. They are a real
 | Attach to **specific files or folders**; **cannot be set on the root folder** (ID 0) | There is no account-wide subscription to create |
 | Cap of **1,000 webhooks per application + user** combination | You could watch 1,000 folders — not an enterprise |
 | Triggers are content actions (upload, copy, move, share, delete) | **No logins, no admin actions, no `SHIELD_ALERT`** |
-| Delivery requires a 2xx within 30 s; Box retries 12× over 2 hours | A receiver outage drops events with no cursor to replay from |
+| Delivery requires a 2xx within 30 s; Box retries up to 5× over 1 hour | A receiver outage drops events with no cursor to replay from |
 | Token expiry degrades the payload to `NO_ACTIVE_SESSION` | Silent partial failure |
 
 Enterprise audit events are reachable only through `GET /events` with `stream_type` set to `admin_logs` or `admin_logs_streaming`, and Box's own documentation states that **"the enterprise event feed does not support long polling."** It is pull-only.
@@ -108,6 +108,7 @@ Enterprise audit events are reachable only through `GET /events` with `stream_ty
 
 > <sub>**Sources:**</sub>
 > - <sub>[Webhooks (Box Dev Docs)](https://developer.box.com/guides/webhooks)</sub>
+> - <sub>[Webhooks V2 (Box Dev Docs)](https://developer.box.com/guides/webhooks/v2) — *"Box retries webhook deliveries up to 5 times over a period of 1 hour. These numbers could be subject to change."*</sub>
 > - <sub>[Webhook limitations V2 (Box Dev Docs)](https://developer.box.com/guides/webhooks/v2/limitations-v2)</sub>
 > - <sub>[Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise)</sub>
 > - <sub>[Box Hub catalog (Dynatrace)](https://www.dynatrace.com/hub/)</sub>
@@ -143,11 +144,12 @@ Run this before you build anything:
 // http.url does NOT exist in the semantic dictionary and returns zero rows
 // silently — see § 17. Same shape, different field: span.status_code values are
 // LOWERCASE, so `== "ERROR"` reports a 0% failure rate for every address.
+// Divide a duration by 1ms to get a number — dividing by 1000000 still yields a duration.
 fetch spans, from:-24h
 | filter span.kind == "client" and endsWith(server.address, "box.com")
 | summarize {calls = count(),
              failures = countIf(span.status_code == "error"),
-             p90_ms = percentile(duration, 90) / 1000000},
+             p90_ms = percentile(duration, 90) / 1ms},
             by:{server.address}
 | fieldsAdd failure_rate_pct = round(100.0 * failures / calls, decimals: 2)
 | sort calls desc
@@ -304,9 +306,9 @@ The recommended path at typical volume. No infrastructure, secrets stay in the C
 
 | Step | What | Why it matters |
 |---|---|---|
-| **1. Credential Vault entry** | Store the Box `client_id` / `client_secret` as a username/password credential | Never put Box secrets in workflow code — they are readable by anyone who can view the workflow |
+| **1. Credential Vault entry** | Store the Box `client_id` / `client_secret` as a username/password credential with the **AppEngine** scope | Never put Box secrets in workflow code — they are readable by anyone who can view the workflow. A credential without the AppEngine scope is not readable from workflow code |
 | **2. Outbound allowlist** | Add `api.box.com` to `builtin:dt-javascript-runtime.allowed-outbound-connections` | **A non-allowlisted host fails silently.** This is the single most common "my workflow does nothing" cause |
-| **3. Standard workflow** | Create a **standard** workflow, not a simple one | `@dynatrace-sdk/automation-utils` returns **404** on simple workflows. Standard workflows also bill differently — see ALERT-03 |
+| **3. Standard workflow** | Create a **standard** workflow, not a simple one | A simple workflow cannot contain a **Run JavaScript** action at all. Standard workflows also bill differently — see ALERT-03 § 1 |
 
 ### 7.2 The collector
 
@@ -314,7 +316,7 @@ A single **Run JavaScript** action on a 5-minute schedule. It authenticates, rea
 
 ```javascript
 import { credentialVaultClient, logsClient } from "@dynatrace-sdk/client-classic-environment-v2";
-import { stateClient } from "@dynatrace-sdk/client-state";
+import { stateClient, isNotFound } from "@dynatrace-sdk/client-state";
 
 const BOX_CREDENTIAL_ID = "CREDENTIALS_VAULT-XXXXXXXXXXXXXXXX";
 const BOX_ENTERPRISE_ID = "1234567";
@@ -323,6 +325,7 @@ const LOG_SOURCE        = "box.events";
 const PAGE_LIMIT        = 500;
 const MAX_PAGES         = 60;      // stay clear of the 120 s ceiling
 const INGEST_BATCH      = 1000;    // well under 50,000 records / 10 MB
+const MAX_EVENT_AGE_MS  = 23 * 60 * 60 * 1000; // log ingest drops timestamps > 24 h old (§ 9.1)
 
 export default async function () {
   // --- 1. Authenticate (Client Credentials Grant) -------------------------
@@ -357,7 +360,8 @@ export default async function () {
     if (saved?.value) streamPosition = saved.value;
   } catch (e) {
     // No cursor yet — first run. Any other error should surface.
-    if (e?.status !== 404) throw e;
+    // The SDK error has no top-level `status`; use the exported type guard.
+    if (!isNotFound(e)) throw e;
   }
 
   // --- 3. Page until drained ---------------------------------------------
@@ -390,22 +394,31 @@ export default async function () {
       if (seen.has(evt.event_id)) continue;
       seen.add(evt.event_id);
 
-      records.push({
-        timestamp: evt.created_at,
+      const record = {
         content: JSON.stringify(evt),
         "log.source": LOG_SOURCE,
+        "box.created_at": evt.created_at,
         "box.event_id": evt.event_id,
         "box.event_type": evt.event_type,
         "box.user.login": evt.created_by?.login,
         "box.item.name": evt.source?.item_name,
         "box.ip_address": evt.ip_address,
-      });
+      };
+      // Log ingest DROPS a record whose timestamp is older than 24 h. For a
+      // backlog (first run from 0, a long outage), leave timestamp unset so the
+      // record takes its ingest time, and query event time on box.created_at.
+      if (Date.now() - Date.parse(evt.created_at) < MAX_EVENT_AGE_MS) {
+        record.timestamp = evt.created_at;
+      }
+      records.push(record);
     }
 
     streamPosition = page.next_stream_position;
     pages++;
 
-    // A short page means the stream is drained.
+    // A short page usually means the live edge — but Box can return fewer than
+    // `limit` while events remain. Stopping here only defers them to the next
+    // run; the cursor still points at them, so nothing is lost.
     if (entries.length < PAGE_LIMIT) break;
   }
 
@@ -429,7 +442,7 @@ export default async function () {
 }
 ```
 
-### 7.3 Four details in that code that are load-bearing
+### 7.3 Six details in that code that are load-bearing
 
 | Detail | Why |
 |---|---|
@@ -437,6 +450,8 @@ export default async function () {
 | **No TTL on the cursor** | `stateClient` TTL (`validUntilTime`) accepts now+1m … now+90d. Set one and your cursor silently expires, resetting the collector. **Omit it** |
 | **`MAX_PAGES` guard** | Bounds the run below the 120 s ceiling. A backlog drains across several runs rather than timing out forever on the first |
 | **Throwing on auth failure** | An unhandled non-OK response would leave you with an empty ingest that looks identical to a quiet Box tenant |
+| **`isNotFound(e)` on the first cursor read** | The SDK's error object carries the HTTP response under `response`, not a top-level `status` — a `e.status !== 404` test is always true and makes every first run throw |
+| **No `timestamp` on events older than ~23 h** | Log ingest drops any record timestamped more than 24 h in the past (§ 9.1). Replaying a backlog with `timestamp: created_at` loses it silently; ingest-time stamping plus `box.created_at` keeps it |
 
 ### 7.4 Alert on the collector, not just on Box
 
@@ -444,7 +459,9 @@ A Workflow that stops running produces no logs — and no logs looks exactly lik
 
 > <sub>**Sources:**</sub>
 > - <sub>[JavaScript runtime limits (Dynatrace Developer)](https://developer.dynatrace.com/develop/reference/javascript-runtime/)</sub>
-> - <sub>[client-state SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-state/)</sub>
+> - <sub>[client-state SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-state/) — exports the `isNotFound` type guard (checked in `@dynatrace-sdk/client-state` 1.11.0 typings, 09/28/2026)</sub>
+> - <sub>[Manage secrets (Dynatrace Developer)](https://developer.dynatrace.com/develop/guides/security/manage-secrets/) — *"Ensure to use the AppEngine scope for your credentials."*</sub>
+> - <sub>[Create a simple workflow (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build/simple-workflow) — *"You can use all available actions to create a simple workflow except Run JavaScript"*</sub>
 > - <sub>[Credential vault client (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-classic-environment-v2/)</sub>
 > - <sub>[Client Credentials Grant (Box Dev Docs)](https://developer.box.com/guides/authentication/client-credentials)</sub>
 > - <sub>[List user and enterprise events (Box Dev Docs)](https://developer.box.com/reference/get-events)</sub>
@@ -465,24 +482,33 @@ pip install boxsdk requests
 
 **`boxsdk` (v10+) is the current Box Python SDK. `box-sdk-gen` is the deprecated one.** The naming is actively misleading — "gen" sounds like the newer generation, and it was, briefly: it shipped as a standalone package and was deprecated on **17 September 2025** when its functionality was absorbed into the core SDK at v10.
 
-The PyPI release history settles it: `boxsdk` 10.14.0 shipped 05 August 2026, while `box-sdk-gen` has not released since 05 September 2025.
+The PyPI release history settles it: `boxsdk` 10.16.0 shipped 23 September 2026, while `box-sdk-gen` has not released since 05 September 2025.
+
+**The second half of the trap: you install `boxsdk`, but you import `box_sdk_gen`.** From v10 the `boxsdk` distribution contains only the generated package — its PyPI page says v10 *"fully and exclusively replaces the old `boxsdk` package"* — so `from boxsdk import Client, CCGAuth`, which every pre-v10 example uses, fails with `ModuleNotFoundError`. The collector below imports `BoxClient`, `BoxCCGAuth` and `CCGConfig` from `box_sdk_gen`.
 
 ### 8.2 The collector
+
+Syntax- and import-checked against `boxsdk` 10.16.0 (09/28/2026), including the `client.events.get_events` signature; it has not been run end-to-end against a Box enterprise.
 
 ```python
 """Poll the Box enterprise event stream and ship to Dynatrace.
 
 Steady state:  --stream-type admin_logs_streaming
-Backfill:      --stream-type admin_logs --created-after 2026-01-01T00:00:00Z
+Backfill:      --stream-type admin_logs --created-after 2026-01-01T00:00:00Z \
+               --cursor-file /var/lib/box/cursor-backfill
+
+Requires Python 3.11+ (datetime.fromisoformat accepts Box's offsets and "Z").
 """
 import argparse
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
-from boxsdk import Client, CCGAuth
+from box_sdk_gen import BoxCCGAuth, BoxClient, CCGConfig
+from box_sdk_gen.managers.events import GetEventsStreamType
 
 BOX_CLIENT_ID     = os.environ["BOX_CLIENT_ID"]
 BOX_CLIENT_SECRET = os.environ["BOX_CLIENT_SECRET"]
@@ -491,42 +517,43 @@ BOX_ENTERPRISE_ID = os.environ["BOX_ENTERPRISE_ID"]
 DT_ENV_URL   = os.environ["DT_ENV_URL"]      # https://abc12345.live.dynatrace.com
 DT_API_TOKEN = os.environ["DT_API_TOKEN"]    # scope: logs.ingest
 
-CURSOR_FILE   = Path(os.environ.get("BOX_CURSOR_FILE", "/var/lib/box/cursor"))
 LOG_SOURCE    = "box.events"
 PAGE_LIMIT    = 500
 INGEST_BATCH  = 1000     # well under the 50,000-record / 10 MB request limits
+MAX_EVENT_AGE = timedelta(hours=23)  # ingest drops timestamps > 24 h old (§ 9.1)
 
 
-def box_client() -> Client:
+def box_client() -> BoxClient:
     """Server-side auth. No user interaction, no refresh-token juggling."""
-    auth = CCGAuth(
+    config = CCGConfig(
         client_id=BOX_CLIENT_ID,
         client_secret=BOX_CLIENT_SECRET,
         enterprise_id=BOX_ENTERPRISE_ID,
     )
-    return Client(auth)
+    return BoxClient(auth=BoxCCGAuth(config=config))
 
 
-def read_cursor(default: str = "now") -> str:
-    return CURSOR_FILE.read_text().strip() if CURSOR_FILE.exists() else default
+def read_cursor(cursor_file: Path, default: str) -> str:
+    return cursor_file.read_text().strip() if cursor_file.exists() else default
 
 
-def write_cursor(position: str) -> None:
+def write_cursor(cursor_file: Path, position: str) -> None:
     """Write atomically — a torn cursor file is worse than no cursor file."""
-    CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CURSOR_FILE.with_suffix(".tmp")
+    cursor_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cursor_file.with_suffix(".tmp")
     tmp.write_text(str(position))
-    tmp.replace(CURSOR_FILE)
+    tmp.replace(cursor_file)
 
 
 def to_dt_record(evt: dict) -> dict:
     """Flatten a Box event into a Dynatrace log record."""
     created_by = evt.get("created_by") or {}
     source     = evt.get("source") or {}
-    return {
-        "timestamp":       evt.get("created_at"),
+    created_at = evt.get("created_at")
+    record = {
         "content":         json.dumps(evt, separators=(",", ":")),
         "log.source":      LOG_SOURCE,
+        "box.created_at":  created_at,
         "box.event_id":    evt.get("event_id"),
         "box.event_type":  evt.get("event_type"),
         "box.user.login":  created_by.get("login"),
@@ -534,6 +561,13 @@ def to_dt_record(evt: dict) -> dict:
         "box.item.type":   source.get("type"),
         "box.ip_address":  evt.get("ip_address"),
     }
+    # Only stamp event time when ingest will accept it. An older event keeps
+    # its ingest time as timestamp; query its real time on box.created_at.
+    if created_at:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(created_at)
+        if age < MAX_EVENT_AGE:
+            record["timestamp"] = created_at
+    return record
 
 
 def ingest(records: list[dict]) -> None:
@@ -548,8 +582,13 @@ def ingest(records: list[dict]) -> None:
         for attempt in range(5):
             resp = requests.post(url, headers=headers,
                                  data=json.dumps(batch), timeout=30)
-            if resp.status_code < 300:
+            if resp.status_code == 204:
                 break
+            # 200 is a PARTIAL success: some records were dropped (for example
+            # "... events were not ingested because of timestamp out of correct
+            # time range"). Treat it as a failure so the cursor does not advance.
+            if resp.status_code == 200:
+                raise RuntimeError(f"Dynatrace partial ingest: {resp.text}")
             # 413 means the batch expanded past 10 MB (or 16 MB after
             # preprocessing) — halving is the fix, not retrying.
             if resp.status_code == 413 and len(batch) > 1:
@@ -561,51 +600,53 @@ def ingest(records: list[dict]) -> None:
                 time.sleep(2 ** attempt)
                 continue
             resp.raise_for_status()
+            raise RuntimeError(f"Unexpected ingest response {resp.status_code}")
         else:
             raise RuntimeError("Dynatrace ingest failed after 5 attempts")
 
 
-def collect(stream_type: str, created_after: str | None = None) -> int:
+def collect(stream_type: str, cursor_file: Path,
+            created_after: datetime | None = None) -> int:
     client = box_client()
-    position = read_cursor()
+    # "now" returns no events, only the live-edge position; "0" replays
+    # everything the stream still holds. Backfill wants the latter.
+    default = "0" if stream_type == "admin_logs" else "now"
+    position = read_cursor(cursor_file, default)
     seen: set[str] = set()
     total = 0
 
     while True:
-        params = {
-            "stream_type": stream_type,
-            "limit": PAGE_LIMIT,
-            "stream_position": position,
-        }
-        if created_after:
-            params["created_after"] = created_after
-
         # The SDK handles auth, retry and token refresh for us.
-        page = client.make_request(
-            "GET", client.get_url("events"), params=params
-        ).json()
-
-        entries = page.get("entries", [])
-        if not entries:
-            break
+        page = client.events.get_events(
+            stream_type=GetEventsStreamType(stream_type),
+            stream_position=position,
+            limit=PAGE_LIMIT,
+            created_after=created_after,
+        )
+        entries = page.entries or []
 
         records = []
         for evt in entries:
-            eid = evt.get("event_id")
+            data = evt.to_dict()
+            eid = data.get("event_id")
             # admin_logs_streaming repeats events; admin_logs does not.
             if eid in seen:
                 continue
             seen.add(eid)
-            records.append(to_dt_record(evt))
+            records.append(to_dt_record(data))
 
         if records:
             ingest(records)
             total += len(records)
 
-        position = page.get("next_stream_position")
-        # Persist only after a successful ingest.
-        write_cursor(position)
+        # Persist only after a successful ingest — and on an EMPTY page too,
+        # or a cursor that started at "now" is never initialized.
+        position = str(page.next_stream_position)
+        write_cursor(cursor_file, position)
 
+        # Empty means the live edge. A short page may not be — Box can return
+        # fewer than `limit` while events remain — but stopping only defers
+        # them to the next run; the saved cursor still points at them.
         if len(entries) < PAGE_LIMIT:
             break
 
@@ -618,9 +659,15 @@ if __name__ == "__main__":
                     choices=["admin_logs_streaming", "admin_logs"])
     ap.add_argument("--created-after", default=None,
                     help="RFC3339 timestamp; admin_logs backfill only")
+    ap.add_argument("--cursor-file", type=Path,
+                    default=Path(os.environ.get("BOX_CURSOR_FILE",
+                                                "/var/lib/box/cursor")),
+                    help="use a separate file per stream type")
     args = ap.parse_args()
 
-    count = collect(args.stream_type, args.created_after)
+    after = (datetime.fromisoformat(args.created_after)
+             if args.created_after else None)
+    count = collect(args.stream_type, args.cursor_file, after)
     print(f"ingested {count} events")
 ```
 
@@ -629,7 +676,7 @@ if __name__ == "__main__":
 | Mode | Command | Notes |
 |---|---|---|
 | **Steady state** | `python box_collector.py` | Every 5 min via cron, K8s `CronJob`, or a systemd timer |
-| **Backfill** | `python box_collector.py --stream-type admin_logs --created-after 2026-01-01T00:00:00Z` | Run once. Use a **separate cursor file** so it cannot clobber the live cursor |
+| **Backfill** | `python box_collector.py --stream-type admin_logs --created-after 2026-01-01T00:00:00Z --cursor-file /var/lib/box/cursor-backfill` | Run once. The **separate cursor file** keeps it from clobbering the live cursor. Events older than 24 h land with their ingest time as `timestamp` — query them on `box.created_at` (§ 9.1) |
 
 **Keep the two cursors apart.** A backfill sharing the live cursor will drag the streaming collector backwards or forwards unpredictably — the most common way this design corrupts itself.
 
@@ -644,12 +691,13 @@ if __name__ == "__main__":
 Whatever runs it needs monitoring of its own — see § 13.
 
 > <sub>**Sources:**</sub>
-> - <sub>[boxsdk on PyPI](https://pypi.org/project/boxsdk/)</sub>
+> - <sub>[boxsdk on PyPI](https://pypi.org/project/boxsdk/) — *"Starting with v10, the SDK is built entirely on the generated `box_sdk_gen` package, which fully and exclusively replaces the old `boxsdk` package."*</sub>
 > - <sub>[Deprecated Box Next Gen Python SDK (Box Dev Docs)](https://developer.box.com/guides/tooling/sdks/python-gen)</sub>
 > - <sub>[Client Credentials Grant (Box Dev Docs)](https://developer.box.com/guides/authentication/client-credentials)</sub>
 > - <sub>[POST ingest logs (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/log-monitoring-v2/post-ingest-logs)</sub>
-> - <sub>[Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits)</sub>
-> - <sub>**Derived:** § 8.1's current-vs-deprecated verdict comes from PyPI release dates checked 08/25/2026 against Box's deprecation notice</sub>
+> - <sub>[Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits) — *"200 - in case some of the events in the payload have timestamps earlier than the current time minus 24 hours."*</sub>
+> - <sub>[List user and enterprise events (Box Dev Docs)](https://developer.box.com/reference/get-events) — *"`now` will return an empty list events and the latest stream position for initialization"*; *"Sometimes, the events less than the limit requested can be returned even when there may be more events remaining."*</sub>
+> - <sub>**Derived:** § 8.1's current-vs-deprecated verdict comes from PyPI release dates (re-checked 09/28/2026) against Box's deprecation notice</sub>
 
 ---
 
@@ -664,7 +712,7 @@ Whatever runs it needs monitoring of its own — see § 13.
 | 1 | Box Events API | 500 events/page; streaming retains 2 weeks; duplicates possible |
 | 2 | Collector (Workflow or Python) | Owns the cursor; dedupes on event_id |
 | 3 | Log Ingest API v2 | 10 MB and 50,000 records per request; no events/min cap |
-| 4 | OpenPipeline | Parse, mask, extract metrics, then discard raw at stage 9 |
+| 4 | OpenPipeline | Parse, mask, extract metrics; discard raw with No storage assignment (Bucket assignment stage), never Drop record |
 | 5 | Dedicated bucket | Own retention and own IAM boundary |
 -->
 
@@ -678,6 +726,7 @@ Whatever runs it needs monitoring of its own — see § 13.
 | Post-processing expansion | Rejected above **16 MB** | A batch inside 10 MB can still fail after processing. Halve on 413 |
 | Attributes per record | 500 | Ample for Box events |
 | Attribute value length | 32 kB | A large `additional_details` can approach this |
+| Log age | **24 h** — 72 h from SaaS 1.348 (staged tenant rollout) | A record timestamped earlier is **dropped**; a mixed batch returns **200** with a "not ingested" message, not an error. Backfill must not stamp old events with their event time (§ 7.3, § 8.2) |
 
 ### 9.2 Extract, then discard — in that order
 
@@ -690,7 +739,7 @@ The mechanics and the trap are in **FAQ-19 § 4**; do not configure this without
 | **Alert** | `SHIELD_ALERT` (§ 11) | **Keep** with full context |
 | **Raw record** | Every `PREVIEW` and `DOWNLOAD` event | **Discard by default.** This is the bulk of your 45 GB/month |
 
-> **The trap, stated once more because it silently defeats the whole design:** `Drop record` at **stage 1** pre-empts every extractor downstream — your metrics never get built. Use **`No storage assignment` at stage 9** instead. Extract first, discard last.
+> **The trap, stated once more because it silently defeats the whole design:** `Drop record` in the **Processing** stage pre-empts every extractor downstream — your metrics never get built. Use **`No storage assignment`** in the **Bucket assignment** stage instead: the record still runs through metric extraction, which comes after it, and is simply not stored. Extract first, discard last.
 
 **Field-level controls in the Processing stage, before storage:**
 
@@ -709,9 +758,10 @@ Put Box events in a **dedicated bucket**. Two independent reasons, either suffic
 - **Access differs.** This feed names individuals and the documents they touched. It should be readable by security and compliance, not by everyone who can read application logs. A bucket is the boundary that makes that enforceable — see **ORGNZ**.
 
 > <sub>**Sources:**</sub>
-> - <sub>[Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits)</sub>
+> - <sub>[Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits) — *"The event is dropped if the log event contains a timestamp before the current time minus 24 hours."*</sub>
+> - <sub>[What's new in Dynatrace SaaS 1.348 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-348) — *"Log ingestion now accepts log data up to 72 hours old"*; pre-release, read 09/28/2026</sub>
 > - <sub>[Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing)</sub>
-> - <sub>[Configure data storage and retention for logs (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-bucket-assignment)</sub>
+> - <sub>[Configure data storage and retention for logs (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-bucket-assignment) — *"This means you can extract metrics and generate alerts from records that you won't store."*</sub>
 > - <sub>[Log ingestion (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/logs/lma-log-ingestion) — the ingestion-route overview this section's API choice sits inside</sub>
 
 ---
@@ -914,13 +964,13 @@ fetch logs, from:-24h
 
 | Outage length | Recovery |
 |---|---|
-| **< 2 weeks** | Reset the cursor to `0` and re-run. The streaming window still holds the events; dedupe on `event_id` protects against the overlap |
-| **> 2 weeks** | Streaming cannot help. Backfill with `admin_logs` and `created_after` (§ 8.3) — up to one year, chronological and duplicate-free |
+| **< 2 weeks** | Reset the cursor to `0` and re-run. The streaming window still holds the events; dedupe on `event_id` protects against the overlap. Anything older than 24 h lands with its **ingest time** as `timestamp` (log ingest drops older timestamps — § 9.1); query recovered events on `box.created_at` |
+| **> 2 weeks** | Streaming cannot help. Backfill with `admin_logs` and `created_after` (§ 8.3) — up to one year, chronological and duplicate-free, again with event time carried in `box.created_at` rather than `timestamp` |
 | **Cursor lost, collector healthy** | Same as above: pick the stream by how far back the gap goes |
 
-The existence of a one-year `admin_logs` backfill path is exactly why § 8's Python collector is worth having even in a Workflow-first design. **Build it before you need it** — writing a backfill tool during an active compliance gap is not when you want to be learning the API.
+Recovery is complete in content, not in time: recovered events keep their real time in `box.created_at`, so time-bucketed dashboards built on `timestamp` show the backlog at the moment it was ingested. The existence of a one-year `admin_logs` backfill path is exactly why § 8's Python collector is worth having even in a Workflow-first design. **Build it before you need it** — writing a backfill tool during an active compliance gap is not when you want to be learning the API.
 
-> <sub>**Sources:** [Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise). **Derived:** § 13.1's null-comparison behaviour was observed directly by executing both query forms against a live tenant on 08/25/2026.</sub>
+> <sub>**Sources:** [Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise), [Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits). **Derived:** § 13.1's null-comparison behaviour was observed directly by executing both query forms against a live tenant on 08/25/2026.</sub>
 
 ---
 
@@ -1034,14 +1084,14 @@ The first of those is the one an auditor will ask about. See the **SLO** series 
 - [ ] Collector is a **standard** workflow, not simple
 - [ ] Dedicated bucket created with agreed retention
 - [ ] `logs.ingest` token scope (Python path only)
-- [ ] OpenPipeline: parse → mask/hash → extract metrics → **`No storage assignment` at stage 9**, never `Drop record` at stage 1
+- [ ] OpenPipeline: parse → mask/hash → extract metrics → **`No storage assignment`** in the Bucket assignment stage, never `Drop record` in Processing
 
 **Operations**
 
 - [ ] Cursor persisted, **no TTL**, written only after successful ingest
 - [ ] Staleness alert live **and tested by stopping the collector**
 - [ ] Duplicate-rate check scheduled
-- [ ] Backfill path (§ 8) built and tested *before* it is needed
+- [ ] Backfill path (§ 8) built and tested *before* it is needed — including that events older than 24 h arrive (ingest-time `timestamp`, real time in `box.created_at`)
 - [ ] Retention and masking signed off by whoever owns the data
 
 ---
@@ -1059,13 +1109,15 @@ The first of those is the one an auditor will ask about. See the **SLO** series 
 | 6 | **Not deduplicating** | Inflated counts and ingest cost | `admin_logs_streaming` repeats events. Dedupe on `event_id` (§ 12.2) |
 | 7 | **`http.url` in span queries** | Zero rows, reads as "no Box traffic" | The field does not exist. Use `server.address` / `url.full` (§ 3.1) |
 | 8 | **Staleness check returns "OK" with no data** | Dead collector reports healthy | `null > 15` is false. Test `events == 0` explicitly (§ 13.1) |
-| 9 | **`Drop record` at stage 1** | Raw discarded *and* metrics never built | Use `No storage assignment` at stage 9 (§ 9.2) |
-| 10 | **`box-sdk-gen` instead of `boxsdk`** | Building on a deprecated SDK | `boxsdk` v10+ is current (§ 8.1) |
-| 11 | **Simple workflow** | `automation-utils` returns 404 | Use a standard workflow (§ 7.1) |
+| 9 | **`Drop record` in the Processing stage** | Raw discarded *and* metrics never built | Use `No storage assignment` in the Bucket assignment stage (§ 9.2) |
+| 10 | **`box-sdk-gen` instead of `boxsdk` — or `from boxsdk import …`** | Building on a deprecated SDK, or `ModuleNotFoundError` on v10 | Install `boxsdk` v10+, import from `box_sdk_gen` (§ 8.1) |
+| 11 | **Simple workflow** | No **Run JavaScript** action is available | Use a standard workflow (§ 7.1) |
 | 12 | **Backfill sharing the live cursor** | Live collector jumps backwards or forwards | Separate cursor per stream type (§ 8.3) |
 | 13 | **Renaming fields after extraction** | Metrics carry stale dimension names | Normalize in Processing, then extract (§ 10) |
 | 14 | **413 on ingest** | Batch inside 10 MB still rejected | Payload expands during processing; ceiling is 16 MB. Halve the batch (§ 9.1) |
 | 15 | **`interval:1d`** | Calendar-duration warning | Use `interval:24h` (§ 12.4) |
+| 16 | **Backfill stamped with event time** | Replay "succeeds"; events older than 24 h are silently dropped (Python sees a **200**, not an error) | Omit `timestamp` for old events; carry `box.created_at` (§ 9.1) |
+| 17 | **Testing `e.status` on a client-state error** | First Workflow run always throws | Use `isNotFound(e)` from `@dynatrace-sdk/client-state` (§ 7.3) |
 
 Gotchas 1, 7, and 8 share a shape worth naming: **each produces a confident, plausible, wrong answer rather than an error.** A webhook that delivers nothing, a span query that returns zero, and a health check that says OK all look like success. Every one of them was reproduced during the research for this entry.
 
@@ -1078,7 +1130,7 @@ Gotchas 1, 7, and 8 share a shape worth naming: **each produces a confident, pla
 
 **Then build one collector, in a Workflow.** At 1M events/day a Workflow clears the 120-second ceiling with roughly 90% headroom, keeps secrets in the Credential Vault, and inherits scheduling and failure alerting. Poll `admin_logs_streaming` every 5 minutes, dedupe on `event_id`, persist the cursor with `stateClient` and no TTL, and write that cursor only after a successful ingest.
 
-**Write the Python backfill before you need it.** It is the only recovery path for an outage longer than two weeks, and the worst time to write it is during one.
+**Write the Python backfill before you need it.** It is the only recovery path for an outage longer than two weeks, and the worst time to write it is during one. It recovers the events, not their place on the timeline: log ingest drops timestamps older than 24 h, so recovered events carry their real time in `box.created_at`.
 
 **Decide retention before switching on.** At ~45 GB/month, extract-then-discard is not an optimization — it is the difference between a proportionate cost and an unpleasant surprise. Keep Shield alerts and regulated-folder activity; discard the `PREVIEW` and `DOWNLOAD` bulk once a counter has captured it.
 

@@ -1,6 +1,6 @@
 # OPIPE-01: OpenPipeline as a Multi-Scope Platform
 
-> **Series:** OPIPE — OpenPipeline Beyond Logs | **Notebook:** 1 of 6 | **Created:** March 2026 | **Last Updated:** 09/18/2026
+> **Series:** OPIPE — OpenPipeline Beyond Logs | **Notebook:** 1 of 6 | **Created:** March 2026 | **Last Updated:** 09/28/2026
 
 ## Beyond Logs: Processing Spans, Metrics, and Events at Ingestion
 
@@ -57,9 +57,9 @@ Sprint 1.337 SaaS landed a major OpenPipeline-relevant change: OneAgent now enri
    | Route matcher (DQL) | Target pipeline |
    |---|---|
    | `dt.cost.costcenter == "cc-1234"` | `finance-logs` |
-   | `contains(dt.security_context, "pci")` | `pci-audit` (whose Bucket assignment stage picks the 365-day bucket) |
+   | `matchesValue(dt.security_context, "*pci*")` | `pci-audit` (whose Bucket assignment stage picks the 365-day bucket) |
 
-   The bucket is chosen later, by the target pipeline's **Bucket assignment** stage. If `dt.security_context` can hold an array value on your data, see the array rule in §6 before matching on it.
+   The bucket is chosen later, by the target pipeline's **Bucket assignment** stage. Write substring tests as `matchesValue(field, "*text*")`, not `contains()`: OpenPipeline matchers accept only a subset of DQL functions, and a condition written with `contains()` or `in()` is rejected with the verifier error `The function contains() isn't enabled.` `matchesValue` is case-insensitive and also matches any element when `dt.security_context` holds an array value (see the array rule in §6).
 
 2. **Cross-scope consistency:** because primary fields/tags appear on logs, spans, metrics, AND business events, queries that join across scopes (OPIPE-06 cross-scope design patterns) can correlate without scope-specific lookup tables.
 
@@ -477,7 +477,7 @@ In the Spans scope, a single pipeline processes all server spans but needs diffe
 |-------|-------------------|------------|
 | `api-services` | `matchesValue(http.route, "/api/*")` | Add `span.category = "api"`, extract API version from path |
 | `database-calls` | `isNotNull(db.system)` | Add `span.category = "database"`, normalize `db.statement` to remove parameters |
-| `messaging` | `in(span.kind, {"producer", "consumer"})` | Add `span.category = "messaging"`, extract queue name |
+| `messaging` | `span.kind == "producer" or span.kind == "consumer"` (`in()` is not enabled in OpenPipeline matchers) | Add `span.category = "messaging"`, extract queue name |
 
 ### Common Mistakes
 
@@ -644,6 +644,7 @@ Continue to **OPIPE-02: Span Processing & Enrichment** to configure OpenPipeline
 - [Primary Grail fields and tags (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags)
 - [OpenPipeline ingest sources (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/api-ingestion-reference)
 - [OpenPipeline pipeline groups (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/pipeline-groups)
+- [DQL matcher in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/dql/dql-matcher-in-openpipeline) — `matchesValue`: *"Accepts wildcard * at the beginning or at the end of the value"*; the page documents `matchesPhrase`, `matchesValue`, `isNull` and `isNotNull`, and `contains()` / `in()` are rejected by the matcher verifier
 - [Use Grail buckets to partition data (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data/partition-data)
 - [Security context for access control (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/use-cases/access-security-context)
 - [SaaS 1.344 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-344)
