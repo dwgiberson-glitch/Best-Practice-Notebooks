@@ -131,37 +131,28 @@ Run these queries in the **target tenant** immediately after cutover to confirm 
 ### Host Count Validation
 
 ```dql
-// Post-cutover: Total host count by cloud provider
-fetch dt.entity.host
-| fieldsAdd provider = if(isNotNull(awsNameTag), then: "AWS",
-    else: if(isNotNull(azureResourceGroupName), then: "Azure", else: "On-Premises"))
-| summarize count = count(), by:{provider}
-| sort count desc
+// Post-cutover: total host count by cloud provider (Smartscape)
+smartscapeNodes "HOST", from:-24h
+| fieldsAdd provider = coalesce(cloud.provider, "none (on-premises or undetected)")
+| summarize hosts = count(), by:{provider}
+| sort hosts desc
 
-// Smartscape note (dt.entity.* is deprecated but still functional): the classic cloud-tag
-// fields (awsNameTag / azureResourceGroupName / gcpProjectId) are not Smartscape node fields.
-// On Smartscape, smartscapeNodes "HOST" exposes cloud.provider directly — e.g.
-//   smartscapeNodes "HOST" | summarize count = count(), by:{cloud.provider}
-// (aws / azure / gcp; null = on-premises) — which replaces the tag-presence if-chain.
-// Keep the classic query above; the live-topology count caveat also applies.
+// Compare with the Step 4 baseline taken with the same Smartscape query. Classic fallback:
+// fetch dt.entity.host | summarize hosts = count() — its cloud-tag fields (awsNameTag /
+// azureResourceGroupName) are not on the Smartscape node, so the old tag-presence if-chain
+// does not port.
 ```
 
 ### Service Count Validation
 
 ```dql
-// Post-cutover: Service inventory by technology
-fetch dt.entity.service
-| summarize count = count(), by:{serviceType}
-| sort count desc
+// Post-cutover: service count (Smartscape)
+smartscapeNodes "SERVICE", from:-24h
+| summarize services = count()
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "SERVICE"
-//   | summarize count = count(), by:{dt.service.sdv1_type}
-//   | sort count desc
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
-// Field maps: serviceType -> dt.service.sdv1_type.
+// Technology breakdown: the SERVICE node carries no populated service-type field (on the
+// validation tenant dt.service.sdv1_type was null for all 38 services, 09/28/2026). Classic
+// fallback for a by-technology view: fetch dt.entity.service | summarize count = count(), by:{serviceType}
 ```
 
 ### Log Flow Validation
@@ -322,7 +313,7 @@ Capture lessons learned while the migration is still fresh. Organize by category
 | Lesson | Detail |
 |--------|--------|
 | Entity ID remapping takes longer than expected | Audit dashboards and SLOs **before** migration, not during |
-| baselines need at least 2 full weeks | Plan parallel operation accordingly |
+| Baselines need history, not a calendar | Measure per-host history depth in the target after each wave (**FAQ-25** §5) instead of planning to a fixed number of weeks |
 | Credential recreation is a bottleneck | Involve cloud and security teams early |
 | Stakeholder fatigue is real | Keep communication concise and predictable |
 | Extensions 2.0 need their own migration path | Monaco does not export extension installations; Terraform can install/activate (`dynatrace_hub_extension_active_version`) and configure (`dynatrace_hub_extension_v2_config`) them — otherwise reinstall from Hub |
@@ -356,7 +347,7 @@ This completes the 9-step SaaS-to-SaaS migration framework.
 | **Tags over entity IDs** | Tag-based selectors survive migration; hardcoded entity IDs do not |
 | **Monaco for config, Terraform for IAM** | Use each tool where it excels |
 | **Parallel operation is mandatory** | Historical data does not migrate — plan for dual-tenant operation |
-| **Dynatrace Intelligence needs time** | Baselines require 2–4 weeks; communicate this to stakeholders |
+| **Dynatrace Intelligence needs time** | Baselines rebuild from the target's own data; measure progress per host and communicate it to stakeholders |
 | **Communicate early and often** | Migration success is as much about people as technology |
 
 <a id="step-completion-checklist"></a>

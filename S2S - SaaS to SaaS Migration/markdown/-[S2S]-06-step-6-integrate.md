@@ -38,7 +38,7 @@ This step completes the Upgrade phase. After this step, the target tenant is ful
 | Requirement | Details |
 |-------------|----------|
 | **Step 5 Complete** | All agents reporting to target tenant, configuration imported, validation queries passing |
-| **Cloud Provider Access** | AWS IAM admin, Azure AD admin, or GCP IAM admin for credential creation |
+| **Cloud Provider Access** | AWS: rights to deploy CloudFormation stacks in each monitored account. Azure: rights to create a service principal and assign it on each monitored subscription (Microsoft Entra ID). GCP: IAM admin |
 | **Target Tenant Access** | API token with `WriteConfig`, `settings.write`, `credentialVault.write` scopes |
 | **Notification Channel Access** | Admin access to Slack, PagerDuty, ServiceNow, Teams, or email systems |
 | **Synthetic Private Locations** | Network access from private location hosts to target tenant |
@@ -64,18 +64,52 @@ This notebook covers **operations 7–8** of the Upgrade phase:
 <a id="cloud-integration-migration"></a>
 ## 1. Cloud Integration Migration
 
-Cloud integrations are tenant-specific. Credentials, IAM trust policies, and monitoring scopes must be recreated in the target tenant. Monaco can deploy cloud integration **configurations** but **cannot export credentials** — those must be recreated manually in each cloud provider.
+Cloud connections are tenant-specific. Credentials, trust relationships and monitoring scopes are recreated in the target — Monaco can deploy cloud integration **configurations** but **cannot export credentials**.
 
-### AWS Integration
+Two generations of cloud monitoring exist, and this section is written **Latest first**:
+
+- **Latest Dynatrace — Cloud Platform Monitoring** (AWS and Azure connections, viewed in the Clouds app). Polling runs inside Dynatrace SaaS: *"no need to deploy ActiveGate compute resources for metric polling"*.
+- **Dynatrace Classic integrations** — the fallback, marked as such below, for a target that cannot use the Latest connection yet.
+
+### Azure — Azure Cloud Platform Monitoring (Latest)
+
+| Component | Target action |
+|-----------|---------------|
+| **Azure connection** | Create a new connection **from the target**, with a **new, dedicated** service principal — never the source environment's principal |
+| **Metrics and topology** | Polled by Dynatrace SaaS; no ActiveGate is deployed for polling |
+| **Logs** | SaaS-based ingest via Azure Event Hubs — activity logs, resource logs, Entra ID audit logs, Defender for Cloud alerts |
+| **Events** | Event Grid system topics forwarding resource lifecycle events |
+
+> **Do not monitor a subscription twice.** The Azure connection docs: *"Do not onboard Azure subscriptions already monitored by the classic Azure integration, and avoid monitoring the same subscription across multiple Azure connections—both increase the risk of API throttling and service interruptions."* In a tenant move, that rules out a long overlap in which both the source and the target poll the same subscription. Switch **per subscription**: create the target's connection for a subscription, confirm its resources appear in the target, then remove that subscription from the source's integration (classic or Latest) in the same change window.
+
+### AWS — AWS Cloud Platform Monitoring (Latest)
+
+| Component | Target action |
+|-----------|---------------|
+| **AWS connection** | Create a new connection **from the target**; it is deployed through CloudFormation into each monitored account |
+| **Metrics and topology** | Polled by Dynatrace SaaS; no ActiveGate is deployed for polling |
+| **Logs** | Subscribe CloudWatch log groups to the Firehose streams the target's connection generates |
+
+The AWS onboarding page read for this update carries no equivalent of the Azure double-monitoring warning. Treat a period in which both environments poll the same AWS account as something to keep short and to confirm with your Dynatrace account team (cost and API quota), not as a documented limit either way.
+
+> **Retiring AWS for Azure?** The target needs its **own** AWS connection for the transition — AWS workloads keep running until their wave moves, and they must be visible in the target before the source environment can go. That AWS connection is itself decommissioned last. **S2S-94** is the ordered runbook.
+
+> <sub>**Sources:**</sub>
+> - <sub>[Azure Cloud Platform Monitoring (DT docs)](https://docs.dynatrace.com/docs/shortlink/azure-onboarding) — *"The new Azure Cloud Platform Monitoring is fully managed by Dynatrace SaaS—no need to deploy ActiveGate compute resources for metric polling within your Azure environment."*</sub>
+> - <sub>[Create your first Azure connection (DT docs)](https://docs.dynatrace.com/docs/ingest-from/microsoft-azure-services/create-an-azure-connection) — *"Use a dedicated service principal exclusively for Dynatrace. Do not share it across Dynatrace environments or use it for other non-Dynatrace workloads."*</sub>
+> - <sub>[AWS Cloud Platform Monitoring (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/aws-onboarding) — *"All AWS connection creation methods are powered by CloudFormation as Infrastructure-as-Code (IaC) engine."*; *"Subscribe CloudWatch log groups to auto-generated Firehose streams for immediate ingestion and analysis."*</sub>
+
+### Classic Fallback — Dynatrace Classic Integrations
+
+Use these only where the target cannot use the Latest connections yet.
+
+**AWS (classic):**
 
 | Component | Source | Target Action |
 |-----------|--------|---------------|
 | **IAM Role** | `arn:aws:iam::role/DynatraceMonitoring` | Create new role with target tenant external ID in trust policy |
 | **CloudWatch metrics** | Configured per region | Recreate with same region scope |
 | **Log Forwarder** | Lambda function forwarding CloudWatch Logs | Deploy new Lambda stack with target tenant ingest URL |
-| **ActiveGate S3 extension** | S3 log ingestion via AG | Reconfigure AG extension with target tenant |
-
-#### AWS Trust Policy Update
 
 ```json
 {
@@ -97,20 +131,23 @@ Cloud integrations are tenant-specific. Credentials, IAM trust policies, and mon
 }
 ```
 
-> **Copy the principal and external ID from the target tenant's AWS connection setup** — an IAM principal ARN needs the 12-digit account ID (`arn:aws:iam::<account-id>:root`), and AWS rejects a policy without it. See **CLOUD-02** for the connection model.
->
-> **The external ID changes per tenant.** The target tenant generates a new external ID. Update the IAM role's trust policy with this new ID. The old external ID (source tenant) should be removed after migration validation.
+> **Copy the principal and external ID from the target tenant's AWS connection setup** — an IAM principal ARN needs the 12-digit account ID (`arn:aws:iam::<account-id>:root`), and AWS rejects a policy without it. See **CLOUD-02** for the connection model. The external ID changes per tenant; remove the source tenant's external ID after validation.
 
-### Azure Integration
+**Azure (classic):**
 
 | Component | Source | Target Action |
 |-----------|--------|---------------|
-| **App Registration** | Service principal in Azure AD | Create new App Registration or reuse existing with updated redirect URI |
-| **Azure Monitor** | Subscription-scoped metrics | Configure same subscriptions in target tenant |
-| **Event Hub** | Log forwarding via Event Hub consumer | Create new consumer group for target tenant ActiveGate |
-| **Log Analytics** | Diagnostic settings | Update diagnostic settings to also forward to target (during transition) |
+| **Service principal** | App registration used by the classic integration | Create a new one for the target |
+| **Azure Monitor** | Subscription-scoped metrics | Configure the same subscriptions in the target — then remove them from the source (no double monitoring) |
+| **Log forwarder** | Classic Azure log forwarder | Redeploy pointing at the target. It ingests directly through the Cluster API by default; an ActiveGate is needed only if you choose not to use direct ingest |
+
+> **Classic log-forwarder cut-over timing.** *"Logs older than 24 hours are rejected (considered too old by the Dynatrace log ingest endpoint)."* A forwarder repointed more than a day after its logs were produced cannot backfill them — switch it inside the change window, not after an outage.
+>
+> <sub>**Sources:** [Set up the Azure log forwarder (DT docs, Dynatrace Classic)](https://docs.dynatrace.com/docs/ingest-from/microsoft-azure-services/azure-integrations/set-up-log-forwarder-azure) — *"Azure log forwarding is performed directly through Cluster API. If you don't want to use direct ingest through the Cluster API, you have to use an existing ActiveGate for log ingestion."*</sub>
 
 ### GCP Integration
+
+Not re-verified in this update — see the CLOUD series for the current connection model.
 
 | Component | Source | Target Action |
 |-----------|--------|---------------|
@@ -146,29 +183,42 @@ fetch events, from:-24h
 <a id="cloud-transformation-scenarios"></a>
 ## 2. Cloud Transformation Scenarios
 
-When the SaaS-to-SaaS migration includes a cloud provider change (e.g., AWS to Azure), the integration work is significantly more complex. Not only do credentials change, but the entire monitoring stack changes.
+Two different changes hide under "cloud transformation" (**S2S-01** §1): the Dynatrace environment moving to a cluster on another cloud (a tenant move — this whole series), and the **monitored workloads** moving to another cloud. When the workloads move, not only the credentials change — the monitoring stack and the data it produces change too.
 
-### AWS → Azure Transformation
+### AWS → Azure Workloads (Latest Dynatrace)
 
-| Component | AWS (Source) | Azure (Target) | Migration Notes |
-|-----------|-------------|----------------|------------------|
-| **Compute monitoring** | CloudWatch metrics | Azure Monitor metrics | Different metric keys — dashboard queries must be rewritten |
-| **Container platform** | EKS | AKS | DynaKube CR changes; K8s monitoring remains similar |
-| **Log forwarding** | Lambda → Dynatrace | Event Hub → ActiveGate | New ingestion pipeline; different log format |
-| **Identity** | IAM Role (AssumeRole) | Service Principal (OAuth) | Completely different auth model |
-| **Load balancer** | ALB/NLB metrics | Azure LB / App Gateway | Different metric keys |
-| **Serverless** | Lambda | Azure Functions | Different entity types and metrics |
+| Component | AWS (leaving) | Azure (arriving) | Migration notes |
+|-----------|---------------|------------------|-----------------|
+| **Connection** | AWS connection (CloudFormation) | Azure connection (dedicated service principal) | Both exist on the target during the dual-cloud window |
+| **Cloud metrics** | `cloud.aws.*` — e.g. `cloud.aws.ec2.CPUUtilization.By.InstanceId` | `cloud.azure.*` — e.g. `cloud.azure.microsoft_compute.virtualmachines.PercentageCPU` | Different keys and dimensions: cloud-metric tiles and detectors are **rewritten**, not remapped |
+| **Logs** | Firehose | Event Hubs | New ingest path; OpenPipeline rules and bucket routing that match on the AWS source need an Azure equivalent |
+| **Container platform** | EKS | AKS | A new DynaKube per AKS cluster; the Operator model is the same |
+| **Hosts (OneAgent)** | `cloud.provider == "aws"` | `cloud.provider == "azure"` | Host-level queries and OneAgent metrics (`dt.host.*`) are unchanged across clouds |
+| **Serverless** | Lambda | Azure Functions | Different resource types and metrics — plan per function |
 
-### Azure → AWS Transformation
+The metric keys above were read with the `metrics` command on the validation tenant (09/28/2026).
 
-| Component | Azure (Source) | AWS (Target) | Migration Notes |
-|-----------|---------------|-------------|------------------|
-| **Compute monitoring** | Azure Monitor metrics | CloudWatch metrics | Different metric keys |
-| **Container platform** | AKS | EKS | DynaKube CR changes |
-| **Log forwarding** | Event Hub → ActiveGate | Lambda → Dynatrace | Deploy new Lambda forwarder stack |
-| **Identity** | Service Principal (OAuth) | IAM Role (AssumeRole) | Create role with trust policy |
+> **Dashboard impact:** plan to **recreate** cloud-specific dashboard tiles, not migrate them. Dashboards built on OneAgent data (`dt.host.*`, services, spans, logs) carry across clouds; dashboards built on `cloud.aws.*` metrics do not have an Azure equivalent key to remap to.
 
-> **Dashboard impact:** Cloud transformation migrations require rewriting all cloud-specific dashboard queries. CloudWatch metric keys (e.g., `aws.ec2.cpu_utilization`) differ from Azure Monitor metric keys (e.g., `azure.vm.percentage_cpu`). Plan for dashboard recreation, not migration.
+### The Reverse Direction
+
+Azure → AWS is the mirror image: create the AWS connection through CloudFormation, move log ingest from Event Hubs to Firehose, and rewrite `cloud.azure.*` tiles against `cloud.aws.*`.
+
+### Validate Dual-Cloud Coverage
+
+During the window, the target should see both clouds — through the connections (cloud resources) and through OneAgent (hosts):
+
+```dql
+// Target tenant: cloud resources per provider (connections) — run during the dual-cloud window
+smartscapeNodes "*", from:-2h
+| filter startsWith(type, "AWS_") or startsWith(type, "AZURE_")
+| fieldsAdd provider = if(startsWith(type, "AWS_"), then: "aws", else: "azure")
+| summarize {resources = count(), resource_types = countDistinct(type)}, by:{provider}
+
+// A provider with zero resources means its connection is missing or not yet polling.
+// Pair it with the host query in S2S-94 (hosts by cloud.provider and region) to see OneAgent
+// coverage next to connection coverage.
+```
 
 <a id="dashboard-migration"></a>
 ## 3. Dashboard Migration
@@ -383,10 +433,10 @@ Before proceeding to Step 7 (Expand), verify all integration tasks are complete:
 
 | Deliverable | Status | Owner | Notes |
 |-------------|--------|-------|-------|
-| **AWS integration configured** | ☐ | Cloud / Platform | IAM role trust policy updated, CloudWatch metrics flowing |
-| **Azure integration configured** | ☐ | Cloud / Platform | App Registration created, Azure Monitor connected |
+| **AWS connection created from the target** | ☐ | Cloud / Platform | CloudFormation stack deployed per account (classic fallback: IAM role trust policy updated) |
+| **Azure connection created from the target** | ☐ | Cloud / Platform | Dedicated service principal; each subscription removed from the source in the same window (no double monitoring) |
 | **GCP integration configured** | ☐ | Cloud / Platform | Service account key generated, Cloud Monitoring connected |
-| **Log forwarding active** | ☐ | Cloud / Platform | Lambda/Event Hub/Pub/Sub sending to target tenant |
+| **Log ingest active** | ☐ | Cloud / Platform | Firehose (AWS) / Event Hubs (Azure) / Pub/Sub (GCP) sending to the target; classic forwarders switched inside the 24-hour window |
 | **Classic dashboards remediated** | ☐ | Platform | Entity IDs remapped, ownership reassigned |
 | **Gen3 dashboards validated** | ☐ | Platform | DQL queries returning data |
 | **Workflows migrated** | ☐ | Platform | Actors assigned, triggers reconfigured |

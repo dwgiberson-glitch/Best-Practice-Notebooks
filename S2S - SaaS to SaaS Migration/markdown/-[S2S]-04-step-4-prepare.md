@@ -71,12 +71,12 @@ The target tenant must be provisioned and configured with baseline settings befo
 
 | Item | Action | Status |
 |------|--------|--------|
-| **Region selection** | Choose region closest to primary workload (same region as source if relocation) | ☐ |
+| **Hosting cloud and region** | Choose the hosting cloud and region deliberately (same region as source if relocation) — see *Choosing the Target's Hosting Cloud* below | ☐ |
 | **Environment activation** | Activate SaaS environment via Dynatrace Account Management | ☐ |
 | **Grail enablement** | Verify Grail is enabled (default for new SaaS tenants) | ☐ |
 | **API token creation** | Create token with `WriteConfig`, `ReadConfig`, `settings.write`, `settings.read` scopes | ☐ |
 | **OAuth client creation** | Create OAuth client for account-level API access (IAM management) | ☐ |
-| **Cluster version** | Verify target tenant is on same or newer cluster version than source | ☐ |
+| **Platform version** | Record both environments' Dynatrace versions — SaaS releases roll out to environments in stages, so source and target can briefly differ; check version-gated features on the target before relying on them | ☐ |
 
 ### Region Considerations
 
@@ -84,41 +84,55 @@ The target tenant must be provisioned and configured with baseline settings befo
 |----------|----------------|
 | **Relocation** | Same region as source (minimize latency change) |
 | **Consolidation** | Region closest to majority of monitored infrastructure |
-| **Cloud transformation** | Region matching the target cloud provider's primary region |
+| **Hosting-cloud change** | A region on the new cloud provider — for Azure, one of the regions Dynatrace offers on request (below) |
 | **Compliance-driven** | Region that satisfies data residency requirements (EU, US, APAC) |
+
+### Choosing the Target's Hosting Cloud
+
+A SaaS environment runs on one cloud provider. Dynatrace documents that *"Data is stored in Amazon Web Services (AWS), Microsoft Azure, or Google Cloud data centers."* Moving the environment from an AWS-hosted cluster to an Azure-hosted one is therefore a **new target environment**, provisioned on Azure, followed by this whole series — not a setting on the existing environment.
+
+Azure-hosted regions are listed as East US, West US 3, West Europe, Canada Central, UAE, Switzerland North and Australia East, each footnoted *"Available on request. Talk to your Dynatrace sales contact."* Start that conversation before anything else in Step 4 is scheduled.
+
+There are two ways to get an Azure-hosted target:
+
+| | Standard Dynatrace SaaS on an Azure region | Azure Native Dynatrace Service |
+|---|---|---|
+| **How it is provisioned** | Through your Dynatrace account team, in an Azure region *"Available on request"* | From the Azure portal, via the Azure Marketplace — *"available via a private offer"* |
+| **Billing** | Your existing Dynatrace agreement | *"your Dynatrace license consumption becomes a part of your regular Azure bill"* |
+| **Account and environment** | A new environment, set up with your account team (settle with them how it relates to your existing account) | *"The integration will create a new Dynatrace environment and account; it can't run on an existing Dynatrace SaaS environment."* The Azure user who creates the first resource *"becomes the owner of the Dynatrace account"* |
+| **Region** | Chosen with the account team | *"The Dynatrace environment is created in the same Azure region in which you create the Dynatrace resource."* |
+| **Identity** | SAML SSO — Microsoft Entra ID is a documented IdP | *"Enable SSO through Azure Active Directory"*; *"The integration works across a single Entra ID environment."* |
+| **Cloud monitoring on the target** | Azure Cloud Platform Monitoring (Clouds app) as documented | **Open question:** the Azure Native page is labelled Dynatrace Classic and says nothing about Azure Cloud Platform Monitoring or the Clouds app on an environment it creates. Confirm with Dynatrace before choosing this path |
+
+A consideration the docs do not settle, raised here as a softened recommendation: in community practice, the choice between the two paths is mostly **commercial** — a new account (Azure Native) means a separate account structure, a separate IAM and account-management surface, and consumption billed through Azure rather than your existing DPS agreement. Bring your Dynatrace account team and your Azure commercial owner into the decision together, and settle how the source environment's commitment and the target's consumption overlap during the migration window.
+
+> <sub>**Sources:**</sub>
+> - <sub>[Data security controls (DT docs)](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/data-security/data-security-controls) — *"Data is stored in Amazon Web Services (AWS), Microsoft Azure, or Google Cloud data centers."*; Azure regions *"Available on request. Talk to your Dynatrace sales contact."*; *"Environments hosted on Azure use dedicated Azure storage accounts."*</sub>
+> - <sub>[Azure Native Dynatrace Service (DT docs)](https://docs.dynatrace.com/docs/shortlink/azure-native-integration) — *"The integration will create a new Dynatrace environment and account; it can't run on an existing Dynatrace SaaS environment."*; *"The integration works across a single Entra ID environment."*</sub>
+> - <sub>[Azure Cloud Platform Monitoring (DT docs)](https://docs.dynatrace.com/docs/shortlink/azure-onboarding)</sub>
 
 ### Pre-Migration Baseline: Entity Counts
 
 Before any migration begins, capture entity counts from the source tenant. These serve as validation targets after agent cutover in Step 5.
 
 ```dql
-// Source tenant: baseline host count
-fetch dt.entity.host
+// Source tenant: baseline host count (Smartscape)
+smartscapeNodes "HOST", from:-7d
 | summarize host_count = count()
 | fieldsAdd entity_type = "Hosts"
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "HOST"
-//   | summarize host_count = count()
-//   | fieldsAdd entity_type = "Hosts"
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
+// Run the SAME query in the target after cutover — do not compare a Smartscape count with a
+// classic one. Classic fallback: fetch dt.entity.host | summarize host_count = count()
+// (the classic store can retain hosts Smartscape no longer lists).
 ```
 
 ```dql
-// Source tenant: baseline service count
-fetch dt.entity.service
+// Source tenant: baseline service count (Smartscape)
+smartscapeNodes "SERVICE", from:-7d
 | summarize service_count = count()
 | fieldsAdd entity_type = "Services"
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "SERVICE"
-//   | summarize service_count = count()
-//   | fieldsAdd entity_type = "Services"
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
+// Classic fallback: fetch dt.entity.service | summarize service_count = count()
 ```
 
 ```dql
@@ -153,10 +167,18 @@ IAM is the first configuration deployed to the target tenant. Users need access 
 | Step | Action | Notes |
 |------|--------|-------|
 | 1 | Navigate to **Account Management → Identity & Access Management → SSO** | Target tenant |
-| 2 | Configure SAML identity provider (same IdP as source if consolidation) | Copy metadata URL from IdP |
+| 2 | Configure SAML identity provider (same IdP as source if consolidation) — Microsoft Entra ID has a documented Dynatrace SAML configuration; an Azure Native environment uses Entra ID SSO from the start | Copy metadata URL from IdP; create a **new** enterprise application for the target |
 | 3 | Map IdP groups to Dynatrace groups | Use the IAM design from Step 3 |
 | 4 | Enable SSO enforcement (after initial admin access is confirmed) | Do not lock out admin accounts |
 | 5 | Test SSO login with at least two different group memberships | Verify policy inheritance |
+
+### Rebuild the IP Allowlist
+
+If the source environment restricts access with an IP allowlist, rebuild it on the target before users and automation cut over. It is configured per environment, and it blocks inbound access to the UI and API: *"If a user's IP is not contained in the IP allowlist, they're effectively blocked from accessing and using the latest Dynatrace web UI and API."* Include the addresses of your CI/CD runners and any automation that calls the target API.
+
+The reverse direction — **egress** addresses of the new Azure-hosted cluster that your firewalls or webhook receivers may need to admit — is **unverified**: no primary source for them was found for this update. Ask Dynatrace for them rather than reusing the AWS-hosted source's addresses.
+
+> <sub>**Sources:** [IP allowlist (DT docs)](https://docs.dynatrace.com/docs/manage/account-management/settings/ip-allowlist), [Azure SAML configuration for Dynatrace (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/user-and-group-management/access-saml/idp-specific/saml-azure) — *"Follow the examples below to configure Azure as the SAML identity provider (IdP) for Dynatrace SSO."*</sub>
 
 > **Warning:** Do not enable SSO enforcement until you have confirmed that at least one admin account can log in via SSO. A misconfigured SSO with enforcement enabled will lock all users out of the tenant.
 
@@ -189,7 +211,7 @@ terraform apply -var-file="target-tenant.tfvars"
 <a id="monaco-bulk-export"></a>
 ## 3. Monaco Bulk Export
 
-Monaco `download` exports all configuration from the source tenant into a structured directory. This export becomes the input for `monaco deploy` in Step 5, or can be packaged for upload to the SaaS Upgrade Assistant (SUA) on the target tenant.
+Monaco `download` exports all configuration from the source tenant into a structured directory. This export becomes the input for `monaco deploy` in Step 5. It is **not** an input for the SaaS Upgrade Assistant: that tool is documented for a Managed source only — *"SaaS Upgrade Assistant imports your Dynatrace Managed environment configuration"* ([SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant)).
 
 ### Export Commands
 
@@ -219,16 +241,9 @@ monaco download \
 
 > <sub>**Sources:** [Monaco CLI commands (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/reference/commands-saas), [monaco download flags, v2.30.0 (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/v2.30.0/cmd/monaco/download/download_command.go).</sub>
 
-### Automated Export with SUA Packaging
+### Automated Export
 
-For a streamlined workflow that handles Monaco download, checksum verification, and SUA-compatible `.tar.gz` packaging in a single command, see **S2S-10: Migration Scripts**. The scripts automate:
-
-- Platform-aware Monaco binary download (macOS, Linux, Windows)
-- Short-lived export token creation (read scopes only, 24 h expiry, revoked after the download)
-- Full `monaco download` execution
-- Packaging in SaaS Upgrade Assistant format (`.tar.gz` with `exportMetadata.json`)
-
-> **Important:** The SaaS Upgrade Assistant requires `.tar.gz` format — `.zip` archives are rejected. If packaging manually, ensure the archive contains an `exportMetadata.json` at the root and the exported config in an `export/` subdirectory. See **S2S-10** for the exact format specification.
+For a scripted export — platform-aware Monaco binary download with checksum verification, a short-lived read-only export token that is revoked after the download, and a timestamped export folder ready for `monaco deploy` — see **S2S-10: Migration Scripts**.
 
 ### Export Directory Structure
 

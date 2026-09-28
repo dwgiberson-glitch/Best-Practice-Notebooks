@@ -405,7 +405,8 @@ Comprehensive guide to migrating between Dynatrace SaaS environments.
 - [S2S-07: Step 7 — Expand: OpenPipeline, SLOs, and Alerting](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-07-step-7-expand.md) — Configuring data pipelines, SLOs, and alerting rules
 - [S2S-08: Step 8 — Enable: Parallel Operation and Stakeholder Handover](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-08-step-8-enable.md) — Running source and target in parallel and handing over to operations
 - [S2S-09: Step 9 — Optimize: Cutover Validation and Decommission](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-09-step-9-optimize.md) — Validating the migration, optimizing the target, and decommissioning source
-- [S2S-10: Migration Scripts](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-10-migration-scripts.md) — Reusable Bash and PowerShell scripts for Monaco export and SaaS Upgrade Assistant packaging
+- [S2S-10: Migration Scripts](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-10-migration-scripts.md) — Reusable Bash and PowerShell scripts for Monaco export with a short-lived token, staged for direct `monaco deploy` to the target
+- [S2S-94: [LAB] Retiring AWS for Azure](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-94-%5BLAB%5D-aws-to-azure-cloud-retirement.md) — Appendix lab: retiring AWS for Azure — moving the environment to an Azure-hosted cluster (standard SaaS region vs Azure Native) while workloads move in waves; dual-cloud connections, log/event cut-over, Smartscape validation queries, AWS and source decommission
 - [S2S-99: Best Practice Summary](S2S%20-%20SaaS%20to%20SaaS%20Migration/markdown/-%5BS2S%5D-99-best-practice-summary.md) — Comprehensive reference of all best practices from the S2S series
 
 ### [SL2DT - Sumo Logic to Dynatrace](SL2DT%20-%20Sumo%20Logic%20to%20Dynatrace/README.md)

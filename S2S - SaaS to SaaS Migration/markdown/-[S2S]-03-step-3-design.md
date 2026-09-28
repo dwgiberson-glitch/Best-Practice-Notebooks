@@ -37,7 +37,7 @@ This notebook produces five deliverables: an IAM architecture, a Grail bucket an
 | Requirement | Details |
 |-------------|----------|
 | **Step 1 Complete** | Source tenant discovery finished — entity inventory, configuration export, audit log analysis |
-| **Step 2 Complete** | Migration strategy selected (consolidation, relocation, split, or cloud transformation) |
+| **Step 2 Complete** | Migration strategy selected (consolidation, relocation, split, hosting-cloud change, or workload cloud change) |
 | **Source Tenant Access** | Admin access with `settings.read`, `ReadConfig` scopes |
 | **Target Tenant** | Provisioned Dynatrace SaaS environment |
 | **OAuth Client** | `account-idm-read`, `account-idm-write`, `iam-policies-management` scopes (for IAM design validation) |
@@ -130,7 +130,7 @@ Grail buckets control where data is stored and how long it is retained. For cons
 |----------|---------------|----------|
 | **Consolidation** | Prefix by source tenant or business unit | `us-east_app_logs`, `eu-west_app_logs` |
 | **Relocation** | Keep original names (no collision risk) | `app_logs`, `infra_metrics` |
-| **Cloud Transformation** | Prefix by cloud provider or region | `aws_app_logs`, `azure_app_logs` |
+| **Workload cloud change** | Prefix by cloud provider or region (keeps the dual-cloud window separable) | `aws_app_logs`, `azure_app_logs` |
 | **Unified (consolidation)** | Merge into single bucket with enrichment tags | `app_logs` with `source_tenant` tag |
 
 > **Design Decision:** Prefixed buckets are safer for initial migration. You can consolidate into unified buckets later once data flows are validated. Starting with separate buckets preserves the ability to roll back.
@@ -226,45 +226,53 @@ fetch dt.system.events, from:-30d
 <a id="cloud-integration-mapping"></a>
 ## 4. Cloud Integration Mapping
 
-Cloud integrations (AWS, Azure, GCP) are tenant-specific — credentials, IAM roles, and monitoring configurations must be recreated in the target tenant.
+Cloud connections are environment-scoped — credentials, IAM roles and monitoring scopes are recreated in the target, never moved. Two generations exist, and the design should pick one per provider explicitly:
+
+- **Latest Dynatrace — Cloud Platform Monitoring** (AWS and Azure connections, Clouds app). Polling runs inside Dynatrace SaaS: *"no need to deploy ActiveGate compute resources for metric polling"*.
+- **Dynatrace Classic integrations** (classic AWS/Azure integrations, the classic Azure log forwarder). Use these only as the fallback where the target cannot use the Latest connection yet.
 
 > **Monaco download limitation:** Cloud provider credentials **cannot be exported** via `monaco download`. Monaco can deploy credential configurations but not extract existing ones. You must document and recreate credentials manually.
 
 ### Integration Inventory Template
 
-Document all active cloud integrations from the source tenant:
+Document all active cloud integrations from the source tenant, and the target action for each:
 
-| Provider | Integration Type | Scope | Credential Type | Target Action |
-|----------|-----------------|-------|----------------|---------------|
-| AWS | CloudWatch metrics | us-east-1, us-west-2 | IAM Role (AssumeRole) | Create new role with target tenant trust policy |
-| AWS | Log Forwarder | CloudWatch Logs | Lambda execution role | Deploy new forwarder stack |
-| Azure | Azure Monitor | Subscription A, B | Service Principal | Create new App Registration |
-| Azure | Event Hub logs | Resource Group X | Connection string | Create new consumer group |
-| GCP | Cloud Monitoring | Project A | Service Account key | Generate new key for target tenant |
-
-### Cloud Transformation Scenarios
-
-When the migration includes a cloud provider change, integration work is more extensive:
-
-| Transformation | Compute Monitoring | Container Platform | Log Forwarding | Identity |
-|---------------|-------------------|-------------------|----------------|----------|
-| **AWS → Azure** | CloudWatch → Azure Monitor | EKS → AKS | Lambda forwarder → Event Hub | IAM Role → Service Principal |
-| **AWS → GCP** | CloudWatch → GCP Cloud Monitoring | EKS → GKE | Lambda forwarder → Pub/Sub | IAM Role → Service Account |
-| **Azure → AWS** | Azure Monitor → CloudWatch | AKS → EKS | Event Hub → Lambda forwarder | Service Principal → IAM Role |
-| **Azure → GCP** | Azure Monitor → GCP Cloud Monitoring | AKS → GKE | Event Hub → Pub/Sub | Service Principal → Service Account |
-| **GCP → AWS** | GCP Monitoring → CloudWatch | GKE → EKS | Pub/Sub → Lambda forwarder | Service Account → IAM Role |
-| **GCP → Azure** | GCP Monitoring → Azure Monitor | GKE → AKS | Pub/Sub → Event Hub | Service Account → Service Principal |
+| Provider | Integration | Scope | Credential | Target action (Latest first) |
+|----------|------------|-------|-----------|------------------------------|
+| AWS | Metrics + topology | Accounts, regions | Role created by the connection | Create an AWS connection **from the target**; it is created through CloudFormation |
+| AWS | Logs | CloudWatch log groups | Firehose stream | Subscribe log groups to the Firehose streams the target's connection generates |
+| Azure | Metrics + topology | Subscriptions | Service principal | Create an Azure connection **from the target** with a **new, dedicated** service principal |
+| Azure | Logs / events | Resource logs, activity logs / resource events | Event Hubs / Event Grid | SaaS-based ingest via Event Hubs (logs) and Event Grid (events) |
+| GCP | Cloud Monitoring | Projects | Service account | New key or service account for the target (not re-verified in this update — see the CLOUD series) |
 
 ### Credential Recreation Checklist
 
-| Provider | Credential | Source Value | Target Action | Owner |
+| Provider | Credential | Source value | Target action | Owner |
 |----------|-----------|-------------|---------------|-------|
-| AWS | IAM Role ARN | Document ARN from source | Create new role with target trust policy | Cloud team |
-| AWS | External ID | Document from source setup | New ID generated by target tenant | Auto |
-| Azure | Tenant ID | Document from source | Same if same Azure AD, new if different | Cloud team |
-| Azure | Client ID / Secret | Document App Registration | Create new App Registration in Azure | Cloud team |
-| GCP | Service Account key | Document project and SA | Generate new JSON key | Cloud team |
-| K8s | ActiveGate token | Not exportable | Generate new token in target tenant | Platform team |
+| AWS | Connection stack | Document account IDs and regions | Create the target's AWS connection; deploy the CloudFormation template it produces in each account | Cloud team |
+| AWS (classic fallback) | IAM role + external ID | Document role ARN | New role, or updated trust policy, carrying the **target's** external ID | Cloud team |
+| Azure | Service principal | Document subscriptions and the principal in use | Create a **new** principal for the target — the docs say not to share one across environments, even inside the same Entra ID tenant | Cloud team |
+| GCP | Service account key | Document project and SA | Generate a new key for the target | Cloud team |
+| K8s | ActiveGate / DynaKube tokens | Not exportable | Generate new tokens in the target | Platform team |
+
+> <sub>**Sources:**</sub>
+> - <sub>[AWS Cloud Platform Monitoring (DT docs)](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/aws-onboarding) — *"All AWS connection creation methods are powered by CloudFormation"*; *"Subscribe CloudWatch log groups to auto-generated Firehose streams for immediate ingestion and analysis."*</sub>
+> - <sub>[Azure Cloud Platform Monitoring (DT docs)](https://docs.dynatrace.com/docs/shortlink/azure-onboarding) — *"no need to deploy ActiveGate compute resources for metric polling within your Azure environment."*</sub>
+> - <sub>[Create your first Azure connection (DT docs)](https://docs.dynatrace.com/docs/ingest-from/microsoft-azure-services/create-an-azure-connection) — *"Use a dedicated service principal exclusively for Dynatrace. Do not share it across Dynatrace environments or use it for other non-Dynatrace workloads."*</sub>
+
+### Workload Cloud Change Scenarios
+
+When the workloads themselves change cloud, the monitoring stack changes with them, not only the credentials. For the AWS ↔ Azure case on Latest Dynatrace:
+
+| Concern | AWS | Azure | Design note |
+|---------|-----|-------|-------------|
+| Connection | AWS connection (CloudFormation) | Azure connection (dedicated service principal) | Different auth models — plan both for the dual-cloud window |
+| Metrics namespace | `cloud.aws.*` (e.g. `cloud.aws.ec2.CPUUtilization.By.InstanceId`) | `cloud.azure.*` (e.g. `cloud.azure.microsoft_compute.virtualmachines.PercentageCPU`) | Cloud-metric dashboard tiles and detectors are **rewritten**, not remapped |
+| Log ingest | Firehose | Event Hubs | New ingest path per cloud; OpenPipeline rules keyed on source may need both |
+| Container platform | EKS | AKS | DynaKube is applied per cluster; the Operator model is the same |
+| Hosts | `cloud.provider == "aws"` | `cloud.provider == "azure"` | The Smartscape `HOST` node carries `cloud.provider`, which makes dual-cloud progress queryable |
+
+The metric keys above were read with the `metrics` command on the validation tenant (09/28/2026). For the full "retire AWS, move to Azure" sequence, see the appendix LAB **S2S-94**. GCP scenarios follow the same shape but were not re-verified in this update.
 
 <a id="configuration-deployment-order"></a>
 ## 5. Configuration Deployment Order
@@ -377,21 +385,16 @@ filter = "type(SERVICE),tag(app:checkout),tag(env:production)"
 For entity IDs that cannot be replaced with tags (rare), use entity name + type for lookup in the target tenant after agents are reporting:
 
 ```dql
-// Look up a service by name in the target tenant to find its new entity ID
-fetch dt.entity.service
-| filter contains(entity.name, "checkout")
-| fields entity.name, id
+// Look up a service by name in the target tenant to find its new entity ID (Smartscape)
+smartscapeNodes "SERVICE", from:-7d
+| filter contains(name, "checkout")
+| fields name, id, id_classic
 | limit 10
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "SERVICE"
-//   | filter contains(name, "checkout")
-//   | fields name, id
-//   | limit 10
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
-// Field maps: entity.name -> name.
+// id_classic carries the classic SERVICE-… identifier used by classic dashboards, SLOs and
+// selectors. It prints the same value as id, but the two have different types: compare with
+// toString(id) == id_classic, never id == id_classic (always false — see FAQ-25 §4).
+// Classic fallback: fetch dt.entity.service | filter contains(entity.name, "checkout")
 ```
 
 ```dql

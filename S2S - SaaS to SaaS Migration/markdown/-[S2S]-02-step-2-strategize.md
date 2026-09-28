@@ -69,7 +69,7 @@ The SaaS-to-SaaS migration follows the same proven three-phase, nine-step framew
 | Upgrade | 2-6 weeks | High — technical execution |
 | Run | 2-4 weeks | Medium — enablement and tuning |
 
-> **S2S vs. M2S:** The framework is identical, but SaaS-to-SaaS migrations typically move faster because there is no architecture upgrade (both tenants are Gen3 Grail). However, the absence of a SaaS Upgrade Assistant means you rely entirely on Monaco, Terraform, and the Settings API.
+> **S2S vs. M2S:** The framework is identical, but SaaS-to-SaaS migrations typically move faster because there is no Managed-to-SaaS architecture change. Do not assume the two SaaS environments are identical, though: either can still use Dynatrace Classic surfaces, and they can be hosted on different clouds and regions (**S2S-01** §1). However, the absence of a SaaS Upgrade Assistant means you rely entirely on Monaco, Terraform, and the Settings API.
 
 <a id="migration-approach-selection"></a>
 
@@ -130,7 +130,7 @@ When consolidating multiple source tenants into a single target, migrate sources
 | **K8s complexity** | If one source has Kubernetes and another does not, migrate the simpler source first — K8s requires DynaKube redeployment (not `oneagentctl`) and introduces additional validation steps |
 | **Typical duration** | Add 2-3 weeks per additional source tenant |
 
-> **Lesson from real migrations:** A two-source consolidation (70 non-K8s hosts + 38 K8s hosts) used sequential migration — the simpler source first to validate the Monaco → SUA → target workflow, then the K8s source second. This isolated a DynaKube redeployment issue that would have been much harder to diagnose if both sources migrated simultaneously.
+> **Lesson from real migrations:** A two-source consolidation (70 non-K8s hosts + 38 K8s hosts) used sequential migration — the simpler source first to validate the `monaco download` → `monaco deploy` workflow, then the K8s source second. This isolated a DynaKube redeployment issue that would have been much harder to diagnose if both sources migrated simultaneously.
 
 ### S2S Advantages Over M2S
 
@@ -139,9 +139,9 @@ SaaS-to-SaaS migration has inherent advantages that affect approach selection:
 | Advantage | Impact on Strategy |
 |-----------|-------------------|
 | **Both environments are SaaS** | Easier parallel operation — no on-premises infrastructure to maintain |
-| **No architecture upgrade** | Both tenants are Gen3 Grail — no cluster version concerns |
+| **No Managed-to-SaaS architecture change** | Both are SaaS — but record each environment's platform state (Classic vs Latest surfaces, hosting cloud, region); they are not guaranteed to match |
 | **Cloud-hosted infrastructure** | Network connectivity is simpler (SaaS-to-SaaS, not on-prem-to-cloud) |
-| **Identical feature set** | Source and target have the same capabilities — no feature gaps |
+| **Same product family** | Most capabilities exist on both sides — but verify rather than assume: features roll out to SaaS environments in stages, and a target on a different hosting cloud or region can differ in what is available on day one |
 
 ### S2S Risks vs. M2S
 
@@ -221,7 +221,9 @@ This is the single biggest difference between S2S and M2S. In a Managed-to-SaaS 
 
 Dynatrace Intelligence learns normal behavior from historical data. In a new tenant, it starts from scratch.
 
-| Baseline Type | Time to Establish | Notes |
+In community practice, baselines become trustworthy on roughly the timescales below — planning estimates, not documented figures. **FAQ-25** §5 gives a query that measures each host's history depth in the target, which replaces the estimate with a fact after each wave.
+
+| Baseline Type | Rough Planning Estimate | Notes |
 |--------------|-------------------|-------|
 | Availability | 2-3 days | Binary metric, fast learning |
 | Response time | 1-2 weeks | Requires weekday/weekend patterns |
@@ -235,9 +237,9 @@ Both tenants are cloud-hosted, which makes parallel operation easier than M2S bu
 | Consideration | Detail |
 |---------------|--------|
 | **Double licensing** | Both tenants consume DPS during parallel period — coordinate with Dynatrace account team |
-| **Duration** | 2-4 weeks minimum for Dynatrace Intelligence baselines; longer for complex environments |
+| **Duration** | Per wave: from a wave's cutover until its hosts have enough history in the target (measure it — **FAQ-25** §5); the source stays readable for its bucket retention |
 | **Agent dual-reporting** | OneAgent cannot report to two tenants — use phased waves, not dual-send |
-| **Cloud integrations** | Can point at both tenants simultaneously (separate credentials) |
+| **Cloud integrations** | Each environment needs its own connection and credentials. For Azure, do **not** leave the same subscription on two connections: *"Do not onboard Azure subscriptions already monitored by the classic Azure integration, and avoid monitoring the same subscription across multiple Azure connections—both increase the risk of API throttling and service interruptions."* ([Create your first Azure connection (DT docs)](https://docs.dynatrace.com/docs/ingest-from/microsoft-azure-services/create-an-azure-connection)) — plan a switch per subscription, not a long overlap |
 
 ### Items That Cannot Be Exported
 
@@ -249,7 +251,7 @@ Both tenants are cloud-hosted, which makes parallel operation easier than M2S bu
 | **API tokens** | Secrets, cannot be exported | Create new tokens in target |
 | **OAuth client secrets** | Secrets, cannot be exported | Create new OAuth clients in target |
 | **Historical data** | Stored in source tenant Grail | Accept data gap or extend parallel period |
-| **Dynatrace Intelligence baselines** | Learned from source data | Allow 2-4 weeks to retrain in target |
+| **Dynatrace Intelligence baselines** | Learned from source data | Relearned in the target — measure per-host history depth (**FAQ-25** §5) |
 | **Problem history** | Stored in source tenant | Export key problems as documentation |
 | **Extensions 2.0** | Monaco does not export extension installations | Terraform install/activate (`dynatrace_hub_extension_active_version`) and configure (`dynatrace_hub_extension_v2_config`), or manual reinstall from Dynatrace Hub |
 
@@ -260,16 +262,18 @@ The queries from Step 1 (Discover) provide the data you need to assess these con
 Once your agents are reporting to the target tenant, use these DQL queries to validate coverage and identify gaps.
 
 ```dql
-// Count monitored entities by type — compare against discovery inventory
-fetch dt.entity.host
+// Count monitored entities by type in the target — compare against the discovery inventory
+smartscapeNodes "HOST", from:-7d
 | summarize hosts = count()
-| append [fetch dt.entity.service | summarize services = count()]
-| append [fetch dt.entity.application | summarize applications = count()]
+| append [smartscapeNodes "SERVICE", from:-7d | summarize services = count()]
+| append [smartscapeNodes "FRONTEND", from:-7d | summarize frontends = count()]
 | append [fetch dt.entity.process_group | summarize process_groups = count()]
 
-// Keep classic: this is a completeness inventory spanning types not all present on Grail
-// Smartscape (e.g. application, process groups). Smartscape would count live topology, not
-// the full monitored inventory — the wrong basis for a migration-completeness check.
+// HOST, SERVICE and FRONTEND (web and mobile applications) are Smartscape nodes. Process
+// groups stay on the classic entity store: Smartscape models PROCESS instances, a different
+// granularity whose count is not comparable. Smartscape counts live topology and can list fewer
+// entities than the classic store (validation tenant, 09/28/2026: 9 Smartscape vs 11 classic
+// hosts) — compare like with like: run the same query in source and target.
 ```
 
 ```dql
@@ -311,7 +315,7 @@ Every migration carries risk. The goal is not to eliminate risk but to identify,
 |------|--------|------------|------------|
 | **Entity ID remapping failures** | High | High | Refactor configs to use tags/names before migration; validate entity references post-import |
 | **Data gaps during cutover** | High | Medium | Use phased approach; minimize per-wave gap to < 15 minutes |
-| **Dynatrace Intelligence false positives** | Medium | High | Communicate baseline learning period to on-call teams; suppress non-critical alerts for 2-4 weeks |
+| **Dynatrace Intelligence false positives** | Medium | High | Communicate the relearn period to on-call teams; route non-critical alerts to a staging channel rather than disabling them, and track per-host history depth (**FAQ-25** §5) |
 | **Configuration drift** | Medium | Medium | Freeze source tenant changes during migration; use Monaco manifest for consistent exports |
 | **Integration failures** | High | Medium | Test all webhooks and APIs in target before cutover; verify endpoints and tokens |
 | **Rollback complexity** | High | Low | Document rollback procedure; keep source tenant active during entire parallel period |
@@ -348,21 +352,17 @@ Define measurable success criteria before migration starts. These criteria deter
 | **Integration success** | 100% of external integrations operational | Test each webhook, API, and ITSM connection |
 | **User access** | All users can authenticate via SSO | Verify SSO login for each role/group |
 | **SLO accuracy** | All SLOs evaluating correctly | Confirm metric expressions resolve with target entity IDs |
-| **Baseline established** | Dynatrace Intelligence baseline period complete (2-4 weeks) | Confirm Dynatrace Intelligence is generating problems correctly — no excessive false positives |
+| **Baseline established** | Migrated hosts have enough history in the target for their detectors | Per-host history-depth query (**FAQ-25** §5); problem volume back to a normal operating level |
 
 ```dql
 // Post-migration validation — compare host count to your discovery inventory
-fetch dt.entity.host
+smartscapeNodes "HOST", from:-24h
 | summarize totalHosts = count()
 | fieldsAdd target = "<YOUR_DISCOVERY_COUNT>", coverage = "Compare totalHosts to target"
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "HOST"
-//   | summarize totalHosts = count()
-//   | fieldsAdd target = "<YOUR_DISCOVERY_COUNT>", coverage = "Compare totalHosts to target"
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
+// Classic fallback: fetch dt.entity.host | summarize totalHosts = count()
+// Use the same surface in source and target — the classic store can retain hosts Smartscape
+// no longer lists, so mixing the two produces a false gap.
 ```
 
 ```dql
@@ -386,7 +386,7 @@ Build your timeline working backward from the desired source tenant decommission
 | **Prepare** (Step 4) | 1-2 weeks | Target tenant provisioning, ActiveGate deployment, network validation |
 | **Execute** (Step 5) | 1-3 weeks | Config migration + OneAgent redirect (per wave for phased) |
 | **Integrate** (Step 6) | 1-2 weeks | Cloud integrations, webhooks, ITSM reconnection |
-| **Parallel operation** | 2-4 weeks | Both tenants running — critical for Dynatrace Intelligence baselines |
+| **Parallel operation** | Per wave | Source stays readable while each migrated wave builds history in the target — measure it rather than fixing a duration |
 | **Run** (Steps 7-9) | 2-4 weeks | Expand coverage, enable new features, optimize |
 | **Total** | **4-12 weeks** | Depends on environment size and approach |
 
@@ -398,7 +398,7 @@ Build your timeline working backward from the desired source tenant decommission
 | **Phased by Env** | Plan + Prepare | Dev wave | Staging wave | Prod wave | Parallel + Decommission |
 | **Phased by Region** | Plan + Prepare | Region 1 | Region 2 | Region 3 | Parallel + Decommission |
 
-> **Important:** The parallel operation period is non-negotiable. Dynatrace Intelligence needs 2-4 weeks to build baselines in the target tenant before you can trust its problem detection. Do not decommission the source tenant until baselines are established.
+> **Important:** The overlap is non-negotiable, but its length is not a fixed number. Each wave needs enough history in the target before its problem detection can be trusted; the per-host history-depth query in **FAQ-25** §5 tells you when that is true. Do not decommission the source tenant until the last wave passes that check.
 
 ### Migration Plan Checklist
 

@@ -6,7 +6,7 @@
 
 This notebook consolidates **112 actionable best practices** from the S2S series into a single reference organized around the 9-step migration framework. Each practice is definitive: it tells you exactly what to set, when, and why. Use this as a pre-flight checklist and ongoing reference throughout your SaaS-to-SaaS migration.
 
-The S2S series follows a **9-step framework** (Discover through Optimize) supported by an **11-step Order of Operations** that governs execution sequence.
+The S2S series follows a **9-step framework** (Discover through Optimize) supported by an **11-step Order of Operations** that governs execution sequence. When the migration retires a cloud provider — moving the environment to an Azure-hosted cluster *and* the workloads from AWS to Azure — the appendix LAB **S2S-94** sequences both.
 
 ## The 9-Step Migration Framework
 
@@ -73,8 +73,8 @@ The S2S series follows a **9-step framework** (Discover through Optimize) suppor
 
 | # | Best Practice | Recommended Setting/Value | Priority |
 |---|--------------|---------------------------|----------|
-| 1 | Complete entity discovery before anything else | Run `fetch dt.entity.host \| summarize count()` for hosts, services, process groups, and applications to establish baseline numbers | **Critical** |
-| 2 | Identify your migration scenario | Classify as consolidation (many-to-one), split (one-to-many), regional relocation, or cloud provider change — each has distinct tooling and planning requirements | **Critical** |
+| 1 | Complete entity discovery before anything else | Run `smartscapeNodes "HOST", from:-7d \| summarize count()` (and the `SERVICE` / `FRONTEND` equivalents; process groups stay on `fetch dt.entity.process_group`) to establish baseline numbers — and run the same queries in the target later | **Critical** |
+| 2 | Identify your migration scenario | Classify as consolidation (many-to-one), split (one-to-many), regional relocation, hosting-cloud change (the environment moves to another cloud), or workload cloud change (the monitored workloads move) — retiring a cloud is both at once | **Critical** |
 | 3 | Select Monaco for configuration, Terraform for IAM | Monaco v2 covers all 8 config types (settings, document, automation, bucket, segment, slo-v2, openpipeline, classic api); Terraform is required exclusively for IAM policies, groups, and bindings | **Critical** |
 | 4 | Plan for entity ID changes | Entity IDs (HOST-xxx, SERVICE-xxx) are tenant-specific and will change; identify every dashboard, SLO, and alert that hardcodes an entity ID | **Critical** |
 | 5 | Document the 90/10 manual items | 90% of config migrates automatically; budget 90% of your effort for the remaining 10% — entity ID remapping, integration repointing, IAM redesign, credential recreation | **Critical** |
@@ -94,7 +94,7 @@ The S2S series follows a **9-step framework** (Discover through Optimize) suppor
 | 11 | Choose phased approach for environments with >500 hosts | Migrate dev first (weeks 1-2), staging (weeks 3-4), production (weeks 5-6); gives Dynatrace Intelligence time to build baselines | **Critical** |
 | 12 | Define success criteria before starting | Document measurable targets: host count parity, service count parity, log volume parity, SLO evaluation accuracy, alerting coverage | **Critical** |
 | 13 | Engage your account team for licensing early | Contact Dynatrace to discuss temporary parallel licensing; negotiate before the migration window opens | **Critical** |
-| 14 | Plan a 2-4 week parallel operation period | Historical data does not migrate; parallel is the only path to data continuity and Dynatrace Intelligence baseline stability | **Critical** |
+| 14 | Plan a per-wave overlap, sized by measurement | Historical data does not migrate; keep the source readable while each wave builds history in the target, and measure per-host history depth (FAQ-25 §5) rather than fixing a number of weeks | **Critical** |
 | 15 | Establish a configuration freeze window | No settings modifications in the source tenant during cutover; communicate freeze dates to all teams | **Critical** |
 | 16 | Migrate multi-source consolidations sequentially | Complete Source 1 → validate → Source 2 → validate; never migrate two sources in parallel; migrate the simpler source first (non-K8s before K8s) | **Critical** |
 | 17 | Align migration timing with stable traffic periods | Avoid holidays, sales events, or other atypical traffic patterns that would distort Dynatrace Intelligence baselines | **Recommended** |
@@ -125,21 +125,21 @@ The S2S series follows a **9-step framework** (Discover through Optimize) suppor
 
 | # | Best Practice | Recommended Setting/Value | Priority |
 |---|--------------|---------------------------|----------|
-| 29 | Export via `monaco download` | Run `monaco download manifest.yaml --environment source-tenant` to export all configuration in one operation | **Critical** |
-| 30 | Use the S2S-10 migration scripts for SUA packaging | Automates Monaco download + SUA-compatible `.tar.gz` packaging; Bash and PowerShell versions provided | **Recommended** |
-| 31 | Package exports as `.tar.gz` for SUA — never `.zip` | The SaaS Upgrade Assistant rejects `.zip` archives; must be `.tar.gz` with `exportMetadata.json` at root | **Critical** |
+| 29 | Export via `monaco download` | Run `monaco download --manifest manifest.yaml --environment source-tenant` to export all configuration in one operation | **Critical** |
+| 30 | Use the S2S-10 migration scripts for export | Automates Monaco download with a short-lived, auto-revoked read-only token and stages a timestamped folder for `monaco deploy`; Bash and PowerShell versions provided | **Recommended** |
+| 31 | Deploy with `monaco deploy` — do not plan on the SaaS Upgrade Assistant | The SUA is documented for a Managed source (*"imports your Dynatrace Managed environment configuration"*); no SaaS-source path is documented | **Critical** |
 | 32 | Store exported configuration in Git | Commit the Monaco export directory to a Git repository immediately after download | **Critical** |
 | 33 | Validate export completeness | Compare `ls projects/full-export/settings/ \| wc -l` against Settings API `totalCount` per schema | **Critical** |
 | 34 | Validate export contains no secrets | Run `grep -r "dt0c01" projects/` after export and confirm 0 matches | **Critical** |
 | 35 | Run `monaco deploy manifest.yaml --environment <target> --dry-run` before any deploy | Checks manifest structure, references and template rendering; it does not contact the tenant, so a deploy can still fail with HTTP 400. Monaco has no `validate` command | **Critical** |
-| 36 | Provision target tenant and verify admin access | Confirm SSO, API token creation, and environment admin role before proceeding | **Critical** |
+| 36 | Provision target tenant and verify admin access | Choose the hosting cloud and region deliberately (Azure-hosted regions are *"Available on request"*; Azure Native Dynatrace Service creates a new account and environment); confirm SSO, API token creation, and environment admin role before proceeding | **Critical** |
 | 37 | Configure SSO with full SAML message signing | Create a new SAML application in your IdP for the target tenant — new Entity ID, new ACS URL; never reuse the source SAML app | **Critical** |
 | 38 | Test SSO with a pilot user before cutover | SAML configuration issues are the #1 day-of-cutover blocker | **Critical** |
 | 39 | Deploy ActiveGates in the target tenant | ActiveGates cannot be reconfigured like OneAgents; install fresh from the target tenant UI | **Critical** |
-| 40 | Prepare K8s operator manifests for the target tenant | Update DynaKube API to `v1beta5` or `v1beta6`; use Operator v1.8.1+ from `oci://public.ecr.aws/dynatrace/dynatrace-operator` | **Critical** |
+| 40 | Prepare K8s operator manifests for the target tenant | Write a new DynaKube for the target in an API version your Operator release supports (check its release notes); the switch is delete-and-recreate — *"starting with Dynatrace Operator version 1.3.0, editing spec.apiUrl is not allowed"* | **Critical** |
 | 41 | Recreate network zones in the target | Export with `monaco download … --settings-schema builtin:networkzones` and deploy to the target before agent migration | **Critical** |
 | 42 | Create new OAuth clients and API tokens in the target | Source credentials cannot be exported; create fresh clients with matching scopes | **Critical** |
-| 43 | Limit Azure AD group claims to 150 groups per SAML assertion | Azure AD has a hard limit; use group filtering if your org exceeds this | **Recommended** |
+| 43 | Keep Microsoft Entra ID group claims under 150 per SAML assertion | Microsoft: *"The number of groups emitted in a token is limited to 150 for SAML assertions"* — above it the claim is omitted entirely; emit only groups assigned to the application, or filter ([Group claims (Microsoft Learn)](https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/how-to-connect-fed-group-claims)) | **Recommended** |
 
 <a id="step-5-execute"></a>
 ## 5. Step 5: Execute — Configuration Import and Agent Cutover
@@ -169,11 +169,11 @@ The S2S series follows a **9-step framework** (Discover through Optimize) suppor
 
 | # | Best Practice | Recommended Setting/Value | Priority |
 |---|--------------|---------------------------|----------|
-| 57 | Recreate cloud provider credentials in the target tenant | `monaco download` cannot export AWS, Azure, or K8s credentials; create new IAM roles, service principals, and service accounts | **Critical** |
-| 58 | Create new AWS IAM role with trust policy for the target tenant | Reference the target tenant's Dynatrace account ID and external ID from the AWS integration wizard | **Critical** |
-| 59 | Create new Azure App Registration with `Monitoring Reader` role | New Tenant ID, Client ID, Client Secret for the target tenant | **Critical** |
+| 57 | Recreate cloud provider connections in the target tenant | `monaco download` cannot export AWS, Azure, or K8s credentials; create new connections from the target (Latest Dynatrace Cloud Platform Monitoring first, classic integrations only as fallback) | **Critical** |
+| 58 | Create the target's AWS connection | *"All AWS connection creation methods are powered by CloudFormation"* — deploy the stack the target generates in each account (classic fallback: IAM role trust policy with the target's external ID) | **Critical** |
+| 59 | Create a new, dedicated service principal for the target's Azure connection | *"Do not share it across Dynatrace environments"*; and never leave a subscription on two connections — switch it per subscription | **Critical** |
 | 60 | Create new GCP Service Account with `Monitoring Viewer` and `Compute Viewer` roles | Generate new JSON key for the target tenant integration | **Critical** |
-| 61 | Deploy new AWS Log Forwarder Lambda pointing to the target | Update S3 event notifications to trigger the new Lambda function | **Critical** |
+| 61 | Move cloud log ingest to the target | AWS: subscribe log groups to the Firehose streams of the target's connection (classic fallback: a new Lambda forwarder). Azure: Event Hubs ingest (classic forwarder: switch within 24 hours — older logs are rejected) | **Critical** |
 | 62 | Update webhook URLs that reference source-tenant-specific endpoints | Verify custom webhooks accept traffic from the target tenant's IP range | **Critical** |
 | 63 | Migrate dashboards via Monaco and audit for hardcoded entity IDs | Search dashboard JSON for `entityId(`, `HOST-`, `SERVICE-`, `PROCESS_GROUP-` patterns and replace with tag-based filters | **Critical** |
 | 64 | Reassign dashboard ownership to a target tenant user or service account | Source user accounts may not exist in the target; set `owner` field to a valid target identity | **Critical** |
@@ -212,12 +212,12 @@ The S2S series follows a **9-step framework** (Discover through Optimize) suppor
 
 | # | Best Practice | Recommended Setting/Value | Priority |
 |---|--------------|---------------------------|----------|
-| 84 | Run parallel operation for 2-4 weeks minimum | Historical data does not migrate; parallel is the only path to continuity | **Critical** |
-| 85 | Allow 7-14 days for Dynatrace Intelligence baselines to stabilize | Availability: 2-3 days; response time and error rate: 1-2 weeks; resource utilization: 2-4 weeks (full business cycle) | **Critical** |
+| 84 | Keep the source readable through every wave's overlap | Historical data does not migrate; size each wave's overlap from measured history depth in the target (FAQ-25 §5) | **Critical** |
+| 85 | Treat baseline timescales as estimates and measure them | In community practice: availability 2-3 days; response time and error rate 1-2 weeks; resource utilization 2-4 weeks — confirm per host with the FAQ-25 §5 history-depth query | **Critical** |
 | 86 | Use phased parallel model to control cost | Each host reports to one tenant (OneAgent cannot dual-report), so agent cost does not double; overlap cost comes from integrations, synthetics and forwarders you point at both tenants, plus the per-wave window | **Critical** |
 | 87 | Communicate to all personas | Engineering teams: 4 weeks before cutover; SRE/on-call: 2 weeks before; executives: weekly status | **Critical** |
 | 88 | Communicate the SLO baseline gap to stakeholders | SLOs start at 0% in the target and accumulate data over 7-30 days depending on evaluation window | **Critical** |
-| 89 | Warn about Dynatrace Intelligence false positives | Baselines are relearning during first 2-4 weeks; expect noisy alerting until stabilized | **Recommended** |
+| 89 | Warn about Dynatrace Intelligence false positives | Baselines relearn from the target's own data; expect noisier alerting for recently migrated hosts, and route it to a staging channel rather than disabling it | **Recommended** |
 | 90 | Negotiate dual licensing with Dynatrace | Contact your account team to discuss temporary parallel licensing to reduce cost | **Recommended** |
 | 91 | Configure SCIM provisioning for the target tenant | Set new SCIM URL and token; users sync automatically on first login | **Recommended** |
 | 92 | Export problem history before decommission | Problem history cannot migrate; export critical incidents as documentation for post-mortem reference | **Recommended** |

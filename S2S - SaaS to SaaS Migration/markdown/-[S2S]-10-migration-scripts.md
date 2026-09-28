@@ -4,15 +4,15 @@
 
 ## Overview
 
-Reusable scripts for SaaS-to-SaaS configuration export. These scripts automate the Monaco download → SaaS Upgrade Assistant (SUA) packaging workflow, producing a `.tar.gz` archive ready for upload to the target tenant. Both Bash (macOS/Linux/WSL) and PowerShell (Windows) versions are provided.
+Reusable scripts for SaaS-to-SaaS configuration export. They download Monaco, export the source tenant's configuration with a short-lived read-only token, and leave a timestamped export folder that you review, commit to Git, and **deploy directly to the target with `monaco deploy`**. Both Bash (macOS/Linux/WSL) and PowerShell (Windows) versions are provided.
 
-> **Why scripts instead of raw `monaco download`?** The SaaS Upgrade Assistant on the target tenant requires a specific archive format (`.tar.gz` with `exportMetadata.json`). These scripts handle platform detection, Monaco binary download, checksum verification, temporary token creation, export, and SUA-compatible packaging in a single command.
+> **Why scripts instead of raw `monaco download`?** They handle platform detection, Monaco binary download, checksum verification, temporary token creation and revocation, and the export in a single command — and they leave the Monaco binary in place for the deploy step.
 
 ---
 
 ## Table of Contents
 
-1. [SaaS Upgrade Assistant Format](#sua-format)
+1. [Why Monaco Direct Deploy](#why-direct-deploy)
 2. [Monaco Configuration Export (Bash)](#monaco-bash)
 3. [Monaco Configuration Export (PowerShell)](#monaco-powershell)
 4. [Usage Notes](#usage-notes)
@@ -25,63 +25,31 @@ Reusable scripts for SaaS-to-SaaS configuration export. These scripts automate t
 | Requirement | Details |
 |-------------|----------|
 | **API Token** | Token with `apiTokens.write` scope on the source tenant — the scripts use it to create, then revoke, a short-lived export token |
-| **Shell (Option A)** | Bash (macOS, Linux, or WSL) with `curl`, `jq`, `shasum`, `tar` |
-| **Shell (Option B)** | PowerShell 5.1+ on Windows 10/11 (includes `tar.exe` natively) |
-| **Network** | HTTPS access to `github.com` (Monaco download) and source tenant URL |
+| **Shell (Option A)** | Bash (macOS, Linux, or WSL) with `curl`, `jq`, `shasum` |
+| **Shell (Option B)** | PowerShell 5.1+ on Windows 10/11 |
+| **Network** | HTTPS access to `github.com` (Monaco download), the source tenant URL, and — for the deploy — the target tenant URL |
+| **Target credentials** | For the deploy: a target API token for classic configuration and settings, plus a platform token or OAuth client for platform configuration (documents, automations, buckets, segments, SLOs, OpenPipeline) |
 
-<a id="sua-format"></a>
+<a id="why-direct-deploy"></a>
 
-## 1. SaaS Upgrade Assistant Format
+## 1. Why Monaco Direct Deploy
 
-The SaaS Upgrade Assistant (SUA) on the target tenant accepts configuration imports in a specific archive format. Understanding this format is essential — the scripts below produce it automatically.
+This notebook does not package exports for the SaaS Upgrade Assistant (SUA), because that path is not documented for a SaaS source. The SUA documentation describes a Managed source: *"SaaS Upgrade Assistant imports your Dynatrace Managed environment configuration."* No SaaS-to-SaaS import is described there, so this series does not rely on it.
 
-### Archive Requirements
+The supported building blocks for SaaS → SaaS are the configuration-as-code tools themselves:
 
-| Requirement | Detail |
-|-------------|--------|
-| **Format** | `.tar.gz` — **not** `.zip` (SUA rejects zip archives) |
-| **Metadata file** | `exportMetadata.json` at the archive root |
-| **Export directory** | `export/` subdirectory containing the Monaco download output |
+| Tool | Export from the source | Import into the target |
+|------|------------------------|------------------------|
+| **Monaco** (this notebook) | `monaco download` | `monaco deploy <manifest> --environment <target>` |
+| **Terraform** (IAM, and teams already on Terraform) | `terraform-provider-dynatrace -export` | `terraform apply` with target credentials (see **S2S-06** §4 for workflows and **AUTOM** for the provider) |
 
-### `exportMetadata.json` Structure
-
-```json
-{
-  "clusterUuid": "<source-tenant-id>",
-  "productVersion": "1.305.0.20260331-000000",
-  "monacoVersion": "2.30.0",
-  "exportTimestamp": "<unix-ms>",
-  "environments": [
-    {
-      "name": "<source-tenant-id>",
-      "uuid": "<source-tenant-id>"
-    }
-  ]
-}
-```
-
-### Directory Layout Inside the Archive
-
-```text
-configurationExport-YYYY-MM-DD_HH-MM-SS/
-├── exportMetadata.json
-└── export/
-    └── project/
-        ├── alerting-profile/
-        ├── auto-tag/
-        ├── dashboard/
-        ├── management-zone/
-        ├── notification/
-        └── ... (50+ config types)
-```
-
-> **Key fact:** If you run `monaco download` manually and upload the raw output, SUA will reject it. The scripts below handle the packaging automatically.
+> <sub>**Sources:** [SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant) — *"SaaS Upgrade Assistant imports your Dynatrace Managed environment configuration"*, [Monaco CLI commands (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/monaco/reference/commands-saas).</sub>
 
 <a id="monaco-bash"></a>
 
 ## 2. Monaco Configuration Export (Bash)
 
-Downloads Monaco, exports all configuration from the source tenant, and packages it in SaaS Upgrade Assistant format.
+Downloads Monaco, exports all configuration from the source tenant, and stages it in a timestamped folder for `monaco deploy`.
 
 > **Deprecation — Dynatrace API 1.348 (pre-release; staged rollout planned from 09/22/2026).** The API 1.348 changelog marks the whole `/apiTokens` endpoint family deprecated — *"The following endpoints are deprecated"*, covering `POST /apiTokens`, `POST /apiTokens/lookup` and the per-token `GET`/`PUT`/`DELETE`. No successor is named. Deprecated endpoints keep working during the deprecation period, so both scripts below (which mint a temporary export token with `POST /api/v2/apiTokens`) remain the working path — re-check the [API 1.348 changelog (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-348) at GA before building new automation on that endpoint. Separately, once an environment opts into **Phase 3** of the upgrade to Latest Dynatrace, *"classic API token creation is disabled; all new integrations must use platform tokens"* ([Best practices for upgrading App Observability API endpoints (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/best-practices/stage-11-api-tokens/upgrade-api-endpoints)) — check your environment's upgrade phase before running these scripts, since each one mints a classic token.
 
@@ -99,8 +67,8 @@ export ENV_TOKEN="dt0c01.XXXX..."
 ```bash
 #!/bin/bash
 #
-# Monaco Configuration Export for SaaS Upgrade Assistant
-# Produces a .tar.gz archive compatible with the SUA on the target tenant.
+# Monaco Configuration Export for SaaS-to-SaaS migration
+# Produces a timestamped export folder for review and `monaco deploy` to the target.
 #
 # Usage: ENV_TOKEN=<api-token> ./monaco-export-migration.sh <tenantId>
 
@@ -255,65 +223,42 @@ MONACO_TOKEN_ID=""
 unset MONACO_TOKEN
 echo ""
 
-# --- Package in SaaS Upgrade Assistant format ---
+# --- Stage the export for review and deploy ---
 datetime=$(date +"%Y-%m-%d_%H-%M-%S")
-directory_name="configurationExport-${datetime}"
-mkdir -p "${directory_name}/export"
-
-current_timestamp=$(($(date +%s) * 1000))
-
-cat > "${directory_name}/exportMetadata.json" <<EOF
-{
-  "clusterUuid": "${tenantId}",
-  "productVersion": "1.305.0.20260331-000000",
-  "monacoVersion": "${MONACO_VERSION}",
-  "exportTimestamp": "${current_timestamp}",
-  "environments": [
-    {
-      "name": "${tenantId}",
-      "uuid": "${tenantId}"
-    }
-  ]
-}
-EOF
-
-mv "${tenantId}"/* "${directory_name}/export/" 2>/dev/null || true
-
-# --- Create archive ---
-tar -czf "${directory_name}.tar.gz" "${directory_name}"
-echo "Archive created: ${directory_name}.tar.gz"
+export_dir="export-${tenantId}-${datetime}"
+mv "${tenantId}" "${export_dir}"
 
 # --- Summary ---
 echo ""
 echo "=== Export Summary ==="
 echo "Tenant:    ${tenantId}"
 echo "Monaco:    v${MONACO_VERSION}"
-echo "Output:    ${directory_name}.tar.gz"
-echo "Format:    SaaS Upgrade Assistant compatible"
+echo "Output:    ${export_dir}/ (manifest.yaml + project/)"
 echo ""
 
-config_count=$(find "${directory_name}/export" -name "*.json" -o -name "*.yaml" 2>/dev/null | wc -l | tr -d ' ')
+config_count=$(find "${export_dir}" -name "*.json" -o -name "*.yaml" 2>/dev/null | wc -l | tr -d ' ')
 echo "Configs exported: ~${config_count} files"
 echo ""
 
 echo "Next steps:"
-echo "  1. Upload ${directory_name}.tar.gz to SaaS Upgrade Assistant on target tenant"
-echo "  2. Review configuration preview in SUA"
-echo "  3. Deploy in waves per S2S-05 deployment order"
+echo "  1. Commit ${export_dir}/ to Git"
+echo "  2. Add the target environment to ${export_dir}/manifest.yaml (S2S-05, section 2)"
+echo "  3. Remap entity IDs (S2S-05, section 4)"
+echo "  4. ./monaco deploy ${export_dir}/manifest.yaml --environment target-tenant --dry-run"
+echo "  5. ./monaco deploy ${export_dir}/manifest.yaml --environment target-tenant"
 echo ""
 
-# --- Cleanup ---
-rm -f monaco monaco_checksum manifest.yaml
-rm -rf "${directory_name}"
+# --- Cleanup (the monaco binary is kept for the deploy step) ---
+rm -f monaco_checksum manifest.yaml
 
-echo "Done. Temporary files cleaned up (archive preserved)."
+echo "Done."
 ```
 
 <a id="monaco-powershell"></a>
 
 ## 3. Monaco Configuration Export (PowerShell)
 
-Windows equivalent of the Bash script above. Produces the same `.tar.gz` archive for upload to the SaaS Upgrade Assistant.
+Windows equivalent of the Bash script above. Produces the same timestamped export folder for `monaco deploy`.
 
 **Usage:**
 ```powershell
@@ -327,11 +272,10 @@ $env:ENV_TOKEN = "dt0c01.XXXX..."
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Monaco Configuration Export for SaaS Upgrade Assistant
+    Monaco Configuration Export for SaaS-to-SaaS migration
 .DESCRIPTION
     Downloads Monaco, exports all configuration from a source tenant,
-    and packages the result as a .tar.gz archive compatible with the
-    SaaS Upgrade Assistant.
+    and stages the result in a timestamped folder for monaco deploy.
 .PARAMETER TenantId
     The Dynatrace tenant identifier (e.g., abc12345)
 .EXAMPLE
@@ -451,68 +395,36 @@ if ($downloadExit -ne 0) {
 }
 Write-Host ""
 
-# --- Package in SaaS Upgrade Assistant format ---
+# --- Stage the export for review and deploy ---
 $datetime = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$directoryName = "configurationExport-$datetime"
-New-Item -ItemType Directory -Path "$directoryName\export" -Force | Out-Null
-
-$currentTimestamp = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
-
-@"
-{
-  "clusterUuid": "$TenantId",
-  "productVersion": "1.305.0.20260331-000000",
-  "monacoVersion": "$MonacoVersion",
-  "exportTimestamp": "$currentTimestamp",
-  "environments": [
-    {
-      "name": "$TenantId",
-      "uuid": "$TenantId"
-    }
-  ]
-}
-"@ | Set-Content -Path "$directoryName\exportMetadata.json" -Encoding UTF8
-
-if (Test-Path $TenantId) {
-    Get-ChildItem -Path $TenantId | Move-Item -Destination "$directoryName\export\" -Force
-}
-
-# --- Create tar.gz archive (Windows 10+ includes tar.exe) ---
-tar -czf "$directoryName.tar.gz" $directoryName
-Write-Host "Archive created: $directoryName.tar.gz"
+$exportDir = "export-$TenantId-$datetime"
+Rename-Item -Path $TenantId -NewName $exportDir
 
 # --- Summary ---
 Write-Host ""
 Write-Host "=== Export Summary ==="
 Write-Host "Tenant:    $TenantId"
 Write-Host "Monaco:    v$MonacoVersion"
-Write-Host "Output:    $directoryName.tar.gz"
-Write-Host "Format:    SaaS Upgrade Assistant compatible"
+Write-Host "Output:    $exportDir\ (manifest.yaml + project\)"
 Write-Host ""
 
-$configCount = (Get-ChildItem -Path "$directoryName\export" -Recurse -Include *.json, *.yaml).Count
+$configCount = (Get-ChildItem -Path $exportDir -Recurse -Include *.json, *.yaml).Count
 Write-Host "Configs exported: ~$configCount files"
 Write-Host ""
 
 Write-Host "Next steps:"
-Write-Host "  1. Upload $directoryName.tar.gz to SaaS Upgrade Assistant on target tenant"
-Write-Host "  2. Review configuration preview in SUA"
-Write-Host "  3. Deploy in waves per S2S-05 deployment order"
+Write-Host "  1. Commit $exportDir\ to Git"
+Write-Host "  2. Add the target environment to $exportDir\manifest.yaml (S2S-05, section 2)"
+Write-Host "  3. Remap entity IDs (S2S-05, section 4)"
+Write-Host "  4. .\monaco.exe deploy $exportDir\manifest.yaml --environment target-tenant --dry-run"
+Write-Host "  5. .\monaco.exe deploy $exportDir\manifest.yaml --environment target-tenant"
 Write-Host ""
 
-# --- Cleanup ---
-Remove-Item -Force monaco.exe, monaco_checksum, manifest.yaml -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force $directoryName, $TenantId -ErrorAction SilentlyContinue
+# --- Cleanup (monaco.exe is kept for the deploy step) ---
+Remove-Item -Force monaco_checksum, manifest.yaml -ErrorAction SilentlyContinue
 
-Write-Host "Done. Temporary files cleaned up (archive preserved)."
+Write-Host "Done."
 ```
-
-> **Note:** Windows 10 version 1803+ and Windows 11 include `tar.exe` natively. On older systems, install [7-Zip](https://www.7-zip.org/) and replace the `tar` line with:
-> ```powershell
-> & "C:\Program Files\7-Zip\7z.exe" a -ttar "$directoryName.tar" $directoryName
-> & "C:\Program Files\7-Zip\7z.exe" a -tgzip "$directoryName.tar.gz" "$directoryName.tar"
-> Remove-Item "$directoryName.tar"
-> ```
 
 <a id="usage-notes"></a>
 
@@ -521,24 +433,22 @@ Write-Host "Done. Temporary files cleaned up (archive preserved)."
 ### Bash (macOS / Linux / WSL)
 
 - Save the Bash script to a file (e.g., `monaco-export-migration.sh`) and run `chmod +x monaco-export-migration.sh`
-- Requires `curl`, `jq`, `shasum`, and `tar`
-- Tested on macOS (Apple Silicon + Intel), Ubuntu 22.04, and WSL2
+- Requires `curl`, `jq` and `shasum`
 
 ### PowerShell (Windows)
 
 - Save the PowerShell script to a file (e.g., `Monaco-Export-Migration.ps1`)
 - If execution policy blocks the script, run: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
-- Requires Windows 10 version 1803+ or Windows 11 (for native `tar.exe`)
 
 ### Both Scripts
 
-- The script downloads Monaco automatically — no pre-installation required
+- The script downloads Monaco automatically — no pre-installation required — and keeps the binary for the deploy step
 - A short-lived export token (`s2s-monaco-export-temp`) is created with read scopes only, expires after 24 hours, and is revoked as soon as the download finishes — also when it fails
+- The export token is a classic API token, so the download covers classic configuration and Settings 2.0. Platform configuration (documents, automations, buckets, segments, SLOs, OpenPipeline) needs a platform token or OAuth client — Monaco's `--platform-token` flag takes the *"Platform token environment variable"*, and `--oauth-client-id` / `--oauth-client-secret` name an OAuth client's variables (**S2S-04** §3)
 - Monaco is pinned to v2.30.0 (released 09/23/2026); check the [releases page](https://github.com/Dynatrace/dynatrace-configuration-as-code/releases) before reuse and bump `MONACO_VERSION` / `$MonacoVersion`
-- Output is a `.tar.gz` archive compatible with the SaaS Upgrade Assistant
-- The `.tar.gz` format is **required** by SUA — `.zip` archives are not accepted
-- Upload the archive to the target tenant via the SaaS Upgrade Assistant app
-- Deploy in waves per the deployment order in **S2S-05: Execute**
+- Output is a folder `export-<tenant>-<timestamp>/` holding the Monaco manifest and the `project/` configuration
+
+> <sub>**Sources:** [monaco download flags, v2.30.0 (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/v2.30.0/cmd/monaco/download/download_command.go).</sub>
 
 ### Multi-Source Consolidation
 
@@ -552,7 +462,7 @@ ENV_TOKEN=$SOURCE1_TOKEN ./monaco-export-migration.sh tenant-id-1
 ENV_TOKEN=$SOURCE2_TOKEN ./monaco-export-migration.sh tenant-id-2
 ```
 
-Import Source 1 first, validate, then import Source 2. Sequential migration isolates issues to a single source at a time. See **S2S-02** for the multi-source consolidation pattern.
+Deploy Source 1 first, validate, then deploy Source 2. Sequential migration isolates issues to a single source at a time. See **S2S-02** for the multi-source consolidation pattern.
 
 <a id="post-export-workflow"></a>
 
@@ -562,12 +472,27 @@ After running the export script:
 
 | Step | Action | Reference |
 |------|--------|-----------|
-| 1 | Upload `.tar.gz` to SaaS Upgrade Assistant on target tenant | Target tenant → Apps → SaaS Upgrade Assistant |
-| 2 | Review configuration preview in SUA | SUA shows all config items; select what to deploy |
+| 1 | Commit the export folder to Git | The reviewed baseline for everything that follows |
+| 2 | Add the target environment to the export's `manifest.yaml` | **S2S-05 §2: Monaco Deploy Workflow** |
 | 3 | Audit for entity ID references | Search exported config for `HOST-`, `SERVICE-`, `PROCESS_GROUP-` patterns |
-| 4 | Remap entity IDs to tag-based filters | See **S2S-05 §4: Entity ID Remapping** |
-| 5 | Deploy in waves per deployment order | See **S2S-05 §1: Configuration Deployment Order** |
-| 6 | Validate data flow after each wave | See **S2S-05 §8: Wave Execution and Validation** |
+| 4 | Remap entity IDs to tag-, segment- or dimension-based filters | **S2S-05 §4: Entity ID Remapping** |
+| 5 | `monaco deploy <manifest> --environment <target> --dry-run` | Checks structure and references only — it does not contact the target |
+| 6 | `monaco deploy <manifest> --environment <target>` (per project, for phased deployment) | **S2S-05 §1: Configuration Deployment Order** |
+| 7 | Validate data flow after each wave | **S2S-05 §8: Wave Execution and Validation** |
+
+### Deploy to the Target
+
+```bash
+export DT_TARGET_URL="https://<target-env-id>.live.dynatrace.com"
+export DT_TARGET_TOKEN="dt0c01.xxx..."   # the manifest names this variable; it never holds the token
+
+./monaco deploy export-<tenant>-<timestamp>/manifest.yaml --environment target-tenant --dry-run
+./monaco deploy export-<tenant>-<timestamp>/manifest.yaml --environment target-tenant
+```
+
+A clean dry-run is not a guarantee: Monaco's flag help says a dry-run *"can not validate the content of JSON payloads. After a successful dry-run, deployments may still fail with Dynatrace API errors if the content of JSONs is not valid."* Deploy to a non-production target first.
+
+> <sub>**Sources:** [monaco deploy flags, v2.30.0 (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-configuration-as-code/blob/v2.30.0/cmd/monaco/deploy/command.go).</sub>
 
 ### When NOT to Use These Scripts
 
@@ -575,7 +500,7 @@ After running the export script:
 |----------|-------------|
 | You only need specific config types | `monaco download --only-settings`, `--settings-schema <schema>` or `--api <api>` |
 | You want ongoing config management | Terraform with state management |
-| Target is a Managed environment | SaaS Upgrade Assistant has its own export workflow |
+| The source is a Managed environment | The SaaS Upgrade Assistant (see the M2S series) |
 | You need IAM migration | Terraform — Monaco cannot manage IAM |
 
 ### Script vs. Manual Monaco
@@ -584,8 +509,8 @@ After running the export script:
 |---------|--------|--------------------------|
 | Monaco installation | Automatic (downloads + verifies checksum) | Manual pre-installation required |
 | Export token | Auto-created with read scopes, 24 h expiry, revoked after download | Manual token creation and revocation |
-| SUA-compatible packaging | Automatic `.tar.gz` with `exportMetadata.json` | Manual packaging required |
-| Cleanup | Automatic (removes temp files) | Manual cleanup |
+| Output | Timestamped export folder, ready for `monaco deploy` | Whatever `--output-folder` you choose |
+| Cleanup | Automatic (removes temp files, keeps the binary) | Manual cleanup |
 | Cross-platform | Bash + PowerShell versions | Single platform |
 
 ---
