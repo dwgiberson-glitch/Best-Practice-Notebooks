@@ -42,7 +42,7 @@ With data pipelines, SLOs, and alerting configured in the target tenant (Step 7)
 
 ## 1. Parallel Operation Strategy
 
-During parallel operation, both the source and target tenants are live. Each host's OneAgent reports to exactly one of them — a single OneAgent has one destination — so hosts move from source to target in waves, while cloud integrations, synthetics and log forwarders can feed both tenants at once. This period exists to validate the target tenant, build Dynatrace Intelligence baselines, and give users confidence before cutover.
+During parallel operation, both the source and target tenants are live. Each host's OneAgent reports to exactly one of them — a single OneAgent has one destination — so hosts move from source to target in waves, while synthetics and log forwarders can feed both tenants at once. Cloud connections are the exception to plan around: for Azure, the docs warn against monitoring one subscription from multiple connections (**S2S-06** §1), so Azure subscriptions move per subscription rather than running in both. This period exists to validate the target tenant, build Dynatrace Intelligence baselines, and give users confidence before cutover.
 
 ### Parallel Operation Timeline
 
@@ -60,7 +60,7 @@ During parallel operation, both the source and target tenants are live. Each hos
 
 | Model | Description | Best For | Duration |
 |-------|-------------|----------|----------|
-| **Full Parallel** | Both tenants live; each host reports to exactly one — pending waves to source, migrated waves to target. Cloud integrations, synthetics and log forwarders feed both | High-risk environments, regulatory requirements | 4–6 weeks |
+| **Full Parallel** | Both tenants live; each host reports to exactly one — pending waves to source, migrated waves to target. Synthetics and log forwarders can feed both; Azure subscriptions switch per subscription rather than feeding both (see S2S-06 §1) | High-risk environments, regulatory requirements | 4–6 weeks |
 | **Phased** | Migrate groups of hosts/services incrementally | Large environments (1000+ hosts) | 6–10 weeks |
 | **Reference** | Source receives data, target receives from a representative subset only | Cost-constrained, low-risk migrations | 2–4 weeks |
 
@@ -73,22 +73,17 @@ During parallel operation, both the source and target tenants are live. Each hos
 Run this query in both source and target tenants. The host counts should match (allowing for normal churn):
 
 ```dql
-// Host count validation — run in both source and target tenants
-fetch dt.entity.host
-| summarize total_hosts = count()
-| append [
-    fetch dt.entity.host
-    | fieldsAdd provider = if(isNotNull(awsNameTag), then: "AWS",
-        else: if(isNotNull(azureResourceGroupName), then: "Azure", else: "On-Premises"))
-    | summarize count = count(), by:{provider}
-  ]
+// Host count validation — run in both source and target tenants (Smartscape)
+smartscapeNodes "HOST", from:-24h
+| fieldsAdd provider = coalesce(cloud.provider, "none (on-premises or undetected)")
+| summarize hosts = count(), by:{provider}
+| sort hosts desc
 
-// Smartscape note (dt.entity.* is deprecated but still functional): the classic cloud-tag
-// fields (awsNameTag / azureResourceGroupName / gcpProjectId) are not Smartscape node fields.
-// On Smartscape, smartscapeNodes "HOST" exposes cloud.provider directly — e.g.
-//   smartscapeNodes "HOST" | summarize count = count(), by:{cloud.provider}
-// (aws / azure / gcp; null = on-premises) — which replaces the tag-presence if-chain.
-// Keep the classic query above; the live-topology count caveat also applies.
+// cloud.provider is aws / azure / gcp on cloud-hosted hosts. Summed across both tenants, the
+// per-provider totals should match the pre-migration baseline (allowing for churn), because each
+// host reports to exactly one tenant. Classic fallback: fetch dt.entity.host — but its cloud-tag
+// fields (awsNameTag / azureResourceGroupName) do not exist on the Smartscape node, and mixing
+// classic and Smartscape counts produces false gaps.
 ```
 
 ### Validate Log Continuity
@@ -110,6 +105,8 @@ fetch logs, from:-24h
 Dynatrace Intelligence requires historical data to establish baselines for anomaly detection. In the target tenant, Dynatrace Intelligence starts from zero — there is no way to transfer learned baselines.
 
 ### Baseline Types and Learning Times
+
+In community practice, baselines become trustworthy on roughly these timescales — planning estimates, not documented figures. Replace them with a measurement after each wave: **FAQ-25** §5 has a per-host history-depth query that shows which migrated hosts have enough data yet.
 
 | Baseline Type | Learning Period | What It Detects |
 |--------------|----------------|------------------|
@@ -204,7 +201,7 @@ Include this table in your stakeholder communication:
 
 | Area | Impact | Duration | Mitigation |
 |------|--------|----------|------------|
-| **Dynatrace Intelligence** | Increased false positives in target tenant | 2–4 weeks | Alerts routed to staging channel |
+| **Dynatrace Intelligence** | Increased false positives in target tenant | Until migrated hosts have enough history (measured per host — **FAQ-25** §5) | Alerts routed to staging channel |
 | **SLOs** | Incomplete evaluation in target tenant | 1–4 weeks (depends on window) | Dual reporting from both tenants |
 | **Historical data** | Not available in target tenant | Permanent | Source tenant stays queryable during the buffer period (no new ingest) |
 | **Dashboards** | New URLs, possible layout differences | One-time | User training and URL redirect documentation |
@@ -269,7 +266,7 @@ Users need to know what changes, what stays the same, and where to find things i
 | Question | Answer |
 |----------|--------|
 | Why are my dashboards showing less data? | The target tenant does not have historical data. Data accumulates from the migration date forward. |
-| Why am I getting more alerts than usual? | Dynatrace Intelligence is establishing baselines. False positives are expected for 2–4 weeks. |
+| Why am I getting more alerts than usual? | Dynatrace Intelligence is establishing baselines from the target's own data. Expect more noise for recently migrated hosts until they have built up history — the platform team tracks this per host. |
 | Where is my old dashboard? | Dashboards have been migrated. Find them at `<target-tenant-url>/ui/dashboards`. |
 | Do I need a new API token? | Yes. All API tokens must be regenerated in the target tenant. |
 | When will SLOs be accurate? | SLOs need one full evaluation window of data. 7-day SLOs: 1 week. 30-day SLOs: 4 weeks. |

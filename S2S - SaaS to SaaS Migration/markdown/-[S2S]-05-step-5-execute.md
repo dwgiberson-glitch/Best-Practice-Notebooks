@@ -239,7 +239,7 @@ Entity IDs are auto-generated and unique per tenant. Configurations exported fro
 |--------------|-------------|
 | `entityId("HOST-1A2B3C4D")` | `tag("env:production"), tag("app:checkout")` |
 | `type(SERVICE),entityId(SERVICE-5E6F7A8B)` | `type(SERVICE),tag("service:checkout")` |
-| `dt.entity.host == "HOST-1A2B3C4D"` | `entityName(dt.entity.host) == "prod-web-01"` |
+| `dt.entity.host == "HOST-1A2B3C4D"` (DQL on logs, spans, metrics) | Filter on a dimension the data already carries: `fetch logs \| filter host.name == "prod-web-01"`, or `timeseries avg(dt.host.cpu.usage), filter:{host.name == "prod-web-01"}` |
 
 ### Automated Remapping Script
 
@@ -255,6 +255,8 @@ echo "Services: $(grep -c 'SERVICE-' entity-id-references.txt)"
 echo "Process Groups: $(grep -c 'PROCESS_GROUP-' entity-id-references.txt)"
 echo "Applications: $(grep -c 'APPLICATION-' entity-id-references.txt)"
 ```
+
+The DQL row is dimension-first: `host.name` is a dimension on the host metrics and on log records, so the filter needs no entity lookup and survives the move (both forms executed on the validation tenant, 09/28/2026). Host names can collide across an estate — check uniqueness before relying on a name-only match (**FAQ-25** §4).
 
 > **Best practice:** Replace hardcoded entity IDs with entity selectors or tags in the exported configuration **before** deploying to the target tenant. This makes the configuration portable and resilient to future migrations.
 
@@ -336,33 +338,22 @@ For environments with hundreds of hosts, use configuration management tools:
 After each wave, verify hosts are reporting to the target tenant:
 
 ```dql
-// Target tenant: count hosts reporting after wave cutover
-fetch dt.entity.host
+// Target tenant: count hosts reporting after wave cutover (Smartscape)
+smartscapeNodes "HOST", from:-2h
 | summarize host_count = count()
 | fieldsAdd validation = "Compare this count against the pre-migration baseline from Step 4"
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "HOST"
-//   | summarize host_count = count()
-//   | fieldsAdd validation = "Compare this count against the pre-migration baseline from Step 4"
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
+// Use the same surface as the Step 4 baseline (Smartscape vs classic). Classic fallback:
+// fetch dt.entity.host | summarize host_count = count()
 ```
 
 ```dql
-// Target tenant: count services detected after agent cutover
-fetch dt.entity.service
+// Target tenant: count services detected after agent cutover (Smartscape)
+smartscapeNodes "SERVICE", from:-2h
 | summarize service_count = count()
-| fieldsAdd validation = "Services should appear within 5 minutes of agent reconnection"
+| fieldsAdd validation = "Compare against the Step 4 baseline once the wave's traffic has flowed"
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "SERVICE"
-//   | summarize service_count = count()
-//   | fieldsAdd validation = "Services should appear within 5 minutes of agent reconnection"
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
+// Classic fallback: fetch dt.entity.service | summarize service_count = count()
 ```
 
 <a id="kubernetes-operator-migration"></a>
@@ -400,11 +391,11 @@ kubectl get pods -n dynatrace -l app.kubernetes.io/component=oneagent
 
 The Dynatrace docs give the same sequence: *"Delete the existing DynaKube (starting with Dynatrace Operator version 1.3.0, editing spec.apiUrl is not allowed)."* Their example reuses the secret name `dynakube`; this series creates a separate `dynakube-target` secret in Step 4, so the source tokens stay available for rollback.
 
-**Helm-installed Operators** are switched the same way. The Helm chart installs the Operator only — the tenant URL and tokens live in the DynaKube CR and its secret, not in Helm values — so use the delete-and-recreate steps above. A `helm upgrade --set apiUrl=…` is accepted without error and changes nothing.
+**Helm-installed Operators** are switched the same way: the tenant URL and tokens live in the DynaKube CR and its secret, so use the delete-and-recreate steps above rather than looking for a Helm value to change.
 
 > <sub>**Sources:** [Migrate Dynatrace Operator to a new environment (DT docs)](https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s/guides/migration/migrate-dto-to-tenant).</sub>
 
-> **Rolling restart timing:** The operator performs a rolling restart of OneAgent DaemonSet pods. For large clusters (100+ nodes), the full rollout may take 15–30 minutes. Monitor with `kubectl rollout status daemonset -n dynatrace`.
+> **Rollout timing:** the new DynaKube's OneAgent pods start on every node, and rollout time grows with cluster size. The docs give no figure, so time the first non-production cluster and plan the maintenance window from that measurement. Watch progress with `kubectl get pods -n dynatrace -w`.
 
 <a id="activegate-migration"></a>
 ## 7. ActiveGate Migration

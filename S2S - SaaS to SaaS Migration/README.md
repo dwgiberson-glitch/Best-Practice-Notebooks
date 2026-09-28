@@ -19,7 +19,8 @@ Comprehensive guide to migrating between Dynatrace SaaS environments, covering e
 7. [Step 7 — Expand: OpenPipeline, SLOs, and Alerting](markdown/-[S2S]-07-step-7-expand.md) — Configuring data pipelines, SLOs, and alerting rules
 8. [Step 8 — Enable: Parallel Operation and Stakeholder Handover](markdown/-[S2S]-08-step-8-enable.md) — Running source and target in parallel and handing over to operations
 9. [Step 9 — Optimize: Cutover Validation and Decommission](markdown/-[S2S]-09-step-9-optimize.md) — Validating the migration, optimizing the target, and decommissioning source
-10. [Migration Scripts](markdown/-[S2S]-10-migration-scripts.md) — Reusable Bash and PowerShell scripts for Monaco export and SaaS Upgrade Assistant packaging
+10. [Migration Scripts](markdown/-[S2S]-10-migration-scripts.md) — Reusable Bash and PowerShell scripts for Monaco export with a short-lived token, staged for direct `monaco deploy` to the target
+94. [[LAB] Retiring AWS for Azure](markdown/-[S2S]-94-[LAB]-aws-to-azure-cloud-retirement.md) — Appendix lab: retiring AWS for Azure — moving the environment to an Azure-hosted cluster (standard SaaS region vs Azure Native) while workloads move in waves; dual-cloud connections, log/event cut-over, Smartscape validation queries, AWS and source decommission
 99. [Best Practice Summary](markdown/-[S2S]-99-best-practice-summary.md) — Comprehensive reference of all best practices from the S2S series
 
 ## Usage

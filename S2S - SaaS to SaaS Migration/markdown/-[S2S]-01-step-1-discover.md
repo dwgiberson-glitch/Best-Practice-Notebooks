@@ -64,7 +64,7 @@ For environments where SVG doesn't render
 
 ## 1. Why Migrate Between SaaS Tenants
 
-Migrating between Dynatrace SaaS tenants is fundamentally different from migrating from Managed to SaaS. Both source and target are Gen3 Grail-powered environments, which simplifies some aspects (no architecture upgrade) but introduces unique challenges (entity ID remapping, historical data gaps, parallel operation).
+Migrating between Dynatrace SaaS tenants is fundamentally different from migrating from Managed to SaaS. There is no Managed-to-SaaS architecture change, but do not assume the two environments are identical: either one can still be on Dynatrace Classic surfaces (classic cloud integrations, management zones, classic dashboards) or already on Latest Dynatrace, and a SaaS environment can be hosted on a different cloud and region. Record each environment's platform state during discovery rather than assuming parity. S2S also brings its own challenges: entity ID remapping, historical data gaps, and a per-wave overlap while agents move.
 
 ### Migration Scenarios
 
@@ -74,8 +74,19 @@ Migrating between Dynatrace SaaS tenants is fundamentally different from migrati
 | **Account Restructuring** | Redistribute environments across different account structures | Spinning off a business unit into its own Dynatrace account |
 | **Regional Relocation** | Move to a different SaaS region for compliance or performance | Moving from US-hosted to EU-hosted SaaS cluster for GDPR |
 | **License Restructuring** | Restructure DPS allocation across tenants | Moving from multiple small tenants to a single enterprise agreement |
-| **Cloud Transformation** | AWS → Azure, Azure → AWS, or cross-cloud consolidation | Rebuilding workloads on a new cloud provider with new monitoring |
+| **Hosting-Cloud Change** | Move the Dynatrace SaaS environment itself to a cluster on a different cloud provider | An AWS-hosted environment replaced by an Azure-hosted one |
+| **Workload Cloud Change** | The *monitored* workloads move to a different cloud provider | Applications rebuilt from AWS onto Azure, with new cloud connections |
 | **Environment Promotion** | Promote a staging or POC tenant to production | Converting a successful POC into the production monitoring tenant |
+
+### The Combined Case: Retiring a Cloud
+
+The two cloud rows above are independent decisions, and they are easy to conflate. A **hosting-cloud change** is a tenant move: a new SaaS environment is provisioned on the other cloud and everything in this series applies. A **workload cloud change** is a monitoring change: agents follow the workloads and new cloud connections are created, but it can happen inside one tenant.
+
+When an organization **retires a cloud provider entirely**, both happen at once. Dynatrace documents that *"Data is stored in Amazon Web Services (AWS), Microsoft Azure, or Google Cloud data centers"*, and lists its Azure regions as *"Available on request. Talk to your Dynatrace sales contact."* — so an Azure-hosted target is a commercial conversation before it is a technical one. The consequence for planning is a **dual-cloud window**: the new Azure-hosted environment monitors workloads still running on AWS *and* workloads already moved to Azure, and only once the last AWS workload is gone are the AWS connections and the AWS-hosted source environment retired.
+
+The appendix LAB **S2S-94 (Retiring AWS for Azure)** is the ordered runbook for that case. Two FAQ entries frame it: **FAQ-25** (what carries over to a new tenant — configuration, identity, accumulated state) and **FAQ-17** (the cutover invariants — Go/No-Go gate, parallel-run window, rollback triggers, decommission).
+
+> <sub>**Sources:** [Data security controls (DT docs)](https://docs.dynatrace.com/docs/manage/data-privacy-and-security/data-security/data-security-controls) — *"Data is stored in Amazon Web Services (AWS), Microsoft Azure, or Google Cloud data centers."*</sub>
 
 > **Key Difference from M2S:** In a Managed-to-SaaS migration, the SaaS Upgrade Assistant handles most of the heavy lifting. For SaaS-to-SaaS, there is **no automated assistant** — you use Monaco, Terraform, and the Settings API to export and reimport configuration.
 
@@ -127,7 +138,7 @@ Understanding portability constraints upfront prevents surprises during executio
 |------|--------|--------|
 | **Historical metrics, logs, traces** | Stored in source tenant's Grail | Run parallel tenants during transition |
 | **Entity IDs** | Unique per tenant, auto-generated | Remap references in dashboards/SLOs |
-| **Dynatrace Intelligence baselines** | Learned from source data | Requires 2–4 weeks to retrain |
+| **Dynatrace Intelligence baselines** | Learned from source data | Relearned from target data — measure each host's history depth instead of assuming a fixed period (**FAQ-25** §5) |
 | **Session replay recordings** | Bound to source tenant | Accept gap or extend parallel period |
 | **Problem history** | Stored in source tenant | Export key problems as documentation |
 | **Credential Vault secrets** | Security — secrets cannot be exported | Recreate in target Credentials Vault |
@@ -136,7 +147,7 @@ Understanding portability constraints upfront prevents surprises during executio
 | **Synthetic execution history** | Bound to source tenant | Execution data starts fresh |
 | **Smartscape topology history** | Computed per-tenant | Rebuilds automatically in target |
 
-> **Important:** Historic data does **not** migrate. Plan for a parallel-run period (typically 2–4 weeks) where both tenants receive data so the target tenant accumulates its own baselines and history.
+> **Important:** Historic data does **not** migrate. Plan for an overlap in which the source stays readable while the target accumulates its own history. A host's OneAgent reports to one tenant at a time, so the overlap is **per wave**, not a period in which both tenants receive the same agent data. Size it from measured history depth in the target (**FAQ-25** §5), not from a fixed number of weeks.
 
 <a id="entity-inventory"></a>
 
@@ -147,57 +158,45 @@ Run these DQL queries against the **source** tenant to understand the full monit
 ### Host Inventory
 
 ```dql
-// Host inventory by cloud provider and OS
-// Note: cloud provider fields (awsNameTag, azureResourceGroupName, gcpProjectId)
-// are only present on hosts monitored in those cloud environments
-fetch dt.entity.host
-| fieldsAdd provider = if(isNotNull(awsNameTag), then: "AWS",
-    else: if(isNotNull(azureResourceGroupName), then: "Azure", else: "On-Premises"))
-| summarize count = count(), by:{provider, osType}
-| sort count desc
+// Host inventory by cloud provider and OS (Smartscape)
+// cloud.provider is aws / azure / gcp on cloud-hosted hosts and null otherwise.
+// from:-7d includes hosts that reported at any time in the last week, not only in the
+// default window (see the stale-node rule in the DQL syntax table).
+smartscapeNodes "HOST", from:-7d
+| fieldsAdd provider = coalesce(cloud.provider, "none (on-premises or undetected)")
+| summarize hosts = count(), by:{provider, os.type}
+| sort hosts desc
 
-// Smartscape note (dt.entity.* is deprecated but still functional): the classic cloud-tag
-// fields (awsNameTag / azureResourceGroupName / gcpProjectId) are not Smartscape node fields.
-// On Smartscape, smartscapeNodes "HOST" exposes cloud.provider directly — e.g.
-//   smartscapeNodes "HOST" | summarize count = count(), by:{cloud.provider}
-// (aws / azure / gcp; null = on-premises) — which replaces the tag-presence if-chain.
-// Keep the classic query above; the live-topology count caveat also applies.
+// Classic fallback: fetch dt.entity.host reads the classic entity store, which can retain
+// hosts Smartscape no longer lists (validation tenant, 09/28/2026: 11 classic vs 9 Smartscape
+// hosts). Its cloud-tag fields (awsNameTag / azureResourceGroupName) do not exist on the
+// Smartscape node, so the tag-presence if-chain the earlier version used is not portable.
 ```
 
 ### Kubernetes Cluster Inventory
 
 ```dql
-// Kubernetes cluster inventory
-fetch dt.entity.kubernetes_cluster
-| fields entity.name, id
-| sort entity.name asc
+// Kubernetes cluster inventory (Smartscape)
+smartscapeNodes "K8S_CLUSTER", from:-7d
+| fields name, id
+| sort name asc
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "K8S_CLUSTER"
-//   | fields name, id
-//   | sort name asc
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
-// Field maps: entity.name -> name.
+// Classic fallback: fetch dt.entity.kubernetes_cluster | fields entity.name, id
+// It reads the classic entity store, which can list clusters Smartscape no longer does —
+// cross-check if the two counts disagree.
 ```
 
 ### Service Inventory
 
 ```dql
-// Service inventory by technology
-fetch dt.entity.service
-| summarize count = count(), by:{serviceType}
-| sort count desc
+// Service inventory (Smartscape)
+smartscapeNodes "SERVICE", from:-7d
+| summarize services = count()
 
-// Smartscape equivalent (dt.entity.* is deprecated but still functional):
-//   smartscapeNodes "SERVICE"
-//   | summarize count = count(), by:{dt.service.sdv1_type}
-//   | sort count desc
-// Caveat: Smartscape reflects CURRENT live topology and can report fewer entities
-// than the classic entity store; for a pre-migration discovery inventory keep the
-// classic query above.
-// Field maps: serviceType -> dt.service.sdv1_type.
+// Technology breakdown: the SERVICE node carries no populated service-type field — on the
+// validation tenant dt.service.sdv1_type was null for all 38 services (09/28/2026). For a
+// by-technology breakdown, use the classic fallback:
+//   fetch dt.entity.service | summarize count = count(), by:{serviceType}
 ```
 
 ### Application and Synthetic Inventory
@@ -381,7 +380,7 @@ fetch dt.davis.problems, from:-30d
 | **Terraform** | IAM (policies, groups, bindings), ongoing infrastructure-as-code management | State tracking, drift detection via `terraform plan`, cross-platform resource references | Requires HCL knowledge, no bulk export equivalent |
 | **Settings API** | Targeted, surgical changes to specific settings | Fine-grained programmatic control | Custom scripting required for large-scale migration |
 
-> **Note:** The SaaS Upgrade Assistant is for Managed-to-SaaS migrations only. It does **not** support SaaS-to-SaaS.
+> **Note:** The SaaS Upgrade Assistant is documented for a Managed source only — *"SaaS Upgrade Assistant imports your Dynatrace Managed environment configuration"* ([SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant)). No SaaS-source path is documented, so this series moves configuration with Monaco and Terraform directly (**S2S-10**).
 
 ### When You Need Terraform
 
@@ -398,7 +397,7 @@ Use **Monaco for bulk configuration** and **Terraform for IAM only**:
 
 ```bash
 # Step 1: Monaco download from source tenant
-monaco download manifest.yaml --environment source-tenant
+monaco download --manifest manifest.yaml --environment source-tenant
 
 # Step 2: Update manifest to point at target tenant
 # Step 3: Validate and deploy
@@ -427,7 +426,7 @@ The 90/10 rule is the defining reality of SaaS-to-SaaS migration:
 - **Entity IDs change** between tenants — every dashboard filter, SLO metric expression, and notification rule that references an entity ID must be updated
 - **Integrations are tenant-specific** — webhook URLs, cloud provider connections, and SSO configurations must be reconfigured
 - **Historical data cannot move** — parallel operation is required to maintain continuity
-- **Dynatrace Intelligence must relearn** — baselines take 2–4 weeks to stabilize in the target tenant
+- **Dynatrace Intelligence must relearn** — baselines rebuild from target data; measure per-host history depth rather than assuming a fixed period (**FAQ-25** §5)
 
 ### Items That Require Manual Attention
 
@@ -449,7 +448,8 @@ Before proceeding to **Step 2 — Strategize**, confirm that you have completed 
 
 | Checkpoint | Status |
 |-----------|--------|
-| Migration scenario identified (consolidation, split, regional relocation, cloud transformation) | [ ] |
+| Migration scenario identified (consolidation, split, regional relocation, hosting-cloud change, workload cloud change — or both, when retiring a cloud) | [ ] |
+| Platform state of source and target recorded (hosting cloud and region; Classic vs Latest surfaces in use) | [ ] |
 | Entity inventory complete (hosts, services, K8s clusters, applications, synthetics, ActiveGates) | [ ] |
 | Configuration inventory complete (Gen2 counts + Gen3 counts) | [ ] |
 | detected problem triage complete — frequent/duplicate events suppressed or tuned | [ ] |
@@ -477,7 +477,7 @@ Before proceeding to **Step 2 — Strategize**, confirm that you have completed 
 
 In Step 1, you:
 
-- Identified your migration scenario (consolidation, split, regional relocation, cloud transformation, or environment promotion)
+- Identified your migration scenario (consolidation, split, regional relocation, hosting-cloud change, workload cloud change, or environment promotion)
 - Documented what configuration migrates with tooling versus what requires manual recreation
 - Completed an entity inventory (hosts, services, K8s clusters, applications, synthetics, ActiveGates)
 - Completed a configuration inventory (Gen2 classic + Gen3 Grail counts)
