@@ -119,7 +119,7 @@ A quick test for any existing tile or alert: **if its query has a `fetch logs �
 <a id="ootb-first"></a>
 ## 4. Use OOTB Metrics Before You Extract Anything
 
-Before building an extraction rule, check whether Dynatrace already produces the metric. Teams routinely re-derive from logs numbers the platform emits for free:
+Before building an extraction rule, check whether Dynatrace already produces the metric. In community practice, teams routinely re-derive from logs numbers the platform emits for free — the middle column below is that common practice, not something the docs list:
 
 | You want… | Often re-derived from logs as… | OOTB metric already exists |
 |-----------|-------------------------------|----------------------------|
@@ -133,7 +133,7 @@ Before building an extraction rule, check whether Dynatrace already produces the
 
 Exact metric keys vary by Dynatrace version and by what's deployed in your tenant — confirm the key in your own metric browser rather than assuming it. The point stands regardless of the precise key: **the cheapest extraction is the one you don't have to do because the metric already exists.**
 
-> <sub>**Sources:** [Built-in metrics / metric browser (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics), [DPS Metrics (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-metrics). FINOPS-01 documents the DPS consumption metric surfaces; FAQ-08 documents the `log.source.*` fields. **Derived:** the "re-derived from logs" column is a synthesis of common practice — the docs list the metrics, not the log-based work they replace.</sub>
+> <sub>**Sources:** [Built-in metrics / metric browser (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/metrics), [DPS Metrics (DT docs)](https://docs.dynatrace.com/docs/shortlink/dps-metrics). FINOPS-01 documents the DPS consumption metric surfaces; FAQ-08 documents the `log.source.*` fields.</sub>
 
 <a id="extraction"></a>
 ## 5. Extracting a Metric From Logs

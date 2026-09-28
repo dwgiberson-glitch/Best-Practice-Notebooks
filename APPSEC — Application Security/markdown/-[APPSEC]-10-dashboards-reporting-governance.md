@@ -1,6 +1,6 @@
 # APPSEC-10: Dashboards, Reporting and Governance
 
-> **Series:** APPSEC — Application Security | **Notebook:** 10 of 10 | **Created:** June 2026 | **Last Updated:** 09/18/2026
+> **Series:** APPSEC — Application Security | **Notebook:** 10 of 10 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -46,7 +46,7 @@ This is the final notebook in the series. The other nine cover the data sources;
 <a id="dss-trend"></a>
 ## 1. Open Vulnerabilities by DSS Level — the Trend
 
-DSS is a per-vulnerability score (APPSEC-01 § 4), so there is no single tenant-wide "DSS" to chart. The board-facing metric is the **count of open vulnerabilities at each DSS level**, trended over a 90-day window — § 2's query, run on a schedule. Treat it as directional:
+DSS is a per-vulnerability score (APPSEC-01 § 4), so there is no single tenant-wide "DSS" to chart. The board-facing metric is the **count of open vulnerabilities at each DSS level**, trended over a 90-day window — § 2's query, run on a schedule. In community practice the trend is read directionally:
 
 - **More open vulnerabilities at CRITICAL / HIGH** = posture deteriorating. Investigate which applications or libraries added them.
 - **Flat** = posture stable. Could mean no new risk, or could mean stalled remediation — pair with backlog burn-rate from APPSEC-08 to disambiguate.
@@ -54,7 +54,7 @@ DSS is a per-vulnerability score (APPSEC-01 § 4), so there is no single tenant-
 
 Do **not** compare these counts across tenants or business units without normalizing for estate size and monitoring-mode coverage (per APPSEC-01 § 3–4) — Infrastructure-mode hosts keep DSS at the CVSS base score, which shifts the level mix. Use within-tenant deltas.
 
-> <sub>**Sources:** [Vulnerabilities concepts (DT docs)](https://docs.dynatrace.com/docs/secure/vulnerabilities/concepts) — *"This scoring system forms the foundation for the Dynatrace Security Score (DSS), which adds environmental context to help prioritize remediation."*; [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — *"the DSS will be the same as the CVSS base score"* in Infrastructure Monitoring deployments (both re-read 09/18/2026). **Derived:** the trending-direction interpretation guide is community practice.</sub>
+> <sub>**Sources:** [Vulnerabilities concepts (DT docs)](https://docs.dynatrace.com/docs/secure/vulnerabilities/concepts) — *"This scoring system forms the foundation for the Dynatrace Security Score (DSS), which adds environmental context to help prioritize remediation."*; [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) — *"the DSS will be the same as the CVSS base score"* in Infrastructure Monitoring deployments (both re-read 09/18/2026). **Derived:** the cross-tenant caution follows from DSS falling back to the CVSS base score in Infrastructure Monitoring.</sub>
 
 <a id="severity-mix"></a>
 ## 2. Open Problems by Severity
@@ -92,25 +92,23 @@ fetch security.events, from:-7d
 <a id="mttr"></a>
 ## 3. MTTR by Team
 
-Mean Time To Remediate by team is the fairness metric. It tells you which teams are keeping up and which need help (engineering capacity, blocked dependencies, prioritization conflict).
+In SRE and incident-management practice, Mean Time To Remediate by team is used as the fairness metric — the AppSec docs do not prescribe it. It tells you which teams are keeping up and which need help (engineering capacity, blocked dependencies, prioritization conflict).
 
-For accountability dashboards, group by team or by namespace owner — not by individual developer. The latter creates the wrong incentives and surfaces noise.
-
-> <sub>**Derived:** MTTR-by-team is borrowed from SRE / incident-management practice; the AppSec docs do not prescribe it directly. The *don't group by individual* guidance is community practice and a non-trivial governance design choice.</sub>
+In community practice, accountability dashboards group by team or by namespace owner — not by individual developer, which tends to create the wrong incentives and surface noise.
 
 <a id="compliance-coverage"></a>
 ## 4. Compliance Framework Coverage
 
-For organizations subject to specific compliance regimes (PCI, HIPAA, SOC 2, ISO 27001), the dashboard view that matters is *percent of controls in compliance* by framework, not total finding counts.
+For organizations subject to specific compliance regimes (PCI, HIPAA, SOC 2, ISO 27001), in community practice the dashboard view that matters is *percent of controls in compliance* by framework, not total finding counts.
 
-Pick the primary framework (one) for governance reporting. Use the others as secondary views. Cross-framework rollups are usually misleading because the same finding lands in multiple frameworks.
+Pick the primary framework (one) for governance reporting and use the others as secondary views — community guidance is that cross-framework rollups mislead because the same finding lands in multiple frameworks; verify against your audit regime.
 
-> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for SPM compliance framing. **Derived:** the *one primary framework* recommendation is community practice — verify against your audit regime.</sub>
+> <sub>**Sources:** [Security Posture Management (DT docs)](https://docs.dynatrace.com/docs/secure/application-security/spm) — *"Automated assessments against supported compliance standards"* (re-read 09/28/2026).</sub>
 
 <a id="cadence"></a>
 ## 5. Governance Cadence
 
-A workable cadence for most organizations:
+In community practice, a workable cadence for most organizations looks like this — adapt it to your existing security-governance rhythm:
 
 | Cadence | Audience | Content |
 |---------|----------|---------|
@@ -121,20 +119,18 @@ A workable cadence for most organizations:
 
 The artifacts above (open-vulnerability trend by DSS level, severity mix, MTTR, compliance) feed all four cadences — what differs is the aggregation level and the audience-appropriate framing.
 
-> <sub>**Derived:** the four-cadence model is common but not prescribed by Dynatrace docs. Adapt to your organization's existing security-governance rhythm.</sub>
-
 <a id="dps-cost"></a>
 ## 6. DPS Cost Awareness
 
 Runtime Vulnerability Analytics and Runtime Application Protection are DPS-billed in **GiB-hours** — per monitored host or container, based on its memory — not per `security.events` record. Cost is therefore driven by *which hosts have RVA and RAP enabled*, not by how many findings or detections they produce. Three FinOps practices:
 
-1. **Scope enablement, not events.** Use monitoring rules for process groups to enable RVA and RAP where the risk justifies it; dropping or sampling detection records saves nothing and discards attack evidence.
-2. **Track consumption per capability and host** — FINOPS-01 § 5 covers the host-based capability queries, and FINOPS-02 the forecasting model. AppSec is one tenant-wide consumer among many.
-3. **Watch detection volume as a signal-quality metric, not a cost metric.** A spike in RAP detections with no matching incident suggests rules generating false positives — tune them (APPSEC-04 § 3) for the analysts' sake.
+1. **Scope enablement, not events.** Use monitoring rules to enable RVA and RAP where the risk justifies it; dropping or sampling detection records saves nothing and discards attack evidence.
+2. **Track consumption per capability and host** — in community practice AppSec is tracked as one tenant-wide consumer among many; FINOPS-01 § 5 covers the host-based capability queries, and FINOPS-02 the forecasting model.
+3. **Watch detection volume as a signal-quality metric, not a cost metric.** In community practice, a spike in RAP detections with no matching incident is read as rules generating false positives — tune them (APPSEC-04 § 3) for the analysts' sake.
 
 Don't sacrifice security signal for cost savings without an explicit risk acceptance. But don't ignore cost either — it's a budget reality.
 
-> <sub>**Sources:** [Runtime Vulnerability Analytics (DPS) (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/application-security/runtime-vulnerability-analytics) — *"The unit of measure for Runtime Vulnerability Analytics is the GiB-hour"*; [Runtime Application Protection (DPS) (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/application-security/runtime-application-protection) — *"The unit of measure for Runtime Application Protection is a GiB hour"* (both re-read 09/18/2026). **Derived:** practice 1 follows from the GiB-hour unit; practices 2–3 are community guidance — verify against your organization's DPS-management discipline.</sub>
+> <sub>**Sources:** [Runtime Vulnerability Analytics (DPS) (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/application-security/runtime-vulnerability-analytics) — *"The unit of measure for Runtime Vulnerability Analytics is the GiB-hour"*; [Runtime Application Protection (DPS) (DT docs)](https://docs.dynatrace.com/docs/license/capabilities/application-security/runtime-application-protection) — *"The unit of measure for Runtime Application Protection is a GiB hour"* (both re-read 09/18/2026); [Runtime Vulnerability Analytics (DT docs)](https://docs.dynatrace.com/docs/secure/application-security/vulnerability-analytics) — *"You can also define custom monitoring rules based on certain criteria."*; [Runtime Application Protection (DT docs)](https://docs.dynatrace.com/docs/secure/application-security/application-protection) — *"If you define custom monitoring rules based on certain process groups or vulnerability types, the custom rules override the global attack control"* (both re-read 09/28/2026). **Derived:** practice 1 follows from the GiB-hour unit plus rule-based enablement.</sub>
 
 <a id="series-wrap"></a>
 ## 7. Series Wrap

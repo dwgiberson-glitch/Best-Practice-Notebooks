@@ -363,7 +363,7 @@ Every task chained from a predecessor selects a state condition. The five values
 When a task's conditions are not met, the **else** behaviour decides what happens next:
 
 - **Skip** — mark this task as skipped; downstream tasks evaluate their own conditions (a downstream task with `success or skipped` still runs; one with `success` will not).
-- **Stop** — terminate the workflow run.
+- **Stop** — no more tasks run on this branch of the workflow graph. This is the default.
 
 ### Custom conditions
 
@@ -431,6 +431,8 @@ In community practice, the failure-notify branch is kept narrowly scoped — a s
 
 ### Decision guidance — JS try/catch vs workflow-level branching
 
+Dynatrace documents the `conditions` mechanism, not a rule for when to prefer it over `try`/`catch`. In community practice, the split below is how teams choose:
+
 | Use **try/catch inside a JS task** when… | Use **workflow-level `conditions`** when… |
 |---|---|
 | The error is recoverable — retry, default value, skip a missing field | The error is terminal for this task — downstream work cannot proceed |
@@ -445,7 +447,7 @@ The two patterns compose. A JS task can `try/catch` its own recoverable errors a
 - **WFLOW-07: Auto-Remediation** — remediation tasks are the canonical use case for `error` / `error or cancelled` conditions. A diagnose task runs; a remediation task runs only on `error`; a verify task confirms the remediation; a notify task runs on `error or cancelled` of either remediation or verify.
 - **WFLOW-05: Incident Management** — PagerDuty/ServiceNow tasks are commonly chained as on-failure branches off a primary workflow — incident creation runs only if the primary path errored out.
 
-> <sub>**Sources:** [Build workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Workflow reference / Jinja expressions (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/reference). **Derived:** The decision table contrasting JS try/catch vs workflow conditions, and the recommendation to keep failure-notify branches narrowly scoped, synthesize the two cited pages with community-observed patterns from WFLOW-05 and WFLOW-07 — verify the on-failure shape in your own tenant before adopting at scale.</sub>
+> <sub>**Sources:** [Build workflows (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build) — *"Stop means no more tasks are executed on this branch of the workflow graph."*, [Workflow reference / Jinja expressions (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/reference).</sub>
 
 <a id="working-with-data"></a>
 ## 6. Working with Data
@@ -583,7 +585,7 @@ The accessor path depends on what the upstream task returned:
 |---|---|---|
 | **DQL query** (`dynatrace.automations:execute-dql-query`) | `.records` — array of row objects | `{{ result("query_errors").records[0].error_count }}` |
 | **Run JavaScript** (`dynatrace.automations:run-javascript`) | The returned object directly at top level | `{{ result("transform").affected_services }}` |
-| **HTTP request** (`dynatrace.automations:http-function`) | `.body` for response payload, `.statusCode` for status | `{{ result("post_webhook").statusCode }}` |
+| **HTTP request** (`dynatrace.automations:http-function`) | `.status_code` for status, `.body` for the raw response body, `.json` for a parsed JSON response | `{{ result("post_webhook").status_code }}` |
 
 > **The `.output` wrapper is not universal.** Some older notebook patterns reference `result("task").output` — that field only exists when the upstream task literally returns an object containing a key named `output` (e.g., a JS task whose function returns `{ output: ... }`). It is not a built-in wrapper. Verify against the specific task type's documented result shape rather than assuming `.output` is always present.
 
@@ -670,9 +672,9 @@ JSON-serializable values pass cleanly between tasks: primitives, arrays, plain o
 - Downstream Jinja templates read the data — deep paths like `{{ result("t").problem.entities[0].tags[2] }}` are fragile and unreadable.
 - The notification channel has flat-key templating (e.g., a webhook expecting `entity_id` not `entities[0].id`).
 
-**Rule of thumb:** flatten at the **producer** side (in the JS transform), not at the consumer side. A transform task that emits `{ top_service, top_count, summary }` is easier for a downstream notification template to consume than one that emits `{ raw_records: [...] }`.
+**Rule of thumb** (community practice, not documented guidance): flatten at the **producer** side (in the JS transform), not at the consumer side. A transform task that emits `{ top_service, top_count, summary }` is easier for a downstream notification template to consume than one that emits `{ raw_records: [...] }`.
 
-**Size budget:** task results are passed through the workflow execution store and shown in run history. Returning multi-megabyte payloads inflates run history and can hit task-result size limits. If a DQL query returns 10,000 rows, summarize in the JS task (top 5, counts, p95) — do not pass the full record set downstream.
+**Size budget:** task results are passed through the workflow execution store and shown in run history. Returning multi-megabyte payloads inflates run history and can hit the task-result size limit — for JavaScript tasks, *"The task result size is limited to 6 MB."* If a DQL query returns 10,000 rows, summarize in the JS task (top 5, counts, p95) — do not pass the full record set downstream.
 
 ### 7.5. Variable scoping — what's available where
 
@@ -688,10 +690,12 @@ A task's `return` value is the **only** way to make data visible downstream. The
 
 ### 7.6. Common pitfalls
 
+The `await`, bracket-access and `default` / `.get()` rows follow the cited expression reference and JavaScript action pages; the remaining rows reflect community practice — confirm them in your tenant.
+
 | Pitfall | Symptom | Fix |
 |---|---|---|
 | **Forgetting `await` on `result()` in JS** | Code gets a `Promise<Result>`, not the data; `.records` is `undefined` | Always `await result('task')` |
-| **Assuming `.output` is universal** | `result("dql_task").output` returns `undefined` | Use `.records` for DQL, top-level fields for JS, `.body`/`.statusCode` for HTTP |
+| **Assuming `.output` is universal** | `result("dql_task").output` returns `undefined` | Use `.records` for DQL, top-level fields for JS, `.body`/`.status_code` for HTTP |
 | **Hyphenated/dotted event keys in attribute syntax** | `event().security-problem.technology` is parsed as subtraction | Use bracket form: `event()['security-problem.technology']` |
 | **`default` filter with missing parent** | `result("t").foo \| default("x")` still errors if `result("t")` itself is undefined | Use `.get()`: `result("t").get("foo", "x")` |
 | **Reading a task that may have errored** | Downstream task fails with `Undefined variables` | Add a `conditions.states` gate (`success` only) or check `.get()` with a fallback |
@@ -703,7 +707,7 @@ A task's `return` value is the **only** way to make data visible downstream. The
 
 For long-running multi-step orchestrations where intermediate state must persist *outside* a single workflow run (resumable workflows, cross-workflow handoffs), workflow `result()` is the wrong tool — it lives only for the duration of one execution. Persistent state belongs in **Document Service** (for structured documents) or **Settings 2.0** (for configuration-shaped state).
 
-> <sub>**Sources:** [Workflow expression reference (DT docs)](https://docs.dynatrace.com/docs/shortlink/automation-workflow-expression-reference), [Run JavaScript Workflow Action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Automation Utils SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/automation-utils/v2/). **Derived:** the §6.2 result-shape table consolidates per-task-type access paths from the SDK reference and community examples; the §6.4 flatten-at-producer rule and the §6.6 pitfall list combine the cited expression-reference pitfalls with patterns observed across WFLOW-05/07/08 — verify exact shapes against your tenant's task documentation before deploying at scale.</sub>
+> <sub>**Sources:** [Workflow expression reference (DT docs)](https://docs.dynatrace.com/docs/shortlink/automation-workflow-expression-reference), [Run JavaScript Workflow Action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Automation Utils SDK (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/automation-utils/v2/)., [HTTP request action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/http-request-workflow-action) — result `status_code`, *"the HTTP response status code"*. **Derived:** the §7.2 result-shape table combines the `records` loop example in the expression reference, the JavaScript action's return-value section and the HTTP action's result fields.</sub>
 
 <a id="integration-examples"></a>
 ## 8. Integration Examples
@@ -921,7 +925,7 @@ tasks:
           const result = await queryExecutionClient.queryExecute({
             body: {
               query: `fetch logs, from: now() - 1h | filter loglevel == "ERROR" | summarize count()`,
-              // This is the per-request HTTP timeout from JS to DQL engine,
+              // How long queryExecute waits for the result before returning without one,
               // in milliseconds. Distinct from both the task timeout above
               // and the 120s runtime budget.
               requestTimeoutMilliseconds: 30000
@@ -959,12 +963,12 @@ When a DQL or JavaScript task hits a timeout, the right move depends on **which*
 |---------|----------|------------|
 | Task fails at ~120s with a runtime/engine error | Dynatrace runtime timeout (per-action) | Narrow the query window (`from: now() - 15m` instead of `now() - 24h`), pre-aggregate into a metric or bizevent, or split into multiple smaller tasks. Raising the task `timeout` will not help. |
 | Task fails at exactly the configured task `timeout` value | Task timeout | Raise `timeout`, or break the task into smaller tasks. Verify the work genuinely needs the budget — most legitimately-long tasks are waiting on a human or external system, not computing. |
-| `queryExecute()` returns a request-timeout error well before 120s | `requestTimeoutMilliseconds` too low | Raise it on the SDK call. Default to 30000 (30s); raise to 60000 only if the query genuinely needs longer (and consider whether the query should be pre-aggregated instead). |
+| `queryExecute()` returns well before 120s with no `result` — only the query state and a request token | `requestTimeoutMilliseconds` too low | Raise it on the SDK call, or poll with `queryPoll` using the returned token. Start at 30000 (30s); raise to 60000 only if the query genuinely needs longer (and consider whether the query should be pre-aggregated instead). |
 | Approval/wait task fires at its `timeout` value | Wait-action's own timeout | This is usually the correct behavior — the human did not respond. Decide whether to escalate, auto-approve, or fail. |
 
 > **Rule of thumb.** Raise timeouts only after narrowing scope. A task that needs 10 minutes of DQL is almost always a task that needs a pre-aggregation upstream — fix that first.
 
-> <sub>**Sources:** [Build workflows — Adapt timeout (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Run JavaScript action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Dynatrace SDK — client-query (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/). **Derived:** the three-timeout interaction model in *On `run-javascript`* and the decision table combine the cited per-field documentation; no single source presents them together.</sub>
+> <sub>**Sources:** [Build workflows — Adapt timeout (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/build), [Run JavaScript action (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions/run-javascript-workflow-action), [Grail DQL query API — client-query (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-query/) — *"If the query succeeded, the result will be included. Otherwise the response will contain a request token to reference the query in future polling requests."* **Derived:** the three-timeout interaction model in *On `run-javascript`* and the decision table combine the cited per-field documentation; no single source presents them together.</sub>
 
 ### Monitor JavaScript Task Performance
 
@@ -1050,7 +1054,7 @@ One `set hostTag` operation writes both `primary_tags.*` (the prefix is mandator
 
 > **Hands-on build:** the complete step-by-step walkthrough — build it in the Workflows editor, both scripts, customization, the loop/condition wiring, the safety model, and an import-ready YAML skeleton — is in the **WFLOW-95 LAB: CMDB-Driven Host Tag Enrichment**.
 
-> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — *"Required scope: fleet-management:oneagents:write"* (platform token / OAuth), read 09/28/2026, [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data), [OneAgent tag setup — Ingest enrichment configuration (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent#ingest-enrichment-configuration) — *"No agent restart is needed."* **Derived:** the two-task shape combines this notebook's §2–§7 mechanics — full hands-on build in the WFLOW-95 LAB.</sub>
+> <sub>**Sources:** [OneAgent remote configuration management API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — *"Required scope: fleet-management:oneagents:write"* (platform token / OAuth), read 09/28/2026, [Lookup data in Grail (DT docs)](https://docs.dynatrace.com/docs/platform/grail/lookup-data), [OneAgent tag setup — Ingest enrichment configuration (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent#ingest-enrichment-configuration) — *"No agent restart is needed."*</sub>
 
 ## Next Steps
 

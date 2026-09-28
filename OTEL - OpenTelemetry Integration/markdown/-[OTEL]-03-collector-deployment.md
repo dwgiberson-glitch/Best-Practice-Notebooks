@@ -1,6 +1,6 @@
 # OTEL-03: Collector Deployment Patterns
 
-> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 3 of 8 | **Created:** January 2026 | **Last Updated:** 08/24/2026
+> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 3 of 8 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Deploying the OpenTelemetry Collector
 The OTel Collector can be deployed in various patterns depending on your infrastructure. This notebook covers deployment modes, Kubernetes configurations, and best practices for production.
@@ -373,24 +373,24 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-**When to use which:**
+**When to use which** — in community practice, the choice tends to follow collector count and whether you want the operator's extras; weigh it against how your team already runs rollouts:
 
 | Choose | When |
 |--------|------|
 | Raw `Deployment` + Helm chart | One or two collectors; team already manages Deployment rollouts; Helm-first workflows |
 | `OpenTelemetryCollector` CRD + Operator | Multiple collectors per cluster; auto-reload on config change; want OTLP auto-instrumentation injection for application pods |
 
-The operator's auto-instrumentation feature is the strongest pull for greenfield Kubernetes deployments — annotate a pod with `instrumentation.opentelemetry.io/inject-python: "true"` and the operator injects an init container that loads the OTel agent, pointed at a `Service` your collector exposes. See **OTEL-04 — Trace Instrumentation** for the application-side pattern.
+In community practice, the operator's auto-instrumentation feature is often the deciding factor for greenfield Kubernetes deployments — annotate a pod with `instrumentation.opentelemetry.io/inject-python: "true"` and the operator injects an init container that loads the OTel agent, pointed at a `Service` your collector exposes. See **OTEL-04 — Trace Instrumentation** for the application-side pattern.
 
 > <sub>**Sources:**</sub>
 > - <sub>[OpenTelemetry Operator (opentelemetry-operator GitHub)](https://github.com/open-telemetry/opentelemetry-operator)</sub>
 > - <sub>[OpenTelemetryCollector CRD reference (opentelemetry-operator GitHub)](https://github.com/open-telemetry/opentelemetry-operator/blob/main/docs/api/opentelemetrycollectors.md)</sub>
-> - <sub>**Derived:** "when to use which" table combines operator design with operational trade-offs observed in community deployments</sub>
+> - <sub>[Auto-instrumentation (opentelemetry-operator GitHub)](https://github.com/open-telemetry/opentelemetry-operator/blob/main/docs/auto-instrumentation/README.md) — *"The operator can inject and configure OpenTelemetry auto-instrumentation libraries."*</sub>
 
 <a id="scaling-prometheus-scraping"></a>
 ## 5. Scaling Prometheus Scraping: Target Allocator & Tiered Collectors
 
-The single-collector pattern in **OTEL-05 — Metrics Instrumentation, §6** (one collector with a `prometheus` receiver scraping annotated pods) is the right starting point and carries most deployments. But it does not scale horizontally: a `prometheus` receiver owns a fixed target list, so a second replica makes **both** collectors scrape **every** target — double-counting metrics, not sharing load. Once you reach thousands of scrape targets or millions of data points per minute, you need a tiered architecture that shards scraping across replicas.
+The single-collector pattern in **OTEL-05 — Metrics Instrumentation, §6** (one collector with a `prometheus` receiver scraping annotated pods) is the right starting point for a small or static set of endpoints. But it does not scale horizontally: a `prometheus` receiver owns a fixed target list, so a second replica makes **both** collectors scrape **every** target — double-counting metrics, not sharing load. Once you reach thousands of scrape targets or millions of data points per minute, you need a tiered architecture that shards scraping across replicas.
 
 This builds directly on the OpenTelemetry Operator pattern in §4 — the **Target Allocator** is an Operator component.
 
@@ -414,7 +414,7 @@ For environments where SVG does not render
 | Scraping | Scraper (Deployment) | Stateless and shardable — scale horizontally with an HPA |
 | Counter→delta conversion, enrichment | Gateway (StatefulSet) | `cumulativetodelta` keeps **per-series memory state**; every sample for a series must reach the **same** instance |
 
-The split exists because of `cumulativetodelta`. Prometheus counters are cumulative; Dynatrace prefers delta temporality (cross-reference **OTEL-07 — Dynatrace Integration, §9**). Converting cumulative→delta requires remembering the previous value **per series**, so it cannot be sharded blindly — the gateway tier receives a **resource-hashed** stream so all samples of a series land on one gateway.
+The split exists because of `cumulativetodelta`. Prometheus counters are cumulative; Dynatrace requires delta temporality (cross-reference **OTEL-07 — Dynatrace Integration, §9**). Converting cumulative→delta requires remembering the previous value **per series**, so it cannot be sharded blindly — the gateway tier receives a **resource-hashed** stream so all samples of a series land on one gateway.
 
 ### Target Allocator
 
@@ -654,16 +654,16 @@ Once these land in Dynatrace you can chart them with `timeseries` like any other
 
 | Run | When |
 |-----|------|
-| Single collector (OTEL-05 §6) | Up to a few hundred targets / low-single-digit-million data points per minute; one team, one config; no need for horizontal scrape scaling |
-| Tiered + Target Allocator | Thousands of targets; HPA-driven horizontal scaling; CRD-based (`ServiceMonitor` / `PodMonitor` / `ScrapeConfig`) discovery across many teams |
+| Single collector (OTEL-05 §6) | A small or static set of endpoints; no need for auto-scaling or redundancy |
+| Tiered + Target Allocator | Thousands of pods or hundreds of distinct endpoints; millions of data points per minute; HPA-driven horizontal scaling instead of manually partitioning targets; CRD-based (`ServiceMonitor` / `PodMonitor` / `ScrapeConfig`) discovery |
 
 Complete, runnable configs (Helm values for all three tiers, RBAC, self-monitoring) live in the Dynatrace OTel Collector repo under `config_examples/prometheus-large-scale/`.
 
 > <sub>**Sources:**</sub>
-> - <sub>[Prometheus standard use case (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/use-cases/prometheus/standard)</sub>
+> - <sub>[Prometheus standard use case (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/use-cases/prometheus/standard) — *"The metric_start_time and cumulative_to_delta processors are stateful and must see every consecutive sample of a series in one place to compute deltas correctly."*</sub>
 > - <sub>[prometheus-large-scale config examples (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-otel-collector/tree/main/config_examples/prometheus-large-scale) — verbatim tier-1 scraper / tier-2 gateway / allocator Helm values</sub>
 > - <sub>[OpenTelemetry Operator (opentelemetry-operator GitHub)](https://github.com/open-telemetry/opentelemetry-operator) — Target Allocator component</sub>
-> - <sub>**Derived:** the "why two tiers" split and the single-vs-tiered decision table synthesize the docs architecture with the `cumulativetodelta` per-series-state constraint from OTEL-07 §9</sub>
+> - <sub>[About OTLP metrics ingest (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/otlp-api/ingest-otlp-metrics/about-metrics-ingest) — *"The Dynatrace backend exclusively works with delta values and requires the respective aggregation temporality."*</sub>
 
 <a id="docker-compose"></a>
 ## 6. Docker Compose

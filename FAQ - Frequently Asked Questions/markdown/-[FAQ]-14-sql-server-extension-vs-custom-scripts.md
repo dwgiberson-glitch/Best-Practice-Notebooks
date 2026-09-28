@@ -39,7 +39,7 @@ You can — but in a typical estate the **Microsoft SQL Server extension from Dy
 <a id="short-answer"></a>
 ## 1. Short Answer
 
-**Yes, for almost all of it.** Deploy the Microsoft SQL Server extension (Hub, ActiveGate-based) as Dynatrace recommends, and a typical homegrown monitor set — blocked sessions, database status, job outcomes, log space utilization, Always On sync health and failover posture, instance status, file space — is covered out of the box by documented `sql-server.*` metrics and job-outcome log streams. Keep custom collection only for the checks the extension genuinely doesn't make (in practice: tempdb version-store pressure, and filegroup-level rollups if that exact granularity drives an alert), and implement those as a small Extensions 2.0 SQL extension on the same ActiveGate.
+**Yes, for almost all of a typical script estate.** Deploy the Microsoft SQL Server extension (Hub, ActiveGate-based). In community practice, the monitor set most homegrown script estates carry is blocked sessions, database status, job outcomes, log space utilization, Always On sync health and failover posture, instance status, and file space — and each of those maps onto a documented `sql-server.*` metric or job-outcome log stream (§ 4). Run that mapping against your own script list before treating the verdict as yours. Keep custom collection only for the checks the extension genuinely doesn't make (in practice: tempdb version-store pressure, and filegroup-level rollups if that exact granularity drives an alert), and implement those as a small Extensions 2.0 SQL extension on the same ActiveGate.
 
 The reason to switch is not just parity. Scripts deliver numbers; the extension delivers numbers **attached to entities** — topology, Smartscape SQL Server instances/databases/availability groups, and Davis AI baselining on every signal. Bypassing the extension and shipping raw script output into Dynatrace forfeits exactly the capabilities most customers bought the platform for.
 
@@ -53,7 +53,7 @@ The reason to switch is not just parity. Scripts deliver numbers; the extension 
 | Keep Telegraf → Dynatrace metrics API | Queries unchanged | No topology, no Smartscape entities, no Davis baselining; second agent to operate |
 -->
 
-> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2), [SQL Server Monitoring (Dynatrace Hub)](https://www.dynatrace.com/hub/detail/microsoft-sql-server-2/). **Derived:** the "almost all of it" claim combines the extension's documented metric catalog with a monitor inventory common across field engagements.</sub>
+> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2), [SQL Server Monitoring (Dynatrace Hub)](https://www.dynatrace.com/hub/detail/microsoft-sql-server-2/).</sub>
 
 <a id="two-views"></a>
 ## 2. Two Views of a Database: Caller-Side vs Server-Side
@@ -97,7 +97,7 @@ Two structural points worth internalizing:
 <a id="mapping"></a>
 ## 4. Mapping a Typical Homegrown Monitor Set
 
-The table below maps the monitor set we see most often in script/Telegraf estates onto the extension. If your set looks like this, the extension replaces it nearly one-for-one:
+In community practice, the monitor set below is the one seen most often in script/Telegraf estates — your inventory may differ, so run the mapping against your actual script list before deciding. Each coverage cell is read from the extension's documented metric and log-stream list. If your set looks like this, the extension replaces it nearly one-for-one:
 
 | Typical homegrown monitor | Extension coverage | Notes |
 |---|---|---|
@@ -112,7 +112,7 @@ The table below maps the monitor set we see most often in script/Telegraf estate
 | tempdb version-store pressure | ❌ Not collected | The one recurring hard gap — see section 7 |
 | Filegroup-level %-of-maxsize rollup | ⚠️ File-level only | No filegroup dimension exists on the file metrics |
 
-> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2). **Derived:** the "typical homegrown monitor set" is a field-observed composite; your inventory may differ — run the mapping against your actual script list before deciding.</sub>
+> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2).</sub>
 
 <a id="beyond-the-numbers"></a>
 ## 5. What You Gain Beyond the Numbers
@@ -153,11 +153,11 @@ Constraints that will affect scripts as currently written:
 - **Comments inside queries are rejected.**
 - Default 10-second query timeout; queries run sequentially on one connection.
 
-Design rule worth adopting during the rewrite: **emit raw values, not verdicts.** A script that returns `1` when version store exceeds 30% of tempdb bakes the threshold into the collector. Emit the percentage as a gauge and put the `> 30` in a Dynatrace metric event — thresholds become tunable, and Davis can baseline the raw signal.
+In community practice, the design rule worth adopting during the rewrite is **emit raw values, not verdicts.** A script that returns `1` when version store exceeds 30% of tempdb bakes the threshold into the collector. Emit the percentage as a gauge and put the `> 30` in a Dynatrace metric event — thresholds become tunable, and Davis can baseline the raw signal.
 
 The DBMON series carries the mechanics of the server-side view; the [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference) documents the YAML shape, scheduling (per-minute to cron), and dimension model.
 
-> <sub>**Sources:** [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference). **Derived:** the emit-raw-values-not-verdicts rule is a community/engagement pattern, not documented Dynatrace guidance.</sub>
+> <sub>**Sources:** [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference).</sub>
 
 <a id="keep-telegraf"></a>
 ## 8. The Keep-Telegraf Fallback
@@ -211,6 +211,8 @@ fetch logs, from:-24h
 <a id="recommended-approach"></a>
 ## 10. Recommended Approach
 
+*The sequence below is community practice built on the two pages cited; each step's mechanics are sourced in the section it points to.*
+
 1. **Inventory your script estate** — every query, what it measures, and which alerts consume it.
 2. **Map each monitor** against section 4. Expect the large majority to land on documented `sql-server.*` signals.
 3. **Deploy the extension** per section 9; run it **in parallel** with the scripts for one or two operational cycles.
@@ -219,7 +221,7 @@ fetch logs, from:-24h
 6. **Retire the redundant scripts** after the parallel run confirms parity.
 7. Reserve keep-Telegraf for transition or for checks that genuinely resist rewrite — not as the standing architecture.
 
-> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2), [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference). **Derived:** the seven-step sequence is an engagement pattern built on both sources.</sub>
+> <sub>**Sources:** [Microsoft SQL Server extension (DT docs)](https://docs.dynatrace.com/docs/observe/infrastructure-observability/databases/extensions/microsoft-sql-server-2), [SQL data source reference (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/sql/sql-reference).</sub>
 
 <a id="objections"></a>
 ## 11. Common Objections

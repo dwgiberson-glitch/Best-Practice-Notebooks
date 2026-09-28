@@ -1,6 +1,6 @@
 # APPSEC-05: Security Posture Management
 
-> **Series:** APPSEC — Application Security | **Notebook:** 5 of 10 | **Created:** June 2026 | **Last Updated:** 09/18/2026
+> **Series:** APPSEC — Application Security | **Notebook:** 5 of 10 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -85,12 +85,12 @@ fetch security.events, from:-7d
 <a id="lifecycle"></a>
 ## 4. Finding Lifecycle
 
-SPM findings move through the same lifecycle as RVA findings: OPEN → RESOLVED (config fixed) or OPEN → MUTED / EXCEPTION. Two SPM-specific notes:
+SPM findings move through the same lifecycle as RVA findings: OPEN → RESOLVED (config fixed) or OPEN → MUTED / EXCEPTION. In community practice, two SPM-specific patterns stand out — verify both against your own findings:
 
-1. **Resolution is often automatic** — fix the config and the next SPM scan closes the finding. Manual acknowledgement is more common in RVA than SPM.
-2. **Exceptions are common in SPM** — many compliance findings reflect legitimate architectural choices (a public-facing bucket holding intentionally-public assets). Exception with a documented reason is a normal posture.
+1. **Resolution is often automatic** — teams typically fix the config and let the next SPM assessment close the finding. Manual acknowledgement tends to be more common in RVA than SPM.
+2. **Exceptions are common in SPM** — many compliance findings reflect legitimate architectural choices (a public-facing bucket holding intentionally-public assets), so an exception with a documented reason is widely treated as a normal posture.
 
-> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the SPM framing. **Derived:** the auto-resolution + exception-is-normal observations are synthesis of common SPM operating patterns.</sub>
+> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the SPM framing.</sub>
 
 <a id="next"></a>
 ## 5. Next Steps

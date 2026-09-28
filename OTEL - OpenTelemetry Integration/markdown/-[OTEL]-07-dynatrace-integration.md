@@ -1,6 +1,6 @@
 # OTEL-07: Dynatrace OTLP Integration
 
-> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 7 of 8 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** OTEL — OpenTelemetry Integration | **Notebook:** 7 of 8 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 ## Complete Setup for OpenTelemetry with Dynatrace
 This notebook provides end-to-end configuration for sending OpenTelemetry data to Dynatrace, including authentication, endpoints, and verification.
@@ -512,13 +512,15 @@ For environments where SVG does not render
 
 ### 9.1. Signal-Routing Decision Table
 
+In community practice, placement tends to follow the table below — confirm it against your own OneAgent coverage before committing to it:
+
 | Signal type | Preferred path | Why |
 |-------------|----------------|-----|
 | Host CPU / memory / disk / network | OneAgent (DynaKube) | Auto-discovers; tightly integrated with the Smartscape host entity |
 | Process-level metrics, process group detection | OneAgent | SDV2 entity detection requires the agent |
 | Application traces (OneAgent-supported language) | OneAgent | Auto-instrumentation, no code change |
 | Application traces (unsupported language or fine-grained custom) | OTel SDK → Collector → OTLP | OTel covers languages OneAgent does not |
-| Prometheus-exposed metrics from third-party / business apps | OTel Collector `prometheus` receiver → OTLP | OneAgent does not scrape Prometheus |
+| Prometheus-exposed metrics from third-party / business apps | OTel Collector `prometheus` receiver → OTLP | Scales horizontally with a Target Allocator; a Dynatrace Prometheus extension (run on a OneAgent host or remotely on an ActiveGate) is the alternative when you want host-context enrichment |
 | Custom application metrics | OTel SDK → Collector → OTLP | Same as Prometheus path |
 | Logs from OneAgent-instrumented hosts | OneAgent | Auto-detection from log paths |
 | Logs from OTel-only apps | OTel SDK → Collector → OTLP | OneAgent does not pick them up without the agent installed |
@@ -549,7 +551,7 @@ The collector's `k8sattributes` processor pulls these annotations into the resou
 
 ### 9.3. Counter Temporality — `cumulativetodelta`
 
-Prometheus emits **cumulative** counters that only ever increase. Dynatrace prefers **delta** temporality — the per-interval change. Without conversion, every counter looks ever-increasing in Dynatrace and `rate()` math is awkward at query time. The collector's `cumulativetodelta` processor performs the conversion in-pipeline:
+Prometheus emits **cumulative** counters that only ever increase. Dynatrace requires **delta** temporality — the per-interval change: *"The Dynatrace backend exclusively works with delta values and requires the respective aggregation temporality."* Its instrument mapping gives a cumulative Counter no Dynatrace metric type, so Prometheus counters must be converted before export. The collector's `cumulativetodelta` processor performs the conversion in-pipeline:
 
 ```yaml
 processors:
@@ -592,7 +594,8 @@ set_global_textmap(CompositePropagator([
 > - <sub>[Cumulative to Delta processor (OpenTelemetry Collector Contrib GitHub)](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/cumulativetodeltaprocessor)</sub>
 > - <sub>[Configure OTLP Metrics (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/otlp-api/ingest-otlp-metrics/configure-otlp-metrics)</sub>
 > - <sub>[Dynatrace Operator (Dynatrace GitHub)](https://github.com/Dynatrace/dynatrace-operator)</sub>
-> - <sub>**Derived:** signal-routing table combines OneAgent's coverage capabilities with OTel's gap-filling role; final placement is engagement-specific</sub>
+> - <sub>[About OTLP metrics ingest (DT docs)](https://docs.dynatrace.com/docs/ingest-from/opentelemetry/otlp-api/ingest-otlp-metrics/about-metrics-ingest) — *"The Dynatrace backend exclusively works with delta values and requires the respective aggregation temporality."*</sub>
+> - <sub>[Prometheus data source (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/develop-your-extensions/data-sources/prometheus-extensions) — *"For high-volume Prometheus scraping in Kubernetes, and for new deployments, consider the OpenTelemetry Collector"*</sub>
 
 ---
 

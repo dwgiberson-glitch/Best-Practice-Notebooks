@@ -4,13 +4,13 @@
 
 ## Overview
 
-ActiveGate updates differ from OneAgent updates in a way that matters operationally: ActiveGates are infrastructure, not endpoints. A single ActiveGate sits in the path of many OneAgents, hosts a set of extensions, and may run a synthetic browser engine. When an ActiveGate restarts to update, the impact is concentrated — not distributed across thousands of hosts the way a OneAgent restart is.
+ActiveGate updates differ from OneAgent updates in a way that matters operationally: ActiveGates are infrastructure, not endpoints. A single ActiveGate sits in the path of many OneAgents, hosts a set of extensions, and may run a synthetic browser engine. When an ActiveGate updates, the impact is concentrated — not distributed across thousands of hosts the way a OneAgent restart is.
 
-That concentration is the reason ActiveGate update management deserves a separate decision than OneAgent update management. The mechanics look similar (auto-update toggle, version checking, restart), but the operating practices around sequencing, HA pairs, role-specific validation, and rollback are distinct. It is also why the decision is not purely operational: an ActiveGate is in-path infrastructure with a broad network footprint, and AG security fixes ship inside ordinary version updates — so update policy is a security-posture decision as much as a change-management one (§3).
+That concentration is the reason ActiveGate update management deserves a separate decision than OneAgent update management. The mechanics look similar (auto-update toggle, version checking, install and reconnect), but the operating practices around sequencing, HA pairs, role-specific validation, and rollback are distinct. It is also why the decision is not purely operational: an ActiveGate is in-path infrastructure with a broad network footprint, and AG security fixes ship inside ordinary version updates — so update policy is a security-posture decision as much as a change-management one (§3).
 
 This FAQ covers: the update mechanism, the auto-update vs manual decision, sequencing (let auto-update handle it; ActiveGates before OneAgents when you update manually), HA-pair rolling updates, role-specific considerations (routing, synthetic, Extension Framework 2.0, cloud monitoring), validation, rollback, and the most common pitfalls.
 
-> **Scope:** SaaS only. Managed Cluster ActiveGates and the Cluster ActiveGate update model are out of scope here — with one exception: §2 covers the ActiveGate `autoUpdate` API change, because the same two properties were added to both the SaaS Environment API v2 and the Managed Cluster API v2 and then removed again from the Cluster API only.
+> **Scope:** SaaS only. Managed Cluster ActiveGates and the Cluster ActiveGate update model are out of scope here — with one exception: §2 covers the ActiveGate `autoUpdate` API change, because the same two properties were added to both the SaaS Environment API v2 and the Managed Cluster API v2 and then removed again from six Cluster API endpoints — but not from the SaaS API.
 
 ---
 
@@ -42,23 +42,23 @@ This FAQ covers: the update mechanism, the auto-update vs manual decision, seque
 <a id="why"></a>
 ## 1. Why ActiveGate Updates Need Attention
 
-OneAgent updates are distributed — thousands of hosts, each with its own restart, no single one affecting much. ActiveGate updates are concentrated — one component in the path of many flows, and the restart touches every flow it serves.
+OneAgent updates are distributed — thousands of hosts, each with its own restart, no single one affecting much. ActiveGate updates are concentrated — one component in the path of many flows, and the update gap touches every flow it serves.
 
 The practical consequences:
 
 - **Connectivity gap during the update.** OneAgents and other clients route through the ActiveGate, and an updating ActiveGate installs the new version and then re-connects to the server. In community practice that gap is short, but a single AG cannot hide it; HA pairs absorb it.
 - **Components that move with the AG.** The Extension Execution Controller that runs EF 2.0 extensions is installed and managed with the ActiveGate, and the cloud-monitoring modules (AWS, Azure) run inside it. The extensions themselves are versioned separately. On a synthetic AG the Synthetic engine and browser move too — on Windows the browser always updates with the engine; on Linux a per-location switch decides (§6).
 - **Version compatibility downstream.** A OneAgent can only report through the ActiveGate in front of it. Dynatrace publishes no general version-compatibility matrix between the two, but it has required ActiveGates to be upgraded for a OneAgent change before (§4) — which is why an AG left behind is the component to worry about.
-- **Role-specific behavior changes.** A synthetic-enabled AG restart re-initializes browser monitors; an EF 2.0-enabled AG restart reloads extensions. The "blast radius" of the restart depends on what the AG is configured to do.
+- **What the update touches depends on the role.** The components above come back on the new version, so the checks after an update depend on what the AG is configured to do (§6, §7).
 
 | Without active management | With active management | Impact |
 |---|---|---|
 | AGs on manual updates drift behind auto-updating OneAgents | Auto-update on both tiers, or AGs updated first where manual | No OneAgent arrives at a version its AG has not seen |
-| Synthetic monitors regress unexpectedly after bundled engine change | Browser-engine change is validated post-update | Monitor false-failures are caught quickly |
-| EF 2.0 extensions fail to reload after a restart, ingest stops silently | Extension reload is part of post-update validation | Stays current on extension behavior |
+| Synthetic monitors fail unexpectedly after a browser change | Browser version held with the location switch, or validated post-update | Monitor false-failures are caught quickly |
+| An extension stops ingesting after an update and nobody notices | Extension status and ingest are part of post-update validation | Silent ingest gaps are caught quickly |
 | Single-AG architectures take observability gaps during every update | HA pair, rolled one at a time | No observability gap during update |
 
-In community practice, the most consistent benefit teams report from disciplined AG update management is "we stopped having synthetic monitors flake mysteriously after sprint updates" — the symptom that surfaces when bundled engine changes happen invisibly. Verify against your own monitor history.
+In community practice, the most visible benefit of disciplined AG update management is fewer unexplained synthetic monitor failures after updates — the symptom of a browser change nobody tracked. Verify against your own monitor history.
 
 > <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"The ActiveGate has requested and downloaded the new installation package from the server, and is currently in the process of installing it or re-connecting to the server."*, [About Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/concepts) — *"EEC is automatically installed and managed with each OneAgent and ActiveGate configuration."*, [Private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations) — *"on Windows-based ActiveGates, Chromium is always updated during Synthetic engine updates."* (all re-read 09/28/2026)</sub>
 
@@ -74,7 +74,7 @@ ActiveGate update flow on SaaS:
 
 A few mechanics worth knowing:
 
-- **Where you control updates depends on the platform surface.** On **Latest Dynatrace**, update control is set centrally: **Settings > Fleet management > ActiveGate version and updates** holds a **target version** (pinned, or a rolling policy such as N-1) and an **update mode** — auto-update as soon as Dynatrace releases, auto-update only during update windows you define, or auto-update disabled. On **Dynatrace Classic**, the older path remains: **Settings > Updates > ActiveGate updates**, a per-ActiveGate *Automatic updates at earliest convenience* toggle. Since **SaaS 1.343** (rollout from 07/14/2026), per-ActiveGate settings can override the environment defaults, so a role-specific schedule is expressed by giving those AGs their own update mode or window.
+- **Where you control updates depends on the platform surface.** On **Latest Dynatrace**, update control is set centrally: **Settings > Fleet management > ActiveGate version and updates** holds a **target version** (pinned, or a rolling policy such as N-1) and an **update mode** — auto-update as soon as Dynatrace releases, auto-update only during update windows you define, or auto-update disabled. On **Dynatrace Classic**, the older path remains: **Settings > Updates > ActiveGate updates**, a per-ActiveGate *Automatic updates at earliest convenience* toggle. The Update ActiveGate page documents only that toggle for Classic, but the SaaS 1.343 notes describe ActiveGate update modes by their Classic names — including *Automatic during update window* — and say ActiveGates *"share the same update windows you already use for OneAgent"*. Check your Classic settings before assuming windows are unavailable there. Since **SaaS 1.343** (rollout from 07/14/2026), per-ActiveGate settings can override the environment defaults, so a role-specific schedule is expressed by giving those AGs their own update mode or window.
 - **Auto-update can be disabled.** On the Classic path, a one-click **Update** control appears in the AG's settings when a new version is available and the toggle is off; on Latest Dynatrace, manually managed ActiveGates get an **Update now to target version** button (steps in §4). *Auto-update disabled* is an update mode the docs mark as not recommended.
 - **Containerized ActiveGates are outside all of this.** Auto-update and one-click update apply only to installer-based ActiveGates; containerized ones are updated with your container tooling (on Kubernetes, the Dynatrace Operator).
 - **The check interval.** The docs give 30 minutes for the Classic path and document no setting to change it.
@@ -91,7 +91,7 @@ A few mechanics worth knowing:
 
 **API 1.342** added `targetVersion` (the version AGs update to) and `updateWindows` (when updates may run) to the ActiveGate auto-update endpoints of **both** API families — the SaaS **Environment API v2** and the Managed **Cluster API v2**.
 
-**API 1.344** (published 07/15/2026, rollout from 07/29/2026) then **removed both properties again from the Cluster API v2 only** — from the global and per-AG `/activeGates/autoUpdate` endpoints and their validators — marked *"Broken compatibility"*, and changed the read-only status of properties on the per-AG endpoints. If you automate **Dynatrace Managed** ActiveGate updates, remove both properties from those request bodies before the change reaches your cluster. Verify against your own cluster's API version rather than assuming the rollout date.
+**API 1.344** (published 07/15/2026, rollout from 07/29/2026) then **removed both properties from six Cluster API v2 endpoints** — the global and per-AG `/activeGates/autoUpdate` endpoints and their validators — marking four of them *"Broken compatibility"*, and changed the read-only status of properties on the per-AG endpoints. The changelog lists **no** removal for the per-environment `/activeGates/autoUpdate/{envId}` endpoints that 1.342 also extended; check your cluster's API reference for those. If you automate **Dynatrace Managed** ActiveGate updates, drop both properties from the affected request bodies once your cluster is on 1.344 or later — go by your own cluster's API version, not the rollout date.
 
 On **SaaS**, nothing was removed: the Environment API v2 reference for `PUT /api/v2/activeGates/autoUpdate` still documents `targetVersion` and `updateWindows` (read 09/28/2026), alongside the Fleet management settings page. An earlier revision of this document said the properties were never part of the SaaS API; that was wrong.
 
@@ -105,15 +105,15 @@ The general lesson: a capability announced in one sprint can be withdrawn in the
 > - <sub>[API changelog 1.342 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-342) — under both *Environment API v2* and *Cluster API v2*: *"Added properties: targetVersion, updateWindows"*</sub>
 > - <sub>[ActiveGate auto-update configuration API — PUT global (DT docs)](https://docs.dynatrace.com/docs/discover-dynatrace/references/dynatrace-api/environment-api/activegates/auto-update-config/put-global) — SaaS `PUT /api/v2/activeGates/autoUpdate` request body lists `targetVersion` and `updateWindows` (read 09/28/2026)</sub>
 > - <sub>[ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"These are replaced by the ACTIVEGATE Smartscape node."*</sub>
-> - <sub>[API changelog 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — the changelog marks the schema *"Broken compatibility"* and lists *"Removed properties: targetVersion , updateWindows"* on each of the six Cluster API v2 `/activeGates/autoUpdate` endpoints</sub>
+> - <sub>[API changelog 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — lists *"Removed properties: targetVersion , updateWindows"* on six Cluster API v2 `/activeGates/autoUpdate` endpoints, four marked *"Broken compatibility"*; no removal is listed for `/activeGates/autoUpdate/{envId}`, which 1.342 also extended (both changelogs re-read 09/28/2026)</sub>
 > - <sub>[SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343) — *"Fleet Management is now available."*</sub>
 > - <sub>[Fleet Management (DT docs)](https://docs.dynatrace.com/docs/ingest-from/fleet-management) — *"Plan and control updates with target versions and update windows."*; *"Define an update window to control when updates are applied."*</sub>
-> - <sub>**Derived:** the "remove both properties from Managed request bodies before the change lands" instruction follows from the 1.344 Cluster API schema removal plus the staged-rollout model</sub>
+> - <sub>**Derived:** the "drop both properties once the cluster is on 1.344" instruction follows from the 1.344 Cluster API schema removal plus the staged-rollout model</sub>
 
 <a id="modes"></a>
 ## 3. The Auto-Update vs Manual Decision
 
-Two effective modes per ActiveGate on the Dynatrace Classic path. On Latest Dynatrace the same decision is the **update mode** in Fleet management settings (§2), with a third option — *auto-update during an update window* — that gives the "deliberately scheduled" behavior below without leaving updates to a manual reminder:
+Two effective modes per ActiveGate as the Classic Update ActiveGate page documents them (the SaaS 1.343 notes also describe a windowed mode — §2). On Latest Dynatrace the same decision is the **update mode** in Fleet management settings (§2), with a third option — *auto-update during an update window* — that gives the "deliberately scheduled" behavior below without leaving updates to a manual reminder:
 
 | Mode | What it does | When to pick it |
 |------|--------------|-----------------|
@@ -123,7 +123,7 @@ Two effective modes per ActiveGate on the Dynatrace Classic path. On Latest Dyna
 ### Decision factors
 
 - **HA pair vs single AG.** HA pairs make auto-update low-risk: roll one at a time, the partner absorbs the load. Single AGs cause a connectivity gap during the update — an update window lets you schedule that gap without disabling updates. In community practice, single-AG architectures are usually a temporary state on the path to HA — the right long-term answer is *deploy a second AG*, not *disable auto-update*.
-- **Security releases and your vulnerability-remediation SLA.** This is the factor most often missing from the conversation, because the rest of the decision reads as purely operational. An ActiveGate is **in-path infrastructure with a broad network footprint** — it terminates OneAgent connections, holds credentials for cloud connectors and extensions, reaches into monitored networks, and often sits in a DMZ or a routable segment by design. That footprint is why an AG security fix is not the same class of change as a feature update. And AG security fixes do ship inside ordinary version updates rather than on a separate channel: **ActiveGate 1.343 backported a fix for CVE-2026-40984 and CVE-2026-40983 in the ActiveGate for Kubernetes image**, and in the same version shipped a vSphere certificate-validation vulnerability fix — so a containerized AG left on a pre-1.343 image stays exposed to those CVEs until it takes the new version.
+- **Security releases and your vulnerability-remediation SLA.** This is the factor most often missing from the conversation, because the rest of the decision reads as purely operational. An ActiveGate is **in-path infrastructure with a broad network footprint** — it terminates OneAgent connections, holds credentials for cloud connectors and extensions, reaches into monitored networks, and often sits in a DMZ or a routable segment by design. That footprint is why an AG security fix is not the same class of change as a feature update. And AG security fixes do ship inside ordinary version updates rather than on a separate channel: **ActiveGate 1.343 backported a fix for CVE-2026-40984 and CVE-2026-40983 in the ActiveGate for Kubernetes image**, so a containerized AG left on a pre-1.343 image stays exposed to those CVEs until it takes the new image. (The same release added a vSphere certificate-validation fix, but that one is **opt-in**: the new `vsphere.strict.tls.validation` property defaults to `false`, so taking the update alone changes nothing — you have to turn it on.)
 
   The test to apply: **every AG on manual updates needs a demonstrable path to apply a security release inside your organization's vulnerability-remediation SLA.** Not a hope that someone notices — a named owner, a trigger, and a window that fits inside the SLA clock. If the manual process cannot meet that SLA — and for a single AG whose restart requires a change ticket, it usually cannot — **the answer is HA plus auto-update, not manual updates.** HA is what removes the update-gap objection that motivated manual mode in the first place, which makes it the fix for both problems at once. Manual mode is defensible for a scheduled feature update; it is much harder to defend for a security release.
 - **Synthetic load — use the browser switch, not the AG switch.** The browser on a synthetic AG is updated *during* ActiveGate and Synthetic engine updates. On Linux, whether that happens is a **per-private-location** switch, *Enable Chrome(-ium) auto-update*, on by default; to hold a specific browser version, turn it off **before** the ActiveGate update and update the browser by hand on each AG in the location. On Windows the browser always updates with the engine. Either way, Dynatrace supports browser versions no more than two behind the latest supported one for the ActiveGate release. Disabling ActiveGate auto-update to freeze the browser also freezes the AG's security fixes, which is the worse trade.
@@ -133,7 +133,7 @@ Two effective modes per ActiveGate on the Dynatrace Classic path. On Latest Dyna
 
 ### The other clock: operating-system support end dates
 
-Auto-update keeps an ActiveGate current on *Dynatrace* versions. It does nothing about the **host OS falling out of support**, which stops updates just as effectively and on a schedule nobody sets. The ActiveGate 1.345 notes publish the current runway:
+Auto-update keeps an ActiveGate current on *Dynatrace* versions. It does nothing about the **host OS falling out of support** — a date Dynatrace sets, after which the ActiveGate is running on an unsupported platform. The ActiveGate 1.345 notes publish the current runway:
 
 | ActiveGate support ends | Operating systems |
 |---|---|
@@ -141,11 +141,11 @@ Auto-update keeps an ActiveGate current on *Dynatrace* versions. It does nothing
 | **December 1, 2026** | RHEL 9.7 / 10.1, Oracle Linux 9.7 / 10.1, Rocky Linux 9.7 / 10.1 |
 | **January 1, 2027** | Amazon Linux 2 |
 
-Read the December row carefully — it retires **9.7 and 10.1 point releases across three distributions at once**, which is the row most likely to catch a fleet that standardized on a single minor version. Inventory the OS behind each ActiveGate against these dates now: an OS migration is a rebuild-and-re-register, not a version bump, so it needs lead time an update window cannot supply. In community practice this is the strongest practical argument for HA pairs in §5 — an OS migration is far easier to absorb when a partner can carry traffic.
+Read the December row carefully — it retires **9.7 and 10.1 point releases across three distributions at once**, which is the row most likely to catch a fleet that standardized on a single minor version. Inventory the OS behind each ActiveGate against these dates now. Most rows are **minor** releases (RHEL / Oracle Linux / Rocky Linux 9.4, 9.7, 10.1), where the fix is normally an OS minor update on the same host — ActiveGate 1.343 added support for Oracle Linux and Rocky Linux 9.8 and 10.2. **Ubuntu 16.04 and Amazon Linux 2** are different: they need a new OS major version, which in community practice usually means a rebuilt host and a fresh ActiveGate install, so they need the most lead time. That is where HA pairs (§5) pay off — a partner carries traffic while one host is rebuilt.
 
-> **Also in ActiveGate 1.345 — a transport change under the hood.** Verbatim: *"ActiveGate watchdog communication switches from TCP sockets to named pipes, aligning with OneAgent."* No action is required, but it is worth knowing before the next post-update investigation: local-port expectations, host-firewall rules, or monitoring that watched the watchdog's TCP socket may need revisiting on ActiveGates that have taken 1.345. The same release moves the containerized base image from **Red Hat UBI 9 Micro to UBI 10 Micro** — a change worth flagging to whoever scans your container images, since the scan baseline shifts with it.
+> **Also in ActiveGate 1.345 — a transport change under the hood.** Verbatim: *"ActiveGate watchdog communication switches from TCP sockets to named pipes, aligning with OneAgent."* The notes require no action; if you had your own monitoring on the watchdog's local TCP socket, expect it to stop matching on ActiveGates that have taken 1.345. The same release moves the containerized base image from **Red Hat UBI 9 Micro to UBI 10 Micro** — a change worth flagging to whoever scans your container images, since the scan baseline shifts with it.
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — Classic: one-click update *"is available only when the Automatic updates at earliest convenience toggle is turned off"*; Latest Dynatrace: *"Auto-update during an update window —ActiveGates update automatically, but only during the update windows you configure on the Manage update windows tab."*, [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"Backported a security fix that addresses CVE-2026-40984 and CVE-2026-40983 in the ActiveGate for Kubernetes image"*, [Private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations) — *"If you don't want Chromium to be updated automatically, for example, to use a specific version of Chromium, or if you have offline environments, turn off the switch before triggering an ActiveGate update."*; *"Dynatrace supports Chromium versions that are no more than two versions behind the the latest Dynatrace-supported version for a specific ActiveGate release."*, [ActiveGate 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — the OS support end dates tabulated above, the watchdog named-pipes switch, and the UBI 9 → UBI 10 Micro base-image change. **Derived:** the "if the manual process cannot meet the SLA, the answer is HA plus auto-update" conclusion combines the security-fix delivery model with the per-AG restart behavior that HA absorbs.</sub>
+> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — Classic: one-click update *"is available only when the Automatic updates at earliest convenience toggle is turned off"*; Latest Dynatrace: *"Auto-update during an update window —ActiveGates update automatically, but only during the update windows you configure on the Manage update windows tab."*, [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"Backported a security fix that addresses CVE-2026-40984 and CVE-2026-40983 in the ActiveGate for Kubernetes image"*; *"When set to false, which is the default, it accepts any certificate and skips hostname verification"*; *"Added support for Oracle Linux 9.8"*, [Private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations) — *"If you don't want Chromium to be updated automatically, for example, to use a specific version of Chromium, or if you have offline environments, turn off the switch before triggering an ActiveGate update."*; *"Dynatrace supports Chromium versions that are no more than two versions behind the the latest Dynatrace-supported version for a specific ActiveGate release."*, [ActiveGate 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — the OS support end dates tabulated above, the watchdog named-pipes switch, and the UBI 9 → UBI 10 Micro base-image change. **Derived:** the "if the manual process cannot meet the SLA, the answer is HA plus auto-update" conclusion combines the security-fix delivery model with the per-AG restart behavior that HA absorbs.</sub>
 
 <a id="sequencing"></a>
 ## 4. Sequencing — ActiveGates Before OneAgents
@@ -183,14 +183,14 @@ Once you disable auto-update, pin a target version, or confine updates to window
 
 **4. Validate the OneAgents** — hosts reporting on the new version, and deep-monitored processes restarted.
 
-**Why this order.** Dynatrace does not publish a general rule that an ActiveGate must be at or above the version of the OneAgents behind it. It has, however, enforced exactly that dependency once: ahead of OneAgent's move to 64-bit host IDs, *"all ActiveGates earlier than version 1.154 must be upgraded to newer releases in order to properly support OneAgent 64-bit IDs. Failure to do this will result in OneAgent being unable to communicate with the Dynatrace Cluster via these earlier versions of ActiveGate."* In community practice teams generalise that one documented case into a standing order — update the ActiveGate tier first so no OneAgent ever arrives at a version the ActiveGate in front of it has not seen. It costs nothing, and the reverse order is the one with a documented failure.
+**Why this order.** Dynatrace does not publish a general rule that an ActiveGate must be at or above the version of the OneAgents behind it. It has, however, enforced exactly that dependency once: ahead of OneAgent's move to 64-bit host IDs, *"all ActiveGates earlier than version 1.154 must be upgraded to newer releases in order to properly support OneAgent 64-bit IDs. Failure to do this will result in OneAgent being unable to communicate with the Dynatrace Cluster via these earlier versions of ActiveGate."* In community practice teams generalise that one documented case into a standing order — update the ActiveGate tier first so no OneAgent ever arrives at a version the ActiveGate in front of it has not seen. The reverse order is the one with a documented failure.
 
 ![Update Sequencing — ActiveGates Before OneAgents](images/05-ag-before-oneagent-sequencing_930x500.png)
 
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Stage | Action |
 |-------|--------|
-| 1 | Update ActiveGates first; roll one at a time in HA pairs |
+| 1 | (Manual updates only — with auto-update on both tiers there is no order to manage) Update ActiveGates first; roll one at a time in HA pairs |
 | 2 | Validate AGs: connectivity, routes, extension reload, synthetic engine healthchecks |
 | 3 | Update OneAgents across host groups; respect update windows |
 | 4 | Validate OneAgents: deep monitoring re-injection, hosts reporting on new version |
@@ -201,10 +201,10 @@ For environments where SVG doesn't render
 
 - **Both tiers on auto-update:** nothing to do — this is the configuration to aim for.
 - **OneAgents automatic, ActiveGates manual:** the riskiest combination. Every OneAgent update can land in front of an AG that has not moved. Put the AGs back on auto-update, or on an update window that runs *before* the OneAgent window.
-- **Major version bumps:** When a major OneAgent version ships with corresponding AG features, the order is explicit: schedule the AG update window first, complete it, validate, then schedule the OneAgent window.
+- **Releases that change both tiers:** when a release note ties a OneAgent capability to an ActiveGate version, the order is explicit: schedule the AG update window first, complete it, validate, then schedule the OneAgent window.
 - **Mixed environments:** If you have both auto-updating and manually-updated AGs, the manual ones are the constraint — they bound how fast the AG tier as a whole advances.
 
-If your tenant uses no private ActiveGates (OneAgents connect directly to Dynatrace SaaS), this sequencing concern doesn't apply for the routing path. It still applies for any **specialized** AGs (synthetic, EF 2.0, cloud-monitoring) that produce data the rest of the platform consumes.
+If your tenant uses no private ActiveGates (OneAgents connect directly to Dynatrace SaaS), this sequencing concern doesn't apply. The ordering question is about the OneAgent path only; for AGs that don't route OneAgent traffic — a synthetic AG, which cannot (§6), or a dedicated extension or cloud-monitoring AG — use the role guidance in §6 instead.
 
 **Cross-reference: FAQ-04: How to manage OneAgent updates on Dynatrace SaaS** for the OneAgent-side of the same problem.
 
@@ -219,22 +219,21 @@ If your tenant uses no private ActiveGates (OneAgents connect directly to Dynatr
 <a id="ha"></a>
 ## 5. HA Pairs and Rolling Updates
 
-HA pair architecture is the operating norm for any ActiveGate role serving OneAgent traffic, synthetic, or cloud monitoring in a non-toy environment. The update pattern is:
+In community practice, HA pairs are the norm for any ActiveGate role serving OneAgent traffic, synthetic, or cloud monitoring in production. The update pattern is:
 
 1. **Roll one AG at a time.** Update the first AG; wait for it to re-connect and resume serving traffic.
 2. **Validate** before touching the second AG. Routes registered, extensions reloaded, no error spikes on the AG itself or on dependents.
 3. **Update the second AG.**
 
-With auto-update on, each AG runs its own availability check every 30 minutes, so in community practice the two restarts usually land at different times. Usually is not always: nothing in the documented mechanism staggers them, so if a simultaneous update is unacceptable, put the pair members in different update windows (§2). The pattern needs to be deliberate when:
+With auto-update on, each AG updates on its own schedule (on the Classic path, an availability check every 30 minutes), so in community practice the two restarts usually land at different times. Usually is not always: nothing in the documented mechanism staggers them, so if a simultaneous update is unacceptable, put the pair members in different update windows (§2). The pattern needs to be deliberate when:
 
 - You've disabled auto-update on both AGs and are running manual updates → roll them yourself, one at a time.
 - You use update windows → give the two pair members different windows (per-AG settings override the environment default since SaaS 1.343).
-- The AGs are on different sprint update windows by design → the staggering is built in, just confirm it.
-- You're rolling out a known-risky update (major version, big extension framework change) → validate the first AG fully before the second.
+- You're rolling out a known-risky update (one whose release notes flag a breaking change) → validate the first AG fully before the second.
 
 **Why not both at once:** while an AG installs and re-connects, it isn't serving traffic. If both update simultaneously, you have a connectivity gap. HA pairs only deliver no-gap operation when at least one of them is up.
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate). — *"The availability check runs at 30-minute intervals."* *"…currently in the process of installing it or re-connecting to the server."* **Derived:** staggering an HA pair follows from each AG going through that install-and-reconnect step plus the reason for running a pair; the docs describe per-AG updates, not the staggering.</sub>
+> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"The availability check runs at 30-minute intervals."* *"…currently in the process of installing it or re-connecting to the server."* **Derived:** staggering an HA pair follows from each AG going through that install-and-reconnect step plus the reason for running a pair; the docs describe per-AG updates, not the staggering.</sub>
 
 <a id="roles"></a>
 ## 6. Roles and Update Implications
@@ -263,28 +262,29 @@ Private synthetic locations are hosted by Synthetic-enabled ActiveGates. That is
 
 What differs is what updates alongside it:
 
-- **The Synthetic engine and the browser** (Chromium, or Chrome for Testing on Ubuntu from ActiveGate 1.331). The browser is updated during ActiveGate and Synthetic engine updates. On **Windows** it always is. On **Linux** it depends on the private location's *Enable Chrome(-ium) auto-update* switch — on by default, set **per location**, not per AG. To hold a browser version, turn that switch off *before* triggering the AG update, then update the browser by hand on every AG in the location.
+- **The Synthetic engine and the browser** (Chromium on RHEL and Rocky Linux; Chrome for Testing on Ubuntu, Amazon Linux 2023 and Oracle Linux, and bundled with the Windows installer). The browser is updated during ActiveGate and Synthetic engine updates. On **Windows** it always is. On **Linux** it depends on the private location's *Enable Chrome(-ium) auto-update* switch — on by default, set **per location**, not per AG. To hold a browser version, turn that switch off *before* triggering the AG update, then update the browser by hand on every AG in the location.
 - **A browser support window.** Dynatrace supports browser versions no more than two behind the latest supported one for the ActiveGate release.
 - **Extra network paths.** Browser updates need `synthetic-packages.s3.amazonaws.com` plus the OS package repositories; offline sites update the browser manually, and a custom repository works only with the auto-update switch on.
 - **One version per location.** *"We strongly recommend updating all ActiveGates per location to the same version."* Roll them one at a time, but do not leave a location on mixed versions.
-- **An OS ceiling.** Synthetic-enabled AGs on Red Hat / Oracle Linux / Rocky Linux 8 are blocked from updating beyond 1.325.
+- **An OS ceiling.** Dynatrace announced plans, from version 1.326, to stop Synthetic-enabled AGs on Red Hat / Oracle Linux / Rocky Linux 8 from updating beyond 1.325 — plan the OS move for any synthetic AG still on a version-8 OS rather than relying on updates.
 - **A lagging status.** Deployment Status refreshes browser versions hourly, so the displayed version can trail the real one by up to an hour.
 
 Post-update validation: re-run a representative sample of browser monitors before the next scheduled execution, and check that HTTP monitors continue to pass. In community practice, synthetic flake immediately after an AG update is more often a browser change than a problem with the monitored site — check that first.
 
 > <sub>**Sources:**</sub>
 > - <sub>[Private Synthetic locations (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic/synthetic-app/private-locations) — *"A clean ActiveGate installation for the purpose of synthetic monitoring disables all other ActiveGate features, including communication with OneAgents."*; *"Chromium autoupdate takes place during manual as well as automatic ActiveGate and Synthetic engine updates."*; *"on Windows-based ActiveGates, Chromium is always updated during Synthetic engine updates."*; *"we plan to introduce mechanisms preventing Synthetic-enabled ActiveGates on Red Hat/Oracle Linux/Rocky Linux 8 from being updated beyond version 1.325."* (re-read 09/28/2026)</sub>
+> - <sub>[ActiveGate 1.345 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-345) — *"Chrome for Testing 151 is bundled with the Windows ActiveGate installer."*</sub>
 > - <sub>[Manage private Synthetic locations in Classic (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/synthetic-monitoring/private-synthetic-locations/manage-private-synthetic-locations) — *"We strongly recommend updating all ActiveGates per location to the same version."*; *"the status is updated once every hour, so it may take up to an hour to refresh the browser version displayed for your ActiveGate in Deployment Status."*</sub>
 
 ### Extension Framework 2.0
 
 Remote EF 2.0 extensions run in the ActiveGate's Extension Execution Controller (EEC), which is *"automatically installed and managed with each OneAgent and ActiveGate configuration"* — so it moves with the AG version, while the extensions themselves keep their own versions. In community practice the extensions come back cleanly after an update; when one does not, it is usually a configuration problem that the reload surfaced rather than the new version.
 
-Post-update validation: check that all expected extensions list as `RUNNING` (or equivalent) post-restart and that their ingest streams (custom metrics, logs, events) resume within the expected interval.
+Post-update validation: check that every expected extension reports a healthy status after the update and that their ingest streams (custom metrics, logs, events) resume within the expected interval.
 
 ### Cloud monitoring
 
-The AWS and Azure monitoring capabilities run as ActiveGate modules (they appear as `AWS_MONITORING` / `AZURE_MONITORING` in the node's `modules` list — §7). In community practice their behavior is stable across versions. Post-update validation: connector status pages in the Cloud app (or equivalent) show healthy connectors, and the data lag for cloud-imported metrics matches the pre-update baseline.
+The AWS and Azure monitoring capabilities run as ActiveGate modules (they appear as `AWS_MONITORING` / `AZURE_MONITORING` in the node's `modules` list — §7). Whether you need one at all depends on the cloud: for AWS, *"to monitor more than 2,000 AWS resources, you must install an ActiveGate"*; for Azure, *"a dedicated ActiveGate is required to poll metadata and metrics from Azure APIs"*. In community practice their behavior is stable across versions. Post-update validation: the cloud integration's status page shows healthy connections, and the data lag for cloud-imported metrics matches the pre-update baseline.
 
 ### Common across all roles
 
@@ -294,7 +294,7 @@ The AWS and Azure monitoring capabilities run as ActiveGate modules (they appear
 
 *In community practice the per-role validation in §7 is the checklist teams converge on; Dynatrace documents each role's setup but publishes no post-update validation list, so treat it as a starting point.*
 
-> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"The availability check runs at 30-minute intervals."* (Classic path), [SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343) — *"Per-ActiveGate settings can override environment defaults"*, [About Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/concepts) — *"EEC is automatically installed and managed with each OneAgent and ActiveGate configuration."* The `modules` values were read from a live `ACTIVEGATE` node, 09/28/2026.</sub>
+> <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"The availability check runs at 30-minute intervals."* (Classic path), [SaaS 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-343) — *"Per-ActiveGate settings can override environment defaults"*, [About Extensions (DT docs)](https://docs.dynatrace.com/docs/ingest-from/extensions/concepts) — *"EEC is automatically installed and managed with each OneAgent and ActiveGate configuration."*, [ActiveGate purposes (DT docs)](https://docs.dynatrace.com/docs/ingest-from/dynatrace-activegate/capabilities/routing-monitoring-purpose) — AWS and Azure monitoring requirements quoted above (read 09/28/2026). The `modules` values were read from a live `ACTIVEGATE` node, 09/28/2026.</sub>
 
 <a id="validation"></a>
 ## 7. Validation After Update
@@ -311,8 +311,8 @@ Post-update validation for ActiveGates is more concentrated than for OneAgents �
    ```
 
    The node also carries `dt.active_gate.group.name`, `dt.network_zone.id`, `is_containerized`, `is_fips`, `modules[]`, and `os.type` — enough to segment the fleet by role and topology in the same query. The SaaS ActiveGate listing endpoints (`GET /api/v2/activeGates` and friends) were deprecated in ActiveGate 1.343 in favor of this node, so automation that inventories AGs should move here too. See FAQ-16 §2 for the full classic-to-Smartscape mapping and why ActiveGate is the odd row in it.
-2. **Routes registered.** Traffic resumes flowing through the AG. No host-side "lost connection to ActiveGate" event spike.
-3. **Extensions reloaded.** All EF 2.0 extensions show `RUNNING`. Ingest streams from each extension resume within their expected interval.
+2. **Routes registered.** Traffic resumes flowing through the AG, and the hosts routed through it keep reporting.
+3. **Extensions reloaded.** Every expected EF 2.0 extension reports a healthy status. Ingest streams from each extension resume within their expected interval.
 4. **Synthetic monitors functioning.** If the AG hosts a private synthetic location, run a representative monitor manually and confirm pass. Watch the next scheduled execution.
 5. **Cloud connectors connected.** If the AG runs cloud monitoring, the connector status pages show healthy and the data lag for cloud metrics has returned to baseline.
 6. **Synthetic browser version.** On a synthetic AG, the browser version matches what you expect for the location — allowing for the hourly status refresh (§6).
@@ -354,14 +354,14 @@ In community practice, rollback is usually a containment move while the underlyi
 |---------|----------------|--------------------|
 | **Taking ActiveGates off auto-update while OneAgents stay on it.** | AG restarts feel riskier than agent restarts, so the AG tier gets frozen first. | Put the AGs back on auto-update, or on an update window that runs before the OneAgent window. Where both are manual, AGs first, OneAgents second (§4). |
 | **Updating both AGs in an HA pair simultaneously.** | Auto-update on both, no staggering enforced; or one update window applied to both. | Give the pair members different update windows, or roll manual updates one at a time. Validate before touching the second. |
-| **Treating synthetic monitor flake post-update as a real failure.** | A monitor that was relying on a specific browser behavior surfaces a failure after the bundled engine version changes. | Validate monitor behavior after the AG update before declaring an outage. Browser-engine changes are usually the cause of immediate-post-update synthetic flake. |
-| **Forgetting that EF 2.0 extensions reload on AG restart.** | Extension was running with a stale config that worked-with-the-old-version; the new version reloads and surfaces the config issue. | Treat extension reloads as part of the AG-update change window. Validate extension status post-restart. |
+| **Treating a synthetic failure right after an update as a site outage.** | A monitor that relied on specific browser behavior fails after the browser version changes. | Check the browser version first (§6) before declaring an outage; in community practice it is the usual cause of failures immediately after an update. |
+| **Not checking extensions after an AG update.** | The Extension Execution Controller moves with the AG, so every extension on it comes back on the new version; a problem shows up as missing data, not an error. | Treat extension status and ingest as part of the AG-update change window (§7). |
 | **Disabling auto-update on a single AG and forgetting — leaving a known vulnerability unpatched on in-path infrastructure.** | "We'll update manually." Nobody does. The cost is usually described as version drift, which understates it: AG security fixes ship *inside* ordinary version updates (ActiveGate 1.343 backported the fix for CVE-2026-40984 and CVE-2026-40983 into the ActiveGate for Kubernetes image), so a forgotten AG is not merely behind on features — it holds an open vulnerability window on a component that terminates agent connections and holds connector credentials, for as long as nobody notices. | Either run HA so you can leave auto-update on — the recommended answer — or pair manual mode with a named owner, a calendar mechanism, **and** a check that the manual path fits inside your vulnerability-remediation SLA (§3). If it does not fit, that is the signal to deploy the second AG rather than to tighten the reminder. |
 | **Disabling ActiveGate auto-update to freeze the synthetic browser.** | The browser changes during AG updates, so the AG switch looks like the control. | Use the private location's *Enable Chrome(-ium) auto-update* switch (Linux) instead, and keep the AG itself updating (§6). |
-| **Not validating cloud connectors after an update.** | Connector behavior is usually stable; teams skip the check. | Glance at connector status pages and ingest-lag for cloud metrics post-update — it's a 60-second check that catches the rare regression. |
-| **Automating Managed AG auto-update against `targetVersion` / `updateWindows`.** | Both properties were added to the Cluster API v2 `autoUpdate` endpoints in 1.342 and read as a stable capability. | API 1.344 removes both again from the Cluster API. Strip them from Managed request bodies before the change reaches your cluster (§2). On SaaS the Environment API v2 still documents both (§2). |
+| **Not validating cloud connectors after an update.** | Connector behavior is usually stable; teams skip the check. | Glance at connector status pages and ingest-lag for cloud metrics post-update — a quick check that catches the rare regression. |
+| **Automating Managed AG auto-update against `targetVersion` / `updateWindows`.** | Both properties were added to the Cluster API v2 `autoUpdate` endpoints in 1.342 and read as a stable capability. | API 1.344 removes both from six Cluster API endpoints (§2). Strip them from those Managed request bodies once your cluster is on 1.344. On SaaS the Environment API v2 still documents both (§2). |
 
-*In community practice the remaining items are observed across fleets often enough to flag; none is documented by Dynatrace as an anti-pattern.*
+*These pitfalls are community practice, observed across fleets often enough to flag; Dynatrace does not document them as anti-patterns.*
 
 > <sub>**Sources:** [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — update mechanic and check interval, [ActiveGate 1.343 release notes (DT docs)](https://docs.dynatrace.com/docs/whats-new/activegate/sprint-343) — *"Backported a security fix that addresses CVE-2026-40984 and CVE-2026-40983 in the ActiveGate for Kubernetes image"*, [API changelog 1.344 (DT docs)](https://docs.dynatrace.com/docs/whats-new/dynatrace-api/sprint-344) — Cluster API v2 `/activeGates/autoUpdate`: *"Removed properties: targetVersion , updateWindows"*, flagged *"Broken compatibility"*.</sub>
 
@@ -380,9 +380,9 @@ For most SaaS tenants with private ActiveGates, the right configuration is:
 8. **Validate per-role after every update** — routes, extensions, synthetic monitors, cloud connectors — at the right cadence for each role. `smartscapeNodes "ACTIVEGATE"` gives you the fleet-wide version inventory in one query (§7).
 9. **Plan rollback as a short containment**, not a steady state. Pin the target version (or turn off the toggle) on a rolled-back AG to prevent it moving forward — and put the rollback on the same SLA clock as item 5, since a rolled-back AG is by definition on an older version.
 
-**On Latest Dynatrace**, item 2 is the update mode in Fleet management settings: *auto-update during an update window* gives a known update time without leaving updates to a manual reminder, which answers most of the item 5 concern. On Dynatrace Classic, the Update ActiveGate page documents only the per-AG toggle and the one-click **Update** — so there, leaving the toggle on is the automatic path.
+**On Latest Dynatrace**, item 2 is the update mode in Fleet management settings: *auto-update during an update window* gives a known update time without leaving updates to a manual reminder, which answers most of the item 5 concern. On Dynatrace Classic, the Update ActiveGate page documents only the per-AG toggle and the one-click **Update** — so there, leaving the toggle on is the automatic path; check whether your Classic settings also offer the windowed mode described in the SaaS 1.343 notes (§2).
 
-For tenants with no private ActiveGates:
+For tenants where OneAgents connect directly to Dynatrace SaaS (no routing ActiveGates):
 
 - The sequencing concern doesn't apply for routing.
 - The role-specific concerns still apply for any specialized AGs (synthetic, EF 2.0, cloud monitoring) you do run.
@@ -390,7 +390,7 @@ For tenants with no private ActiveGates:
 
 ## Summary
 
-ActiveGate update management is operationally distinct from OneAgent update management — fewer AGs, more roles bundled into each, more concentrated restart impact. The right default is the same for every role — auto-update, with update windows where a role needs a known time and the private-location browser switch where a synthetic browser version must be held; automatic updates on both tiers remove the sequencing question, and where either tier is manual, ActiveGates go first. The most common failure modes are simultaneous updates of HA pair members, OneAgents auto-updating ahead of manually-updated AGs, and disabled auto-update without a calendar mechanism — the last of which is a security exposure, not merely version drift, because AG security fixes ship inside ordinary version updates.
+ActiveGate update management is operationally distinct from OneAgent update management — fewer AGs, more roles bundled into each, more concentrated update impact. The right default is the same for every role — auto-update, with update windows where a role needs a known time and the private-location browser switch where a synthetic browser version must be held; automatic updates on both tiers remove the sequencing question, and where either tier is manual, ActiveGates go first. The most common failure modes are simultaneous updates of HA pair members, OneAgents auto-updating ahead of manually-updated AGs, and disabled auto-update without a calendar mechanism — the last of which is a security exposure, not merely version drift, because AG security fixes ship inside ordinary version updates.
 
 ## Next Steps
 
@@ -398,7 +398,7 @@ ActiveGate update management is operationally distinct from OneAgent update mana
 - Convert any single-AG architectures serving production roles to HA pairs.
 - Leave auto-update on for every AG; use update windows (not "off") where a role needs a known time, and record an owner for any AG left on manual.
 - Check the manual-mode AGs against your vulnerability-remediation SLA; where the SLA cannot be met, plan the second AG.
-- If you automate Dynatrace Managed AG auto-update, remove `targetVersion` and `updateWindows` from request bodies ahead of the API 1.344 schema change (§2).
+- If you automate Dynatrace Managed AG auto-update, check your request bodies against the API 1.344 change — `targetVersion` and `updateWindows` are gone from six Cluster API endpoints (§2).
 - Confirm auto-update is actually on for your ActiveGates — existing environments keep their earlier setting. Where it is off, confirm AG versions are at or ahead of the OneAgents behind them.
 - Read **FAQ-04** for the OneAgent-side of the same problem, and **FAQ-16 §2** for why ActiveGate is the odd row in the classic-to-Smartscape mapping.
 - Document AG roles, HA topology, and update policy alongside your host-group naming (see **FAQ-01**) and tagging strategy (see **FAQ-02**).

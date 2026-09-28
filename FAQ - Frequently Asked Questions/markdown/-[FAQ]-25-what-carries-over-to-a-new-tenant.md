@@ -216,7 +216,7 @@ smartscapeNodes "HOST"
 
 On the validation tenant (09/21/2026) every row came back `naive = "different"` and `correct = "same"`, with the `id` and `id_classic` columns visibly identical — `HOST-0C9138C82CB5F432` in both. On that run Grail attached an INFO notification:
 
-> *"The `==` operation will always return `false` as `id` is a smartscape id, while `id_classic` is a string."*
+> Notification text returned by the tenant (09/21/2026): The `==` operation will always return `false` as `id` is a smartscape id, while `id_classic` is a string.
 
 Reproduced on a second node type: `smartscapeNodes "SERVICE"` with `toString(id) == id_classic` matched on **23 of 23** services; the bare `==` matched **0 of 23**.
 
@@ -257,11 +257,13 @@ Swap `"HOST"` for `"SERVICE"`, `"K8S_POD"` or any type from the mapping query ab
 <a id="accumulated-state"></a>
 ## 5. Class 3 — Accumulated State: The Relearn Clock
 
-Nothing in this class moves, and unlike class 2 there is no bridge field or reconciliation trick. There are only two responses: **wait for it to rebuild**, or **recreate it by hand**.
+Dynatrace documents the SaaS Upgrade Assistant as importing environment *configuration* and publishes no export surface for Grail history or Davis models, so in community practice nothing in this class is expected to move — and unlike class 2 there is no bridge field or reconciliation trick. There are only two responses: **wait for it to rebuild**, or **recreate it by hand**.
 
 ### Things that rebuild themselves, on a clock
 
 Davis learns normal behaviour from the data it has seen. In a new tenant it has seen nothing, so detection is either silent or noisy until enough history accumulates.
+
+In community practice, baselines become trustworthy on roughly the timescales below. They are planning estimates, not documented figures — verify against your own data (the query further down measures it):
 
 | Baseline type | Roughly how long before it is trustworthy | Why |
 |---|---|---|
@@ -270,7 +272,7 @@ Davis learns normal behaviour from the data it has seen. In a new tenant it has 
 | Error rate | 1–2 weeks | Needs a representative traffic pattern |
 | Resource utilization / traffic | 2–4 weeks | Needs a full business cycle |
 
-Two operational rules matter more than the exact numbers:
+In community practice, two operational rules matter more than the exact numbers:
 
 - **Do not disable alerting during the relearn window.** It is tempting — the volume is genuinely higher — but switching it off means you emerge from the window with no calibration data and the same unturned thresholds you started with. If the noise is unmanageable, route it somewhere quiet rather than turning it off, so you can measure it.
 - **Do not tune during the relearn window either.** Thresholds set against a half-learned baseline get baked in. Give the detectors their window, *then* tune against what actually fired.
@@ -317,7 +319,7 @@ These have no clock. They are simply absent in the new tenant until a human puts
 
 The secrets row is the one that bites hardest on migration day, because it is invisible until something fails to authenticate. **Inventory every credential before the cutover, not during it** — a workflow that silently stops running because its vault entry does not exist in the new tenant looks like a workflow bug, not a migration gap.
 
-> <sub>**Sources:** the history-depth query was executed against a live Dynatrace tenant 09/21/2026 (least-covered hosts: 1, 2 and 4 days within a 31-day window); the `interval:1d` → `24h` rewrite was observed in that query's own response notifications. **Derived:** the "Assistant migrates configuration, therefore accumulated state is out of scope" conclusion combines the SaaS Upgrade Assistant's documented scope (*"imports your Dynatrace Managed environment configuration"*) with the absence of any published export surface for Grail history or Davis models — Dynatrace does not publish an explicit out-of-scope list. **Softened:** the relearn durations are community and field guidance rather than documented figures — treat them as planning estimates and verify against your own data.</sub>
+> <sub>**Sources:** the history-depth query was executed against a live Dynatrace tenant 09/21/2026 (least-covered hosts: 1, 2 and 4 days within a 31-day window); the `interval:1d` → `24h` rewrite was observed in that query's own response notifications. [SaaS Upgrade Assistant (DT docs)](https://docs.dynatrace.com/managed/upgrade/saas-upgrade-assistant) — *"imports your Dynatrace Managed environment configuration"*.</sub>
 
 <a id="the-dual-run-question"></a>
 ## 6. The Dual-Run Question

@@ -1,6 +1,6 @@
 # FINOPS-01: DPS Capability Units and Querying Consumption with DQL
 
-> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 01 — DPS Capability Units and Querying Consumption with DQL | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** FINOPS — Cost Management & FinOps | **Reference:** 01 — DPS Capability Units and Querying Consumption with DQL | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -28,7 +28,7 @@
 10. [Per-Bucket and Per-Cost-Center Attribution](#attribution)
 11. [Common Pitfalls](#pitfalls)
 12. [Validating Numbers Against Account Management](#validating)
-13. [Bootstrap from the DEMO Dashboard](#bootstrap)
+13. [Bootstrap from the Ready-Made Usage Dashboards](#bootstrap)
 14. [Recommended Approach](#recommendation)
 15. [Summary and Next Steps](#summary)
 
@@ -155,24 +155,24 @@ For host-based and security capabilities (plus pre-aggregated chargeback views f
 Use this surface when you need:
 
 - Fast hourly / daily trends without raw-record aggregation overhead
-- Dashboard tiles and Cost Monitor anomaly inputs
+- Dashboard tiles and Davis analyzer inputs
 - Pre-aggregated cost-center / product views (Logs, Traces)
 - Forecast inputs for Davis Predictive AI (FINOPS-02 deep-dives this)
 
 ### Decision
 
-If your question is *"how much did capability X cost over time?"* — use `dt.billing.*`. If your question is *"who is consuming what?"* or *"which bucket / host / workflow drove the cost?"* — use `dt.system.events`. Many dashboards combine both: `dt.billing.*` for the top-line trend, `dt.system.events` for drill-down attribution.
+In community practice, the split that works is: if your question is *"how much did capability X cost over time?"* — use `dt.billing.*`. If your question is *"who is consuming what?"* or *"which bucket / host / workflow drove the cost?"* — use `dt.system.events`. Many dashboards combine both: `dt.billing.*` for the top-line trend, `dt.system.events` for drill-down attribution.
 
-> <sub>**Sources:** Both surfaces verified live on a SaaS tenant (2026-05-19) — the `dt.billing.*` metric catalog returned 13 series; `fetch dt.system.events | filter event.kind == "BILLING_USAGE_EVENT"` returned 15 distinct `event.type` values across 7 unit-field families. § 2 carries the capability-to-unit table. **Derived:** the "which surface for which question" decision framing is community / engagement guidance — Dynatrace docs document each surface separately but do not present the choice as a single decision point.</sub>
+> <sub>**Sources:** Both surfaces verified live on a SaaS tenant (2026-05-19) — the `dt.billing.*` metric catalog returned 13 series; `fetch dt.system.events | filter event.kind == "BILLING_USAGE_EVENT"` returned 15 distinct `event.type` values across 7 unit-field families. § 2 carries the capability-to-unit table.</sub>
 
 <a id="mandatory-patterns"></a>
 ## 4. Mandatory Patterns — `dedup`, `event.kind`, `billing_type`
 
-Three patterns appear in every well-formed DPS consumption query. Skipping them produces results that look reasonable but are wrong.
+Two patterns belong in every DPS consumption query, and a third applies to specific capabilities. Skipping them produces results that look reasonable but are wrong.
 
 ### `dedup event.id` before any aggregation
 
-Billing events can be re-emitted by the platform — duplicates exist in the raw stream. Without dedup, sums double-count. The canonical pattern is:
+Dynatrace documents the reason: *"Dynatrace refreshes metering records when correcting measurements."* Without dedup, the same consumption period is counted more than once — Dynatrace's own tutorials put the inflation at 10–30%. The canonical pattern is:
 
 ```
 fetch dt.system.events
@@ -182,7 +182,7 @@ fetch dt.system.events
 | summarize ...
 ```
 
-This is the single most commonly forgotten pattern. The official DEMO dashboard applies it consistently — when adapting community queries, verify the dedup is present.
+Dynatrace's cost tutorials call it mandatory in every billing query. In community practice it is also the pattern most often missing from queries passed around between teams — when adapting a community query, verify the dedup is present.
 
 ### Always filter on `event.kind`
 
@@ -196,12 +196,12 @@ Some capabilities (notably **AppEngine Functions - Small**) split records into b
 
 Events use `usage.event_bucket`; Logs and Traces use `usage.bucket`. When unifying across capabilities, `coalesce(usage.bucket, usage.event_bucket)` is the canonical fold.
 
-> <sub>**Sources:** Pattern set lifted from the official [DPS Usage Details DEMO dashboard](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription) — every query in that dashboard applies `dedup event.id` and the `event.kind` filter, and the AppEngine query uses `billing_type == "BILLABLE"`. The `usage.event_bucket` vs `usage.bucket` distinction is visible in the dashboard's Log-Retain query, which coalesces them. **Derived:** the consolidated "three mandatory patterns" framing is engagement-level guidance.</sub>
+> <sub>**Sources:** [Trace a cost spike to its root cause (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/investigate-a-spike) — *"Dynatrace refreshes metering records when correcting measurements."*; every billing query in that tutorial and in [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) applies `filter event.kind == "BILLING_USAGE_EVENT"` and `dedup event.id`. The AppEngine `billing_type == "BILLABLE"` filter and the `usage.event_bucket` / `usage.bucket` coalesce are from the DPS Usage Details DEMO dashboard's AppEngine and Log-Retain queries (2026-05-19).</sub>
 
 <a id="host-based"></a>
 ## 5. Querying Host-Based Capabilities
 
-Host-based capabilities are the easiest to query because of the pre-aggregated `dt.billing.*` metric series. For dashboards and trend views, prefer `timeseries` over `fetch dt.system.events` — it is faster, time-aligned, and the canonical surface that Cost Monitor anomaly detection (FINOPS-02) inputs against.
+Host-based capabilities are the easiest to query because of the pre-aggregated `dt.billing.*` metric series. For dashboards and trend views, prefer `timeseries` over `fetch dt.system.events` — it is faster, time-aligned, and the surface FINOPS-02 feeds to Davis forecast and anomaly analyzers.
 
 **Worked example — Full-Stack Monitoring hourly usage:**
 
@@ -540,7 +540,7 @@ On a validation tenant this returned three cost centers: `unassigned` (~397 TiB 
 
 | # | Pitfall | What goes wrong | Fix |
 |---|---------|-----------------|-----|
-| 1 | Missing `dedup event.id` | Double-counting when billing events are re-emitted | Add `dedup event.id` immediately after `filter event.kind == "BILLING_USAGE_EVENT"` |
+| 1 | Missing `dedup event.id` | The same consumption period counted more than once when metering records are refreshed — 10–30% high | Add `dedup event.id` immediately after `filter event.kind == "BILLING_USAGE_EVENT"` |
 | 2 | Assuming `billed_bytes` is universal | Trace Ingest returns NULL — query silently shows zero | Trace Ingest uses `ingested_bytes`; check the unit for each capability in § 2 |
 | 3 | Summing across capabilities | Combining `billed_bytes + billed_gibibyte_hours` produces dimensional nonsense | Aggregate within one `event.type`, convert to currency at the reporting boundary |
 | 4 | Filtering on `dt.security_context` for attribution | The field is literally `"BILLING_USAGE_EVENT"` on every record | Use `usage.bucket`, `dt.entity.host`, or `dt.cost.costcenter[]` for attribution |
@@ -551,7 +551,7 @@ On a validation tenant this returned three cost centers: `unassigned` (~397 TiB 
 | 9 | Confusing `usage.event_bucket` (Events) with `usage.bucket` (Logs) | Empty group-by results when querying Events | `coalesce(usage.bucket, usage.event_bucket)` for cross-capability work |
 | 10 | Missing `billing_type == "BILLABLE"` on AppEngine | Mixes free-tier and platform-internal usage with billable | Add the filter when querying AppEngine; field is optional on other capabilities |
 
-> <sub>**Sources:** Pitfalls #1–#9 derived from live tenant validation against the [DPS Usage Details DEMO dashboard](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription) (2026-05-19). Pitfall #10 is explicit in the demo dashboard's AppEngine query. **Derived:** the consolidated pitfall list is engagement-level synthesis — Dynatrace docs cover each capability in isolation but do not present this consolidated set of cross-capability footguns.</sub>
+> <sub>**Sources:** [Trace a cost spike to its root cause (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/control/investigate-a-spike) — lists *"Missing dedup event.id"* as a common investigation mistake (pitfall #1). Pitfalls #2–#9 come from live tenant validation against the DPS Usage Details DEMO dashboard's queries (2026-05-19); #10 is explicit in that dashboard's AppEngine query.</sub>
 
 <a id="validating"></a>
 ## 12. Validating Numbers Against Account Management
@@ -591,36 +591,36 @@ Additionally, **Metrics-Ingest has a ~4-hour data lag** — the portal incorpora
 If your DQL total deviates from the portal by more than ~15% for the same period after accounting for the three factors above, investigate:
 
 - Are you missing capabilities? List the `event.type` values your tenant actually emits — `fetch dt.system.events, from:-30d | filter event.kind == "BILLING_USAGE_EVENT" | summarize n = count(), by:{event.type}` — and check that each one is covered by a query.
-- Is `dedup event.id` present? Missing dedup roughly doubles totals.
+- Is `dedup event.id` present? Missing dedup inflates totals — Dynatrace's tutorials put it at 10–30%.
 - Are retention queries using `sum()` where they should use `max()`? (Pitfall #6.)
 - For Metrics-Ingest, did you subtract included quotas? (Section 8.)
 - For Traces - Ingest, are you reading `ingested_bytes`? Reading `billed_bytes` returns nothing.
 
-> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management), [License (DT docs)](https://docs.dynatrace.com/docs/license). The rounding-rule ("usage under one hour rounds up to nearest 15 minutes") is documented at the License top-level. **Softened:** the specific reconciliation factors the portal applies (commitment discounts, true-ups, DPS-for-Hybrid pooling) evolve per-contract — the three factors above are the generally observable categories, not an exhaustive list of every portal-side adjustment.</sub>
+> <sub>**Sources:** [Account Management portal (DT docs)](https://docs.dynatrace.com/docs/shortlink/account-management), [License (DT docs)](https://docs.dynatrace.com/docs/license), [Forecast costs with run-rate projections (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/predict/project-run-rate) — the 10–30% dedup figure. The rounding-rule ("usage under one hour rounds up to nearest 15 minutes") is documented at the License top-level. **Softened:** the specific reconciliation factors the portal applies (commitment discounts, true-ups, DPS-for-Hybrid pooling) evolve per-contract — the three factors above are the generally observable categories, not an exhaustive list of every portal-side adjustment.</sub>
 
 <a id="bootstrap"></a>
-## 13. Bootstrap from the DEMO Dashboard
+## 13. Bootstrap from the Ready-Made Usage Dashboards
 
-Dynatrace publishes an official **DPS Usage Details DEMO dashboard** that exercises the patterns in this notebook for every capability category. It is the fastest way to get started:
+Dynatrace ships ready-made **usage dashboards** built on the same billing events this notebook queries: **Usage - Overview** (every rate-card capability, trend, and cost-center breakdown) plus drill-downs — **Usage - Traces**, **Usage - Logs**, **Usage - Metrics**, and **Usage - Full-Stack**. They are the fastest way to get started:
 
-1. Open the [DPS Usage Details DEMO dashboard](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription) in your tenant — it's linked from the License overview docs.
-2. Use the *Make a copy* menu option to create an editable copy in your tenant.
+1. In Dynatrace, go to **Dashboards → Ready-made** and search for **Usage - Overview**. Viewing them needs `storage:system:read`.
+2. Ready-made dashboards are read-only — save a copy to get an editable version in your tenant.
 3. Customize the cost-center / product groupings to match your bucket-naming or `dt.cost.*` labels.
 4. Set the timeframe to align with your billing period (see §12).
-5. Use the dashboard as the operational view; use this notebook as the canonical query reference when you need to extend or debug.
+5. Use the dashboards as the operational view; use this notebook as the query reference when you need to extend or debug.
 
-The DQL queries throughout §§5–9 are directly derived from this dashboard's tile patterns. When the dashboard updates (Dynatrace refreshes it as new capabilities ship), re-verify the patterns in this notebook against the updated tiles.
+The queries in §§5–9 were originally adapted from the tiles of the **DPS Usage Details DEMO dashboard**, which earlier revisions of this entry described as linked from the License overview. That page (re-read 09/28/2026) no longer links it, so treat the ready-made Usage dashboards above as the maintained starting point and cross-check the §§5–9 patterns against their tiles when they change.
 
-> <sub>**Sources:** [DPS Usage Details DEMO dashboard (DT docs)](https://docs.dynatrace.com/docs/shortlink/dynatrace-platform-subscription) — the canonical reference for DPS-consumption DQL patterns. **Derived:** the "make a copy, customize, use as bootstrap" workflow is the standard demo-dashboard adoption pattern.</sub>
+> <sub>**Sources:** [Ready-made usage dashboards (DT docs)](https://docs.dynatrace.com/docs/manage-your-costs/view/usage-dashboards) — the data *"includes billing usage events and query execution events"*; [Ready-made dashboards (DT docs)](https://docs.dynatrace.com/docs/analyze-explore-automate/dashboards-and-notebooks/ready-made-documents/ready-made-dashboards) — *"Save a copy and customize your copy"*.</sub>
 
 <a id="recommendation"></a>
 ## 14. Recommended Approach
 
 A workable plan for putting in-tenant consumption visibility in place:
 
-1. **Start with the DEMO dashboard** (§13). Copy it, customize it, and make it your team's standing consumption view — the one you open most days. Set its refresh cadence to match how often the numbers are actually acted on (daily review does not need a 1-minute refresh); FINOPS-03 §4 covers why dashboard refresh rate is itself a consumption lever on Logs, Events, and Traces.
+1. **Start with the ready-made Usage dashboards** (§13). Save a copy, customize it, and make it your team's standing consumption view — the one you open most days. Set its refresh cadence to match how often the numbers are actually acted on (daily review does not need a 1-minute refresh); FINOPS-03 §4 covers why dashboard refresh rate is itself a consumption lever on Logs, Events, and Traces.
 2. **Adopt the three mandatory patterns** (§4) — `dedup event.id`, `event.kind` filter, `billing_type == "BILLABLE"` where applicable. Audit any consumption query in your tenant against these before trusting its numbers.
-3. **Use the right surface for the question**: `dt.billing.*` for trends and Cost Monitor inputs; `dt.system.events` for attribution and chargeback.
+3. **Use the right surface for the question**: `dt.billing.*` for trends and Davis analyzer inputs; `dt.system.events` for attribution and chargeback.
 4. **Pre-aggregated chargeback first.** For Logs and Traces ingest, use `dt.billing.*_by_costcenter` / `_by_product` before reaching for `expand dt.cost.costcenter`. It's faster and cleaner.
 5. **Set realistic reconciliation expectations.** DQL totals are not invoiceable. The portal is authoritative for billing-period totals; DQL is authoritative for operational visibility.
 6. **Reduce the `unassigned` cost-center share** at ingest time, not at query time. The OpenPipeline / OneAgent enrichment patterns covered in ORGNZ and FAQ-02 are the upstream lever.
@@ -629,7 +629,7 @@ A workable plan for putting in-tenant consumption visibility in place:
 <a id="summary"></a>
 ## Summary
 
-DPS consumption lives in two places — per-record in `dt.system.events` and pre-aggregated in `dt.billing.*`. The schema is per-capability with seven distinct unit-field families, and the three non-negotiable patterns (`dedup event.id`, `event.kind` filter, and `billing_type` filter on AppEngine) appear in every well-formed query. The DEMO dashboard is the canonical bootstrap; the queries in §§5–9 are the canonical building blocks. DQL totals will not exactly match the Subscription portal, and that is by design — the portal does subscription-currency conversion and reconciliation that DQL does not. Use both surfaces deliberately.
+DPS consumption lives in two places — per-record in `dt.system.events` and pre-aggregated in `dt.billing.*`. The schema is per-capability with seven distinct unit-field families, and the three non-negotiable patterns (`dedup event.id`, `event.kind` filter, and `billing_type` filter on AppEngine) appear in every well-formed query. The ready-made Usage dashboards are the bootstrap; the queries in §§5–9 are the building blocks. DQL totals will not exactly match the Subscription portal, and that is by design — the portal does subscription-currency conversion and reconciliation that DQL does not. Use both surfaces deliberately.
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 # AIOPS-06: AI Integrations and Agentic Workflows
 
-> **Series:** AIOPS — Dynatrace Intelligence | **Notebook:** 6 of 8 | **Created:** May 2026 | **Last Updated:** 09/24/2026
+> **Series:** AIOPS — Dynatrace Intelligence | **Notebook:** 6 of 8 | **Created:** May 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -149,7 +149,7 @@ fetch spans, from:-24h
 
 **Verification status:** syntax-verified **and executed** 07/30/2026; returned 0 rows for the same reason as above — no GenAI telemetry on the validation tenant, not a query defect.
 
-> <sub>**Sources:** [Conversation and session tracking (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability), [Semantic Dictionary — `gen_ai` fields (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary). **Derived:** the attribute-existence note combines the documented attribute list with a live `dt.semantic_dictionary.fields` lookup performed 07/30/2026.</sub>
+> <sub>**Sources:** [Conversation and session tracking (DT docs)](https://docs.dynatrace.com/docs/observe/dynatrace-for-ai-observability), [Semantic Dictionary — `gen_ai` fields (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary). **Dictionary:** `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` (`experimental`), `dt.rum.session.id` (`stable`); no row for `gen_ai.conversation.id` or `session.id` under `filter contains(name, "conversation") or name == "session.id"`, read 09/28/2026 (control: the same filter returned `messaging.message.conversation_id`).</sub>
 
 <a id="wf-dql-cost"></a>
 ## 2. Workflow Tutorial: Optimize DQL Cost

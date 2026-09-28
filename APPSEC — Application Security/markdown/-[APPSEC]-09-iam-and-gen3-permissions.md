@@ -1,6 +1,6 @@
 # APPSEC-09: IAM and Gen3 Permissions for AppSec
 
-> **Series:** APPSEC — Application Security | **Notebook:** 9 of 10 | **Created:** June 2026 | **Last Updated:** 09/24/2026
+> **Series:** APPSEC — Application Security | **Notebook:** 9 of 10 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -50,14 +50,14 @@ This is the most-grounded notebook in the series — the [IAM policy statements 
 
 AppSec data in Gen3 lives in Grail (`security.events`) and the `vulnerability-service` API. Both are governed by the same `ALLOW <service>:<resource>:<action> WHERE <conditions>` policy DSL as the rest of Gen3 — not by classic environment roles.
 
-The exception: some AppSec UI surfaces (the Security Problems app, sensitive-payload visibility) are still gated by `environment:roles:*` permissions. This means AppSec is a **dual-surface IAM domain**:
+The exception: managing security problems and viewing sensitive request payloads are still gated by `environment:roles:*` permissions. This means AppSec is a **dual-surface IAM domain**:
 
 - Grail data + `vulnerability-service` API → `storage:*` and `vulnerability-service:*` policy tokens
 - UI / sensitive-payload visibility → `environment:roles:*` permission tokens
 
 A complete AppSec persona policy usually needs grants from both surfaces. See IAM-04 § Policy Authoring for the underlying DSL grammar.
 
-> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) verified 06/04/2026. **Derived:** the *dual-surface IAM domain* framing is a synthesis aid — the docs list each token but do not characterize AppSec as dual-surface.</sub>
+> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — `storage:security.events:read`: *"Read security.events from grail"*; `vulnerability-service:vulnerabilities:read`: *"Allows viewing vulnerabilities"*; `environment:roles:manage-security-problems`: *"Grants user the Manage security problems permission."*; `environment:roles:view-sensitive-request-data`: *"Grants user the View sensitive request data permission."* (re-read 09/28/2026). **Derived:** the dual-surface label combines the `storage:` / `vulnerability-service:` statements with the `environment:roles:` statements on the same page.</sub>
 
 <a id="permission-catalog"></a>
 ## 2. The AppSec Permission Catalog (Verified)
@@ -143,7 +143,7 @@ AppDev sees only findings in their namespaces. Two syntax details: IAM lists use
 <a id="boundary-patterns"></a>
 ## 4. Boundary Patterns for AppSec Data
 
-Beyond the three personas above, three boundary patterns recur in AppSec IAM:
+Beyond the three personas above, in community practice three boundary patterns recur in AppSec IAM:
 
 1. **Production-only manage** — Persona B above. Acknowledge/exception in prod, read-only in non-prod.
 2. **Namespace-scoped read** — Persona C above. AppDev team sees only its own namespaces.
@@ -151,14 +151,14 @@ Beyond the three personas above, three boundary patterns recur in AppSec IAM:
 
 For workflow Service Users that programmatically acknowledge problems, grant `vulnerability-service:vulnerabilities:write` on the Service User specifically (per AUTOM-04 § 3, *Provider Configuration*), not on a shared OAuth client.
 
-> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) for boundary syntax. **Derived:** the three-pattern recurrence is community practice.</sub>
+> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) for boundary syntax.</sub>
 
 <a id="sensitive-payload"></a>
 ## 5. Privacy: view-sensitive-request-data
 
 RAP attack events can include the actual request payload that triggered the detection — the SQL injection string, the JNDI lookup URL, the command-injection input. These payloads frequently contain PII or other sensitive material that came through the application boundary.
 
-`environment:roles:view-sensitive-request-data` is the gate for visibility into these payloads. Three operating rules:
+`environment:roles:view-sensitive-request-data` is the gate for visibility into these payloads. In community practice in regulated environments, three operating rules are common:
 
 1. **Don't grant it broadly.** Grant to incident responders + SOC tier 2, not to general read-only roles. The default-deny posture matters.
 2. **Pair with `configure-request-capture-data`** for the small group responsible for tuning what gets captured.
@@ -166,7 +166,7 @@ RAP attack events can include the actual request payload that triggered the dete
 
 This is the carve-out where AppSec IAM most often gets too generous — make it explicit who has it and why.
 
-> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) confirms `view-sensitive-request-data` and `configure-request-capture-data` as separate tokens. **Derived:** the *don't grant broadly + audit regularly* recipe is community practice in regulated environments.</sub>
+> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — `environment:roles:view-sensitive-request-data`: *"Grants user the View sensitive request data permission."*; `environment:roles:configure-request-capture-data`: *"Grants user the Configure capture of sensitive data permission."* (re-read 09/28/2026).</sub>
 
 <a id="managed-policies"></a>
 ## 6. Reach for Managed Policies First
@@ -189,16 +189,14 @@ Workflows and other automation that consume AppSec data need the right token typ
 - **For Grail reads** (`storage:security.events:read`) and **vulnerability-service** access: Platform Token on a Service User. AUTOM-04 § 3, *Provider Configuration*, covers the three-things-align model.
 - **For classic config APIs** that AppSec workflows occasionally touch (rare in v1 AppSec, more common as workflows chain into broader automation): classic API Token may still be required for some endpoints.
 
-Avoid granting `vulnerability-service:vulnerabilities:write` on a long-lived shared OAuth client — too much blast radius. Bind it to a dedicated Service User that holds only this permission. The policy-statement reference lists no conditions for `vulnerability-service:vulnerabilities:write`, so the permission itself cannot be narrowed — and management zones are not available in Latest Dynatrace to narrow it with. Scope *which* findings the workflow acts on in its trigger filter instead, using `dt.security_context`, a primary Grail field, or `primary_tags.*`.
+In community practice, teams avoid granting `vulnerability-service:vulnerabilities:write` on a long-lived shared OAuth client — too much blast radius — and bind it to a dedicated Service User that holds only this permission. The policy-statement reference lists no conditions for `vulnerability-service:vulnerabilities:write`, so the permission itself cannot be narrowed — and management zones are not available in Latest Dynatrace to narrow it with. Scope *which* findings the workflow acts on in its trigger filter instead, using `dt.security_context`, a primary Grail field, or `primary_tags.*`.
 
 > <sub>**Sources:** [Upgrade security notifications (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/best-practices/stage-09-team-based-global-alerting/upgrade-security-notifications) — *"Management zones are not available in Latest Dynatrace. Replace management zone scoping with Grail record-based field filters."* and *"Use custom metadata enrichment to set dt.security_context on security events via OpenPipeline, then filter by it in the workflow trigger."*; [IAM policy statements (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements) — `vulnerability-service:vulnerabilities:write` is listed with no conditions.</sub>
-
-> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements). **Derived:** the blast-radius framing of *don't put write on a shared OAuth client* is community practice.</sub>
 
 <a id="audit"></a>
 ## 8. Audit and Periodic Review
 
-Audit IAM bindings for AppSec the same way you would audit any sensitive-data access. Quarterly minimum cadence:
+Audit IAM bindings for AppSec the same way you would audit any sensitive-data access. In community practice a quarterly minimum cadence is common — adapt it to your audit regime:
 
 1. **Who has `view-sensitive-request-data`?** Pull the group memberships; remove anyone who hasn't used it in 90 days.
 2. **Who has `manage-security-problems`?** Same — manage is a privileged grant.
@@ -207,7 +205,7 @@ Audit IAM bindings for AppSec the same way you would audit any sensitive-data ac
 
 The query for "who can read security.events in production?" can be answered via the IAM API (see IAM-04 § 7 Policy Testing and Validation).
 
-> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements). **Derived:** the quarterly review checklist is community practice — adapt cadence to your audit regime.</sub>
+> <sub>**Sources:** [IAM policy statements reference (DT docs)](https://docs.dynatrace.com/docs/manage/identity-access-management/permission-management/manage-user-permissions-policies/advanced/iam-policystatements).</sub>
 
 <a id="evolving"></a>
 ## 9. What's Still Evolving

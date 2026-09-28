@@ -287,7 +287,7 @@ smartscapeNodes "SERVICE"
 | fieldsAdd same = if(toString(id) == id_classic, then: "yes", else: "no")
 ```
 
-On the validation tenant (09/21/2026) `toString(id) == id_classic` matched **23 of 23** services and **7 of 7** hosts; the bare `==` matched **0** of each, with Grail attaching *"The `==` operation will always return `false` as `id` is a smartscape id, while `id_classic` is a string."*
+On the validation tenant (09/21/2026) `toString(id) == id_classic` matched **23 of 23** services and **7 of 7** hosts; the bare `==` matched **0** of each, with Grail attaching this notification text (tenant response, 09/21/2026): The `==` operation will always return `false` as `id` is a smartscape id, while `id_classic` is a string.
 
 **Why this one bites hardest during a migration.** Reconciling `id_classic` against the source tenant's ids is how you prove the target tenant found everything — so a reconciliation query built on the bare `==` reports that *nothing* matched, which is indistinguishable from a failed migration and sends you hunting a problem that does not exist. Used as a `filter` instead, it returns zero rows, which reads as "nothing to fix." Both directions are silent. **FAQ-25 § 4** covers the migration case.
 

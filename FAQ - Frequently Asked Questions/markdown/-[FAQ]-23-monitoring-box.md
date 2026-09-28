@@ -112,7 +112,7 @@ Enterprise audit events are reachable only through `GET /events` with `stream_ty
 > - <sub>[Webhook limitations V2 (Box Dev Docs)](https://developer.box.com/guides/webhooks/v2/limitations-v2)</sub>
 > - <sub>[Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise)</sub>
 > - <sub>[Box Hub catalog (Dynatrace)](https://www.dynatrace.com/hub/)</sub>
-> - <sub>**Derived:** § 2.1's no-listing claim is the result of three independent catalog checks on 08/25/2026, not a single search</sub>
+> - <sub>**Catalog observation (08/25/2026):** § 2.1's no-listing claim is the result of three independent catalog checks on that date, not a single search</sub>
 
 ---
 
@@ -167,7 +167,7 @@ If that returns rows, you already have Box performance telemetry and can build a
 
 The common mistake is expecting audit events to answer performance questions. They are an access record, not a latency record. Box does not publish per-request timing for its own service; if you need Box performance, it comes from signal 1 (your calls) or signal 4 (synthetics), never from the audit feed.
 
-> <sub>**Sources:** [Global field reference (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/fields), [List user and enterprise events (Box Dev Docs)](https://developer.box.com/reference/get-events). **Derived:** § 3.1's field-name caution comes from executing both forms against a live tenant on 08/25/2026 — `http.url` returned zero rows while scanning 9.8M records.</sub>
+> <sub>**Sources:** [Global field reference (DT docs)](https://docs.dynatrace.com/docs/semantic-dictionary/fields), [List user and enterprise events (Box Dev Docs)](https://developer.box.com/reference/get-events). **Tenant observation (08/25/2026):** § 3.1's field-name caution comes from executing both forms against a live tenant — `http.url` returned zero rows while scanning 9.8M records.</sub>
 
 ---
 
@@ -446,7 +446,7 @@ export default async function () {
 
 | Detail | Why |
 |---|---|
-| **Cursor written last** | If ingest fails after the cursor advances, those events are gone — and with a two-week window they may be unrecoverable. Write-after-success makes a failed run replay instead of lose |
+| **Cursor written last** | If ingest fails after the cursor advances, those events are skipped by the live collector — and once they fall out of the two-week streaming window, only an `admin_logs` backfill (§ 13.3) can recover them. Write-after-success makes a failed run replay instead of lose |
 | **No TTL on the cursor** | `stateClient` TTL (`validUntilTime`) accepts now+1m … now+90d. Set one and your cursor silently expires, resetting the collector. **Omit it** |
 | **`MAX_PAGES` guard** | Bounds the run below the 120 s ceiling. A backlog drains across several runs rather than timing out forever on the first |
 | **Throwing on auth failure** | An unhandled non-OK response would leave you with an empty ingest that looks identical to a quiet Box tenant |
@@ -465,7 +465,7 @@ A Workflow that stops running produces no logs — and no logs looks exactly lik
 > - <sub>[Credential vault client (Dynatrace Developer)](https://developer.dynatrace.com/develop/sdks/client-classic-environment-v2/)</sub>
 > - <sub>[Client Credentials Grant (Box Dev Docs)](https://developer.box.com/guides/authentication/client-credentials)</sub>
 > - <sub>[List user and enterprise events (Box Dev Docs)](https://developer.box.com/reference/get-events)</sub>
-> - <sub>**Derived:** § 7.3's write-cursor-last rule combines the documented two-week streaming retention with the absence of any replay mechanism once a cursor advances</sub>
+> - <sub>**Derived:** § 7.3's write-cursor-last rule combines the documented two-week streaming retention with the collector resuming from its stored cursor — events behind an advanced cursor are reachable again only through an `admin_logs` backfill (§ 13.3)</sub>
 
 ---
 
@@ -921,7 +921,7 @@ fetch logs, from:-7d
 
 This section is not optional, and it is the one most often skipped.
 
-**The failure mode:** the collector stops. It produces no logs. No logs is indistinguishable from a quiet Box tenant. Nobody notices. Two weeks later the `admin_logs_streaming` window has rolled past the gap and **those events are permanently unrecoverable** — no replay, no backfill, no support ticket that recovers them.
+**The failure mode:** the collector stops. It produces no logs. No logs is indistinguishable from a quiet Box tenant. Nobody notices. Two weeks later the `admin_logs_streaming` window has rolled past the gap and **those events are gone from the live stream** — the only way back is an `admin_logs` backfill, which reaches back one year (§ 13.3), and past a year they exist only in the Box Admin Console's exported reports, outside the API.
 
 Because Box retains the streaming feed for only two weeks, your detection window for a collector outage is *shorter than two weeks*. Alert on it.
 
@@ -970,7 +970,7 @@ fetch logs, from:-24h
 
 Recovery is complete in content, not in time: recovered events keep their real time in `box.created_at`, so time-bucketed dashboards built on `timestamp` show the backlog at the moment it was ingested. The existence of a one-year `admin_logs` backfill path is exactly why § 8's Python collector is worth having even in a Workflow-first design. **Build it before you need it** — writing a backfill tool during an active compliance gap is not when you want to be learning the API.
 
-> <sub>**Sources:** [Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise), [Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits). **Derived:** § 13.1's null-comparison behaviour was observed directly by executing both query forms against a live tenant on 08/25/2026.</sub>
+> <sub>**Sources:** [Get Enterprise Events (Box Dev Docs)](https://developer.box.com/guides/events/enterprise-events/for-enterprise), [Log ingestion limits (DT docs)](https://docs.dynatrace.com/docs/shortlink/lma-limits). **Tenant observation (08/25/2026):** § 13.1's null-comparison behaviour was observed directly by executing both query forms against a live tenant. The Box page also states the retention split behind § 13.3: *"One year of enterprise events are available when stream_type is set to admin_logs."*</sub>
 
 ---
 
@@ -1007,7 +1007,7 @@ A vendor status page reports what the vendor has decided to declare, on the vend
 
 Point an HTTP monitor at a stable, authenticated-free endpoint and alert on both availability and latency. Do not point synthetics at the Events API — you would be consuming your own rate-limit budget to test a service you are already polling.
 
-> <sub>**Sources:** [Box status page (Box)](https://status.box.com). **Derived:** § 14.1's endpoint list and component names were read directly from the live Statuspage API on 08/25/2026.</sub>
+> <sub>**Sources:** [Box status page (Box)](https://status.box.com). **Observation (08/25/2026):** § 14.1's endpoint list and component names were read directly from the live Statuspage API on that date.</sub>
 
 ---
 

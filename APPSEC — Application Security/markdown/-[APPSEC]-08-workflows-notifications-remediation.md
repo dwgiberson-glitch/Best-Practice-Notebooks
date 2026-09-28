@@ -1,6 +1,6 @@
 # APPSEC-08: Workflows, Notifications and Remediation
 
-> **Series:** APPSEC — Application Security | **Notebook:** 8 of 10 | **Created:** June 2026 | **Last Updated:** 09/18/2026
+> **Series:** APPSEC — Application Security | **Notebook:** 8 of 10 | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -60,7 +60,7 @@ Do **not** use the **Problem trigger** for vulnerabilities. It fires on Davis pr
 <a id="routing"></a>
 ## 2. Routing: Jira / ServiceNow / PagerDuty / Slack
 
-Common routing patterns:
+In community practice, a common routing split looks like this — verify it against your SOC's ownership model:
 
 | Destination | What goes there | Trigger filter |
 |-------------|------------------|----------------|
@@ -71,7 +71,7 @@ Common routing patterns:
 
 A finding can fire into multiple destinations — there's no requirement to pick one. What matters is that each destination has a clear ownership boundary so no finding falls between teams.
 
-> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the workflow + notification framing. **Derived:** the four-destination routing matrix is community practice — verify against your SOC's ownership model.</sub>
+> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the workflow + notification framing.</sub>
 
 <a id="ack-loopback"></a>
 ## 3. Acknowledgement Loopback
@@ -90,14 +90,14 @@ For programmatic ack, the IAM scope is `vulnerability-service:vulnerabilities:wr
 <a id="sla-alerts"></a>
 ## 4. SLA and Burn-Rate Alerts
 
-For regulated environments, security findings have remediation SLAs (e.g., Critical: 7 days, High: 30 days, Medium: 90 days). Two complementary alerts:
+For regulated environments, security findings have remediation SLAs (e.g., Critical: 7 days, High: 30 days, Medium: 90 days). In community practice — borrowed from SLO burn-rate alerting — two complementary alerts are common; verify the pairing against your governance model:
 
 1. **Per-problem SLA breach** — fires when an individual problem crosses its deadline.
 2. **Backlog burn-rate** — fires when the *rate of new high-severity findings* exceeds the *rate of remediation* for several days running, signaling the team can't keep up.
 
 Burn-rate alerts catch the systemic-overload pattern that per-problem alerts miss — a team can close every individual ticket on time and still be accumulating debt if new findings outpace remediation.
 
-> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the workflow + notification framing. **Derived:** burn-rate alerting on AppSec backlog is community practice borrowed from SLO operations — verify against your governance model.</sub>
+> <sub>**Sources:** [Application Security (DT docs)](https://docs.dynatrace.com/docs/secure/application-security) for the workflow + notification framing.</sub>
 
 <a id="dql-sla"></a>
 ## 5. DQL: Backlog Burn-Rate
