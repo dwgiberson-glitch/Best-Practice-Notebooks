@@ -206,16 +206,20 @@ When OpenPipeline issues occur in production, follow these emergency procedures.
    Effect: Immediate (within 1-2 minutes)
 ```
 
-2. **Disable Drop Processor (API)**
+2. **Disable Drop Processor (Settings API)**
+
+   Pipelines, routes and ingest sources are **Settings objects** (schemas `builtin:openpipeline.logs.pipelines`, `builtin:openpipeline.logs.routing`, `builtin:openpipeline.logs.ingest-sources`); there is no separate `/api/v2/openpipeline/...` endpoint. Each processor in a pipeline object carries an `enabled` flag.
 ```bash
-   # Get current pipeline config
-   curl -X GET "https://{tenant}.live.dynatrace.com/api/v2/openpipeline/logs/pipelines/{pipelineId}" \
-     -H "Authorization: Api-Token {token}"
+   # Get the pipeline objects (token scope settings.read) — keep this file as your backup
+   curl -X GET "https://{tenant}.live.dynatrace.com/api/v2/settings/objects?schemaIds=builtin:openpipeline.logs.pipelines" \
+     -H "Authorization: Api-Token {token}" > pipelines-backup-YYYYMMDD.json
    
-   # Edit JSON: Set processor "enabled": false
+   # Edit the pipeline's value: set the drop processor's "enabled" to false
+   # (Processing-stage processors are under value.processing.processors[])
    
-   # Update pipeline
-   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/openpipeline/logs/pipelines/{pipelineId}" \
+   # Write the whole object back (token scope settings.write); body = {"value": { ...edited value... }}
+   # Add ?validateOnly=true first to check the object without saving it
+   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/settings/objects/{objectId}" \
      -H "Authorization: Api-Token {token}" \
      -H "Content-Type: application/json" \
      -d @updated-pipeline.json
@@ -304,12 +308,16 @@ fetch logs, from: now() - 1h
 
 **CRITICAL - Immediate Actions:**
 
-1. **STOP INGESTION (if actively leaking)**
-```bash
-   # Disable entire pipeline immediately
-   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/openpipeline/logs/pipelines/{pipelineId}" \
-     -H "Authorization: Api-Token {token}" \
-     -d '{"enabled": false}'
+1. **STOP STORING THE EXPOSED RECORDS (if actively leaking)**
+```text
+   A pipeline object has no single on/off switch. Fastest options, in the UI or via the
+   Settings API PUT shown in Scenario 1:
+   - Fix the masking processor (see step 5), or
+   - Add a Drop record processor at the top of the pipeline's Processing stage whose
+     matching condition selects the affected records, until masking is fixed.
+   
+   Do NOT just disable the route: the records then leave through the Default route
+   without this pipeline's masking.
 ```
 
 2. **Identify Exposure Window**
@@ -392,29 +400,31 @@ fetch logs, from: now() - 1h
    Access: Admins only
 ```
 
-3. **Update Pipeline Storage**
-```
-   Pipeline → Storage Configuration
-   Default Bucket: emergency_recovery_logs
+3. **Point the Pipeline's Bucket Assignment at the Safe Bucket**
+```text
+   Pipeline → Bucket assignment stage
+   Add a Bucket assignment processor as the FIRST processor in the stage:
+     Matching condition: true
+     Bucket: emergency_recovery_logs
    Save
    
-   Effect: New logs routed to safe bucket immediately
+   Effect: new records from this pipeline land in the safe bucket
+   (the stage is first-match-only, so the first matching processor wins)
 ```
 
-4. **Fix Routing Rules**
-```
-   Pipeline → Routing Tab
+4. **Fix Routing and Bucket Assignment**
+```text
+   A route selects a PIPELINE; the bucket is chosen by the pipeline's Bucket assignment
+   processors. Fix each in its own place:
    
-   Rule 1 (HIGHEST PRIORITY):
-     Condition: log.source == "production-api" AND loglevel == "ERROR"
-     Target: prod_error_logs (90 days)
+   Dynamic routing:
+     Route: log.source == "production-api"  →  pipeline: production-api
    
-   Rule 2:
-     Condition: log.source == "production-api"
-     Target: prod_logs (35 days)
+   Pipeline production-api → Bucket assignment stage (first match only):
+     Processor 1: loglevel == "ERROR"  →  bucket prod_error_logs (90 days)
+     Processor 2: true                 →  bucket prod_logs (35 days)
    
-   Default:
-     Target: default_logs (35 days)
+   Then remove the temporary emergency_recovery_logs processor.
 ```
 
 **Post-Incident:**
@@ -433,18 +443,28 @@ fetch logs, from: now() - 1h
 
 **Full Rollback Procedure:**
 
-1. **Disable Entire Pipeline**
+1. **Stop Routing to the Pipeline**
 ```bash
-   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/openpipeline/logs/pipelines/{pipelineId}" \
+   # Routes live in one settings object per scope (schema builtin:openpipeline.logs.routing);
+   # each entry in value.routingEntries[] has its own "enabled" flag
+   curl -X GET "https://{tenant}.live.dynatrace.com/api/v2/settings/objects?schemaIds=builtin:openpipeline.logs.routing" \
+     -H "Authorization: Api-Token {token}" > routing-backup-YYYYMMDD.json
+   
+   # Set "enabled": false on the route(s) whose pipelineId is the problem pipeline,
+   # then PUT the object back ({"value": { ... }})
+   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/settings/objects/{routingObjectId}" \
      -H "Authorization: Api-Token {token}" \
      -H "Content-Type: application/json" \
-     -d '{"enabled": false}'
+     -d @routing-updated.json
+   
+   # Records that no longer match a route leave through the Default route
 ```
 
 2. **Restore Previous Version (if available)**
 ```bash
-   # Restore from backup JSON
-   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/openpipeline/logs/pipelines/{pipelineId}" \
+   # Restore the pipeline from the settings-object backup taken before the change:
+   # PUT its saved "value" back to the same objectId
+   curl -X PUT "https://{tenant}.live.dynatrace.com/api/v2/settings/objects/{objectId}" \
      -H "Authorization: Api-Token {token}" \
      -H "Content-Type: application/json" \
      -d @pipeline-backup-YYYYMMDD.json
@@ -486,8 +506,10 @@ fetch logs, from: now() - 1h
 
 ### Emergency Rollback Checklist
 
+> <sub>**Sources:** [Settings API - GET objects (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/objects/get-objects) — *"To execute this request, you need an access token with settings.read scope."*; [Settings API - PUT an object (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/objects/put-object) — *"If true, the request runs only validation of the submitted settings object, without saving it."*; [OpenPipeline limits (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/reference/limits) — *"We recommend to migrate your legacy configurations to the Settings API."*; [Data flow (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/data-flow) — *"If no route matches the record, the record is routed via the Default route."* **Derived:** the schema IDs and the per-processor and per-route `enabled` flags were read from a validation tenant's settings objects, 09/28/2026.</sub>
+
 **Before ANY pipeline changes:**
-- [ ] Backup current pipeline configuration (JSON export)
+- [ ] Backup current pipeline configuration (Settings API GET of the pipeline and routing objects)
 - [ ] Test in staging environment first
 - [ ] Document expected behavior
 - [ ] Have rollback plan ready
@@ -1041,7 +1063,7 @@ If issues are detected, here's how to rollback.
 | **Pipeline** | Disable specific pipeline, use default |
 | **Processor** | Disable individual processor |
 | **Routing** | Reset dynamic routing to defaults |
-| **Full** | Revert to classic ingestion (pre-v1.295) |
+| **Full** | Disable the routes to your custom pipelines so records leave through the Default route. Whether a Classic pipeline still exists behind it depends on the environment — it is not available for accounts created from September 2026 |
 
 ### Quick Disable Steps
 
@@ -1052,12 +1074,9 @@ If issues are detected, here's how to rollback.
 
 ### Version History
 
-OpenPipeline maintains configuration history:
+If your tenant's OpenPipeline UI offers a version history for the pipeline, you can restore a previous version from there — this series has not verified that such a view exists. The dependable path is the Settings API backup described in *Scenario 5* above: take a `GET` of the pipeline and routing objects before every change and `PUT` the saved value back to roll back.
 
-1. Click on pipeline
-2. View **History** tab
-3. Select previous version
-4. **Restore** to that version
+> <sub>**Sources:** [Processing in OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/platform/openpipeline/concepts/processing) — *"For new accounts created from September 2026, classic pipeline is not available."*</sub>
 
 ---
 

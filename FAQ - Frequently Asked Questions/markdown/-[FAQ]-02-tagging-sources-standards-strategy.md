@@ -18,6 +18,7 @@ If you read only one section, read **§5 (Standards)** and **§6 (Strategy)** �
 2. [Primary Tags vs Primary Fields vs Custom Tags vs Auto-Tags](#primary-vs-others)
 3. [The Four-Source Hierarchy](#four-sources)
     - [Release-identity environment variables (`DT_RELEASE_*`)](#four-sources)
+    - [Changing tags without touching hosts — Ingest enrichment configuration](#ingest-enrichment-howto)
 4. [AWS / Azure / GCP — Per-Cloud Specifics](#cloud-specifics)
 5. [Tagging Standards — Taxonomy and Naming](#standards)
 6. [Strategy Themes](#strategy)
@@ -262,6 +263,110 @@ describes for the at-source path.
 
 > <sub>**Sources:** [Central enrichment rules (DT docs)](https://docs.dynatrace.com/docs/manage/tags/tags-central-enrichment) — the four enrichment sources, the target fields, the before-the-pipeline timing, and both precedence rules, all quoted above, [OneAgent tag setup (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent) — `--set-host-tag` / `oneagentctl` / `DT_TAGS`, the cross-domain precedence order, and the `primary_tags.<key>` storage rule. Read at source 08/27/2026; [What's new in Dynatrace SaaS 1.346 (DT docs)](https://docs.dynatrace.com/docs/whats-new/saas/sprint-346) — trace-based `primary_tags.*` in the Process group tag condition field, quoted above.</sub>
 
+<a id="ingest-enrichment-howto"></a>
+### 3.3 Changing tags without touching hosts — Ingest enrichment configuration
+
+§ 3.2 says central rules exist and where they sit in precedence. This section is the procedure: how to add, change and remove a primary tag or primary field across a fleet **from Dynatrace**, with no host access and no agent restart. It is the Latest Dynatrace answer to "how do I adjust tags remotely?" — and it replaces a per-host remote-configuration job wherever the value can be derived from context the host already reports.
+
+**What you get, verbatim from the OneAgent tag-setup page:** *"No changes on the hosts are required."* *"No agent restart is needed."* *"Rules take effect on the next agent enrichment refresh cycle."* The floor is *"OneAgent version 1.343+"* — check it per host, not per tenant (see the version table in § 3).
+
+#### Create a rule
+
+1. Go to **Settings > Collect and capture > Ingest enrichment configuration** and select **New rule**. Choose the scope first: **environment** for the broad default, **host group** to override it for part of the fleet.
+2. **Condition** — select the hosts and processes the rule applies to. It is a DQL matcher over fields OneAgent provides, for example `dt.host_group.id`, `host.name`, `host.tags.<key>`, `k8s.cluster.name`, `k8s.namespace.name`, `aws.account.id`, `dt.process_group.detected_name`.
+3. **Enrichment** — either a **static value** or a **DPL transformation** on an input field. For **Security context**, **Cost center** or **Cost product**, select that field; for a primary tag, enter the tag key.
+4. Review the **Resulting mapping** preview, then select **Create**.
+
+The condition language is deliberately small:
+
+| Supported | Not supported |
+|---|---|
+| `matchesValue` (equals), `matchesPhrase` (contains, begins/ends with), `isNull`, `isNotNull` | Regex |
+| `AND`, `OR`, `NOT` | Nested condition functions, e.g. `isNull(isNotNull(x))` |
+
+Two condition examples from the documentation: `matchesValue(dt.process_group.detected_name, "example-process-name")` and `matchesPhrase(host.name, "prod-host-")`.
+
+**Where values land.** You enter the bare key; Dynatrace stores it as `primary_tags.<key>`. The three reserved fields — `dt.security_context`, `dt.cost.costcenter`, `dt.cost.product` — are applied as-is. Enrichments set on a host are inherited by its processes, containers, disks and network interfaces.
+
+#### Three rule shapes that cover most fleets
+
+| You have | Rule shape | Example |
+|---|---|---|
+| A fixed value for a known group of hosts | **Static value** (a *Custom rule*) with a condition | Condition `matchesValue(dt.host_group.id, "payments-prod")` → Cost center `payments` |
+| Context already on the host as a host tag | Promote it: static or transform on `host.tags.<key>` | An existing `owner` host tag → primary tag `team` |
+| Meaning encoded in the host name | **DPL transformation** on `host.name` — one rule per extracted tag | See below |
+
+The documentation's host-name example: for `<env>-<team>-<region>-<role>-<index>` (e.g. `prod-payments-eu-web-01`), create five rules sharing the condition `matchesPhrase(host.name, "*-*-*-*-*")`, each moving the `:value` export to a different segment:
+
+| Rule | Primary tag key | Value extraction |
+|---|---|---|
+| 1 | `environment` | `LD:value'-'LD'-'LD'-'LD'-'LD` |
+| 2 | `team` | `LD'-'LD:value'-'LD'-'LD'-'LD` |
+| 3 | `region` | `LD'-'LD'-'LD:value'-'LD'-'LD` |
+| 4 | `role` | `LD'-'LD'-'LD'-'LD:value'-'LD` |
+| 5 | `index` | `LD'-'LD'-'LD'-'LD'-'LD:value` |
+
+*"If the pattern doesn't match, no tag is applied. There is no partial output."* A host outside the naming convention gets no tag from these rules rather than a wrong one — so audit coverage (below) rather than assuming it. OneAgent supports only the core of DPL here (`LD`, anchors, literals, character groups, grouping, quantifiers, `:value` exports); for the full language see **FAQ-15**.
+
+#### Changing and removing a tag
+
+**To change a value, edit the rule. To remove a tag, delete or narrow the rule.** Nothing is sent to a host, so there is no per-host job to track and no restart to schedule. Two ordering rules decide which rule lands when several could:
+
+- **Across scopes**, host group beats environment: *"When the same key is set at multiple scopes, the more specific definition wins."*
+- **Within one scope**, order matters — drag rules to reorder them, and *"When the same key is defined multiple times within a single source, the first matching rule wins."*
+
+Contrast the classic path. The OneAgent remote configuration API writes host tags onto each agent, and its reference states that *"By default OneAgents will be restarted when network zone, host group, host tags or host properties are reconfigured - the restart is required to apply the changes."* The remote-configuration page adds that *"Removing host properties and tags may require up to seven hours to take effect."* That path is still correct where it fits — see *When the classic path is still right* below — but it is not the default for a value Dynatrace can already see.
+
+#### The migration trap: host tags outrank rules
+
+A rule sits at the **bottom** of the precedence chain in § 3.2 — process (`DT_TAGS`) beats host (installer / `oneagentctl`) beats rule. So moving a key from `oneagentctl` to a rule is a **two-step** change:
+
+1. Create the rule and confirm it produces the value you expect on hosts that do not carry the key.
+2. Remove the old host-level tag for that key — with `oneagentctl`, the installer configuration, or the remote configuration API.
+
+Skip step 2 and every host that still carries the old host tag keeps the old value, on that host only, with nothing reporting a conflict. It looks like a rule that works on some hosts and not others.
+
+#### Automating it
+
+Rules are Settings objects with schema **`builtin:ingest.enrichment.config`**, so they can be managed like any other setting (Settings API, Monaco, Terraform, `dtctl`). Each object carries:
+
+| Property | Required | Meaning |
+|---|---|---|
+| `type` | Yes | Enrichment type — `CUSTOM`, `HOST_PROCESS_PROPERTY`, the `K8S_*` label/annotation types, `AWS_TAG`, `AZURE_TAG`, `GCP_LABEL`, `GCP_TAG` |
+| `valueSource` | Yes | A key to read from, or — for `CUSTOM` — the literal value itself |
+| `valueExtraction` | No | A DPL expression; allowed only with the host/process property type |
+| `target` | Yes | The field or tag to populate |
+| `condition` | No | DQL condition that filters signals |
+
+The exact strings `target` expects for a primary tag versus a reserved field are not spelled out on the schema page. The reliable way to template rules as code is to create one in the UI and export it — `dtctl get settings --schema builtin:ingest.enrichment.config -o yaml` — then copy that shape.
+
+> **Scope discrepancy between two Dynatrace pages.** The how-to page says rules are *"supported at the environment scope and host group scope."* The schema page lists more scopes: `HOST`, `KUBERNETES_CLUSTER`, `HOST_GROUP`, `AWS_ACCOUNT`, `AZURE_MICROSOFT_RESOURCES_SUBSCRIPTIONS`, `GCP_PROJECT` and `environment`. Design around environment and host group, which are the documented and UI-supported scopes; treat the others as unverified for OneAgent host tagging until you have tested them in your tenant.
+
+#### Limits worth knowing before you design around it
+
+- **Refresh delay:** *"typically one refresh cycle, around five minutes"* before agents pick up a change.
+- **UI lag, not data lag:** a new key *"can take up to 24 hours to appear in the filter dropdowns of Dynatrace apps"*; the data is enriched and filterable in DQL straight away. Verify on data ingested *after* the change — earlier records keep the value they were ingested with.
+- **Tag budget:** *"Up to 20 primary tags per host or process; excess tags are silently dropped without a warning."*
+- **Inputs:** *"Cloud tags are not yet available as input fields for OneAgent"*, and *"Enriching all data from a host based on a process or service property is not supported."*
+- **Where it does not apply:** serverless code modules (AWS Lambda, Azure Functions) and mainframe — the documentation routes both to process-level enrichment instead (`DT_TAGS`; on mainframe, `zremoteagentuserconfig.conf`).
+- **Kubernetes via ActiveGate:** rules with conditions are ignored on that path — see **K8S-10**.
+
+#### When the classic path is still right
+
+| Situation | Use |
+|---|---|
+| The value is derivable from host group, host name, host tags, K8s or cloud-account context | **Ingest enrichment configuration** (this section) |
+| The value exists only in an external system, one value per host (e.g. a CMDB) | Remote configuration API from a workflow — **WFLOW-95 LAB** |
+| Hosts still below OneAgent 1.343 | `oneagentctl` / installer, or the remote configuration API, until the fleet upgrades |
+| Removing a stale host-level tag that is overriding a rule | `oneagentctl` or the remote configuration API (see the migration trap above) |
+
+> <sub>**Sources:**</sub>
+> - <sub>[OneAgent tag setup — Ingest enrichment configuration (DT docs)](https://docs.dynatrace.com/docs/manage/tags/primary-tags/tags-domain-oneagent#ingest-enrichment-configuration) — *"No changes on the hosts are required."*; UI path, condition fields and operators, DPL support, the five-rule host-name example, scopes, rule ordering and the limits quoted above. Read at source 09/28/2026 (page updated 09/14/2026).</sub>
+> - <sub>[Ingest Enrichment Configuration schema (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/schemas/builtin-ingest-enrichment-config) — `builtin:ingest.enrichment.config` properties and its seven listed scopes. Read 09/28/2026.</sub>
+> - <sub>[OneAgent remote configuration API — POST a configuration job (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/remote-configuration/oneagent/post-config-job) — *"By default OneAgents will be restarted when network zone, host group, host tags or host properties are reconfigured - the restart is required to apply the changes."*</sub>
+> - <sub>[Remote configuration management of OneAgents and ActiveGates (DT docs)](https://docs.dynatrace.com/docs/ingest-from/bulk-configuration) — *"Removing host properties and tags may require up to seven hours to take effect."*</sub>
+> - <sub>**Derived:** the two-step migration and the "when the classic path is still right" table combine the precedence order with the limits above.</sub>
+
 <a id="cloud-specifics"></a>
 ## 4. AWS / Azure / GCP — Per-Cloud Specifics
 
@@ -441,7 +546,9 @@ Reasons:
 
 See OPIPE topic series for the worked enrichment patterns. The migration path from a legacy tenant: identify the auto-tagging rules that compute primary-dimension values, replace them with OpenPipeline enrichment, then deprecate the auto-tagging rules.
 
-**When the source of truth is an external CMDB** (rather than a field already on the incoming signal), OpenPipeline-at-ingest doesn't apply — the CMDB values aren't on the data. The fit there is a scheduled workflow that reconciles the CMDB onto host tags at source: **WFLOW-08 §11 (CMDB-Driven Host Tag Enrichment)** provides an import-ready template that reads CMDB lookup tables and sets `dt.security_context` / `dt.cost.costcenter` / `primary_tags.*` via the OneAgent Remote Configuration Management API, with dry-run guardrails.
+**When the value is already implied by host context** — host group, host name, an existing host tag — use **Ingest enrichment configuration** (§ 3.3) before reaching for anything that writes to hosts. It is a central rule: no host access, no agent restart, and changing the tag later means editing the rule.
+
+**When the source of truth is an external CMDB** (rather than a field already on the incoming signal or the host), neither OpenPipeline-at-ingest nor a context-derived rule applies — the CMDB values aren't on the data. The fit there is a scheduled workflow that reconciles the CMDB onto host tags at source: **WFLOW-08 §11 (CMDB-Driven Host Tag Enrichment)** provides an import-ready template that reads CMDB lookup tables and sets `dt.security_context` / `dt.cost.costcenter` / `primary_tags.*` via the OneAgent Remote Configuration Management API, with dry-run guardrails. Tags written that way are host-level, so they outrank any central rule for the same key (§ 3.2) — pick one mechanism per key.
 
 > <sub>**Sources:** [oneagentctl (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagentctl) — primary-field assignment surface that anchors the precedence model in §6.2, [OpenPipeline (DT docs)](https://docs.dynatrace.com/docs/shortlink/openpipeline) — source-side enrichment as the alternative to view-time auto-tagging rules (§6.5), [Host groups (DT docs)](https://docs.dynatrace.com/docs/shortlink/host-groups) — host-group-level tag rideability as the universal floor (§6.4).</sub>
 

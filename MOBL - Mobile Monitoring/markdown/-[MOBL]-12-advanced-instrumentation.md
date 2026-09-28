@@ -1,6 +1,6 @@
 # MOBL-12: Advanced Instrumentation & Optimization
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 12 of 12 | **Created:** February 2026 | **Last Updated:** 04/25/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 12 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -25,7 +25,7 @@ This notebook covers advanced mobile SDK techniques that go beyond automatic ins
 | Requirement | Details |
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `rum.read`, `bizevents.read`, `entities.read` |
+| **Permissions** | `storage:bizevents:read` (custom business events), `storage:user.events:read`, `storage:user.sessions:read` |
 | **Mobile App** | iOS or Android app with Dynatrace SDK integrated |
 | **Prior Knowledge** | Familiarity with MOBL-01 through MOBL-09 (fundamentals, SDK setup, user actions, crash reporting, network monitoring) |
 | **SDK Version** | Dynatrace iOS Agent 8.x+ or Android Agent 8.x+ |
@@ -51,27 +51,27 @@ The `sendBizEvent()` API allows you to send custom business events directly from
 ```swift
 // iOS -- send a purchase business event
 let attributes: [String: Any] = [
-    "event.type": "com.myapp.purchase",
     "product.name": "Premium Subscription",
     "product.price": 9.99,
     "currency": "USD",
     "payment.method": "apple_pay"
 ]
-Dynatrace.sendBizEvent(type: "com.myapp.purchase", attributes: attributes)
+Dynatrace.sendBizEvent(withType: "com.myapp.purchase", attributes: attributes)
 ```
 
 ### Android Implementation
 
 ```kotlin
 // Android -- send a purchase business event
-val attributes = mapOf(
-    "event.type" to "com.myapp.purchase",
-    "product.name" to "Premium Subscription",
-    "product.price" to 9.99,
-    "currency" to "USD",
-    "payment.method" to "google_pay"
-)
-Dynatrace.sendBizEvent("com.myapp.purchase", attributes)
+// sendBizEvent(String type, JSONObject attributes) takes a JSONObject, not a Map
+JSONObject().apply {
+    put("product.name", "Premium Subscription")
+    put("product.price", 9.99)
+    put("currency", "USD")
+    put("payment.method", "google_pay")
+}.also { jsonObject ->
+    Dynatrace.sendBizEvent("com.myapp.purchase", jsonObject)
+}
 ```
 
 ### Best Practices for Business Events
@@ -80,6 +80,9 @@ Dynatrace.sendBizEvent("com.myapp.purchase", attributes)
 - **Keep attribute names consistent** across iOS and Android implementations
 - **Include version context** -- add `app.version` as an attribute if not automatically enriched
 - **Avoid PII** -- never include email addresses, phone numbers, or other personal data in business event attributes
+- **Only monitored sessions send them** -- business events are captured only for monitored sessions; when OneAgent is disabled by a flag or by cost and traffic control, they are not reported (OneAgent for iOS/Android 8.253+)
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios), [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android) — *"With sendBizEvent , you can report business events. These are standalone events, as Dynatrace sends them separately from user actions or user sessions."*</sub>
 
 ### Query Custom Purchase Events
 
@@ -109,9 +112,9 @@ Nested actions let you create parent-child relationships between user actions. T
 let parentAction = DTXAction.enter(withName: "Checkout Flow")
 let childAction = DTXAction.enter(withName: "Validate Cart", parentAction: parentAction)
 // ... validation logic ...
-childAction.leave()
+childAction?.leave()
 // ... more checkout logic ...
-parentAction.leave()
+parentAction?.leave()
 ```
 
 ```kotlin
@@ -134,11 +137,11 @@ let uploadAction = DTXAction.enter(withName: "Upload Photo")
 uploadPhoto { result in
     switch result {
     case .success:
-        uploadAction.reportValue(withName: "upload.size_bytes", intValue: fileSize)
-        uploadAction.leave()
+        uploadAction?.reportValue(withName: "upload.size_bytes", intValue: Int64(fileSize))
+        uploadAction?.leave()
     case .failure(let error):
-        uploadAction.reportError(withName: "upload.failed", error: error)
-        uploadAction.leave()
+        uploadAction?.reportError(withName: "upload.failed", error: error)
+        uploadAction?.leave()
     }
 }
 ```
@@ -169,7 +172,7 @@ Beyond automatic crash detection, the SDK provides APIs to report handled errors
 do {
     let data = try parseUserProfile(json)
 } catch {
-    Dynatrace.reportError(withName: "profile_parse_error", error: error)
+    DTXAction.reportError(withName: "profile_parse_error", error: error) // standalone error
 }
 ```
 
@@ -184,25 +187,36 @@ try {
 
 ### Reporting Custom Events
 
+`reportEvent` is an **action** method and takes only a name -- the event must belong to an open action. For an event with attributes, send a business event instead:
+
 ```swift
-// iOS -- report a custom event with context
-Dynatrace.reportEvent(withName: "low_storage_warning", attributes: [
+// iOS -- a named event inside an action
+let storageCheck = DTXAction.enter(withName: "Check storage")
+storageCheck?.reportEvent(withName: "low_storage_warning")
+storageCheck?.leave()
+
+// iOS -- the same signal with attributes, as a standalone business event
+Dynatrace.sendBizEvent(withType: "com.myapp.low_storage_warning", attributes: [
     "available_mb": availableMB,
     "threshold_mb": 100
 ])
 ```
+
+> **Correction (09/28/2026).** Earlier revisions called `Dynatrace.reportError(withName:error:)` and `Dynatrace.reportEvent(withName:attributes:)` on iOS. Neither exists: errors are reported with `DTXAction.reportError(withName:error:)` (standalone) or on an action, and events with `action.reportEvent(withName:)`.
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios) — *"The event must belong to an existing custom action or an autogenerated user action ."*</sub>
 
 ### Query Reported Errors
 
 Use the following query to retrieve errors that were explicitly reported from your mobile SDK:
 
 ```dql
-// Reported errors from mobile apps
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter event.type == "com.dynatrace.error.report"
-| fields timestamp, useraction.application, event.name, os.type, app.version
-| sort timestamp desc
+// Reported errors from mobile apps (API-reported errors)
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile"
+| filter characteristics.has_error and characteristics.is_api_reported
+| fields start_time, frontend.name, error.name, error.code, os.name, app.short_version
+| sort start_time desc
 | limit 50
 ```
 
@@ -229,14 +243,18 @@ Web request tagging links mobile-initiated HTTP requests to their corresponding 
 ### iOS Implementation
 
 ```swift
-// iOS -- tag outgoing web request
+// iOS -- tag an outgoing web request with a parent action
 let url = URL(string: "https://api.myapp.com/checkout")!
 var request = URLRequest(url: url)
-if let tag = DTXAction.getRequestTag(for: request) {
-    request.addValue(tag, forHTTPHeaderField: "x-dynatrace")
+let checkout = DTXAction.enter(withName: "Checkout")
+if let dynatraceHeaderValue = checkout?.getTagFor(url) {
+    let dynatraceHeaderKey = Dynatrace.getRequestTagHeader() // always "x-dynatrace"
+    request.setValue(dynatraceHeaderValue, forHTTPHeaderField: dynatraceHeaderKey)
 }
+// Without a parent action: Dynatrace.getRequestTagValue(for: url)
 let task = URLSession.shared.dataTask(with: request) { data, response, error in
     // handle response
+    checkout?.leave()
 }
 task.resume()
 ```
@@ -244,15 +262,22 @@ task.resume()
 ### Android Implementation
 
 ```kotlin
-// Android -- tag outgoing web request
-val url = URL("https://api.myapp.com/checkout")
-val connection = url.openConnection() as HttpURLConnection
-val tag = Dynatrace.getRequestTag(connection)
-if (tag != null) {
-    connection.setRequestProperty("x-dynatrace", tag)
-}
-// proceed with request
+// Android -- tag an outgoing web request with a parent action
+val webAction = Dynatrace.enterAction("Checkout")
+val uniqueRequestTag = webAction.getRequestTag()          // standalone: Dynatrace.getRequestTag()
+val timing = Dynatrace.getWebRequestTiming(uniqueRequestTag)
+val request = Request.Builder()
+    .url("https://api.myapp.com/checkout")
+    .addHeader(Dynatrace.getRequestTagHeader(), uniqueRequestTag)
+    .build()
+timing.startWebRequestTiming()
+// ... execute the request, then stop the timing with the URL and response code ...
+webAction.leaveAction()
 ```
+
+> **Correction (09/28/2026).** Earlier revisions used `DTXAction.getRequestTag(for:)` (iOS) and `Dynatrace.getRequestTag(connection)` (Android). The documented calls are `action?.getTagFor(url)` / `Dynatrace.getRequestTagValue(for:)` on iOS and `action.getRequestTag()` / `Dynatrace.getRequestTag()` on Android, with the header name from `Dynatrace.getRequestTagHeader()`.
+
+> <sub>**Sources:** [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios), [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android) — *"To track web requests, add the x-dynatrace HTTP header with a unique value to the web request."*</sub>
 
 ### When to Use Manual Tagging
 
@@ -276,14 +301,20 @@ Instrumenting A/B tests and feature flags in Dynatrace lets you correlate experi
 
 Use session properties to tag the user's session with the assigned variant:
 
+Values are reported on a user action, then converted into a session property in the app settings:
+
 ```swift
-// iOS -- report A/B test variant as session property
-DTXAction.reportValue(withName: "ab_test_checkout_v2", stringValue: "variant_b")
+// iOS -- report the A/B test variant on an action
+let assign = DTXAction.enter(withName: "Assign experiment")
+assign?.reportValue(withName: "ab_test_checkout_v2", stringValue: "variant_b")
+assign?.leave()
 ```
 
 ```kotlin
-// Android -- report A/B test variant as session property
-Dynatrace.reportValue("ab_test_checkout_v2", "variant_b")
+// Android -- report the A/B test variant on an action
+val assign = Dynatrace.enterAction("Assign experiment")
+assign.reportValue("ab_test_checkout_v2", "variant_b")
+assign.leaveAction()
 ```
 
 ### Reporting Feature Flag States
@@ -293,24 +324,23 @@ Send business events when feature flags are evaluated so you can track which use
 ```swift
 // iOS -- report feature flag evaluation as business event
 let flagAttributes: [String: Any] = [
-    "event.type": "com.myapp.feature_flag",
     "feature.name": "dark_mode",
     "feature.variant": "enabled",
     "feature.source": "launchdarkly"
 ]
-Dynatrace.sendBizEvent(type: "com.myapp.feature_flag", attributes: flagAttributes)
+Dynatrace.sendBizEvent(withType: "com.myapp.feature_flag", attributes: flagAttributes)
 ```
 
 ### Track App Version Adoption Over Time
 
-App version adoption is closely related to feature flag rollouts. Use this query to see how session volume distributes across app versions:
+App version adoption is closely related to feature flag rollouts. Use this query to see how session volume (`user.sessions`, one record per session) distributes across app versions (`app.short_version`):
 
 ```dql
 // Track app version adoption over time
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(app.version)
-| makeTimeseries session_count = countDistinct(dt.rum.session.id), by:{app.version}, interval:1d
+fetch user.sessions, from:-7d
+| filter dt.rum.application.type == "mobile"
+| filter isNotNull(app.short_version)
+| makeTimeseries session_count = count(), by:{app.short_version}, time:start_time, interval:1d
 ```
 
 <a id="sdk-performance-optimization"></a>
@@ -326,8 +356,8 @@ The Dynatrace mobile SDK is designed to be lightweight, but in performance-sensi
 | **Beacon batching** | SDK batches beacons before sending | Reduces network overhead |
 | **Action timeout** | Tune action close timeout (default 500ms) | Balances accuracy vs. payload size |
 | **Excluded URLs** | Skip monitoring for analytics/CDN URLs | Reduces beacon volume |
-| **Crash-only mode** | Set performance collection level to crash-only | Minimum overhead |
-| **Sampling** | Reduce data collection percentage | Reduces DEM unit consumption |
+| **Data collection level** | `OFF` / `PERFORMANCE` / `USER_BEHAVIOR` per user (MOBL-09 §3); crash reporting is a separate opt-in | Captures only what the user agreed to |
+| **Cost and traffic control** | Monitored-session percentage in the app settings | Reduces DEM unit consumption |
 
 ### Configuring Excluded URLs
 
@@ -344,24 +374,17 @@ Exclude third-party analytics and CDN URLs that generate noise without providing
 </monitoring>
 ```
 
-### Performance Collection Levels
+### Data Collection Levels
 
-| Level | What Is Captured | Overhead | DEM Units |
-|-------|-----------------|----------|-----------|
-| **Full** | User actions, network requests, crashes, session replay | Highest | Full |
-| **User actions** | User actions, crashes (no network details) | Medium | Reduced |
-| **Crash-only** | Crashes and errors only | Minimal | Lowest |
-| **Off** | Nothing (SDK disabled) | None | None |
+There is no "crash-only" or "user actions only" level. The SDK has three data collection levels -- `OFF`, `PERFORMANCE` and `USER_BEHAVIOR` -- and crash reporting is a separate opt-in (`crashReportingOptedIn`). See MOBL-09 §3 for what each level captures and how to set it.
 
-### Sampling Configuration
+### Cost and Traffic Control
 
-Sampling reduces the percentage of sessions that are fully monitored. This is useful for high-traffic apps where 100% monitoring is not cost-effective:
+Reducing the share of monitored sessions lowers DEM unit consumption for high-traffic apps. The setting is in the mobile app's settings under **General > Enablement and cost control**, and applies to all users of that application configuration. Sessions that are not monitored also send no business events.
 
-- **100% sampling** -- All sessions monitored (default)
-- **50% sampling** -- Half of sessions monitored; DEM unit consumption halved
-- **10% sampling** -- One in ten sessions monitored; suitable for very high-traffic apps
+> **Correction (09/28/2026).** Earlier revisions listed a four-level "performance collection level" table (Full / User actions / Crash-only / Off) and placed sampling under "Application Settings > Data Privacy > Session Replay & Data Collection". Neither matches the documentation.
 
-> **Important:** Sampling is configured in the Dynatrace UI under Application Settings > Data Privacy > Session Replay & Data Collection. It applies to all users of that application configuration.
+> <sub>**Sources:** [OneAgent SDK for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-android-app/instrumentation-via-oneagent-sdk/oneagent-sdk-for-android) — *"The possible values for the data collection level are as follows: OFF PERFORMANCE USER_BEHAVIOR"*, [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android) — *"From the application settings, select General > Enablement and cost control ."*</sub>
 
 ### Query Feature Flag Event Tracking
 
@@ -395,18 +418,17 @@ Many organizations operate multiple mobile applications -- a customer-facing app
 - **Naming conventions** -- Use consistent prefixes (e.g., `MyBrand Customer`, `MyBrand Driver`, `MyBrand Admin`) so you can filter and group easily in DQL
 - **Shared business events** -- If multiple apps send the same `event.type`, include an `app.name` attribute to distinguish the source
 - **Cross-app session linking** -- When a user action in one app triggers backend calls that affect another app, use web request tagging (Section 4) to maintain trace continuity
-- **DEM unit budgeting** -- Each app consumes DEM units independently. Use sampling strategically for high-traffic apps while keeping 100% monitoring for critical apps
+- **DEM unit budgeting** -- Each app consumes DEM units independently. Use cost and traffic control strategically for high-traffic apps while keeping 100% monitoring for critical apps
 
 ### Compare Session Volume Across Apps
 
-Use this query to compare daily session volumes across all your mobile applications:
+Use this query to compare daily session volumes (distinct `dt.rum.session.id` per `frontend.name`) across all your mobile applications:
 
 ```dql
 // Session volume comparison across all mobile apps
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| makeTimeseries session_count = countDistinct(dt.rum.session.id), by:{useraction.application}, interval:1d
+fetch user.events, from:-7d
+| filter dt.rum.application.type == "mobile"
+| makeTimeseries session_count = countDistinct(dt.rum.session.id), by:{frontend.name}, interval:1d
 ```
 
 ---
@@ -420,17 +442,17 @@ Congratulations on completing all 12 notebooks in the **MOBL (Mobile Monitoring)
 | Notebook | Title | Focus |
 |----------|-------|-------|
 | **MOBL-01** | Mobile Monitoring Fundamentals | Architecture, platforms, entity types, beacon data flow |
-| **MOBL-02** | SDK Setup -- iOS | CocoaPods/SPM integration, configuration, verification |
-| **MOBL-03** | SDK Setup -- Android | Gradle integration, configuration, verification |
-| **MOBL-04** | Cross-Platform Frameworks | Flutter, React Native, Cordova, Xamarin setup |
-| **MOBL-05** | User Action Tracking | Auto and manual actions, naming rules, session properties |
-| **MOBL-06** | Crash Reporting | Crash analysis, symbolication, ANR detection |
-| **MOBL-07** | Network Request Monitoring | HTTP monitoring, error rates, latency analysis |
-| **MOBL-08** | Session Replay | Visual session replay, privacy masking, debugging |
-| **MOBL-09** | Performance Analysis | App launch time, Apdex, device/OS segmentation |
-| **MOBL-10** | Alerting & SLOs | Mobile-specific alerting, SLO configuration, anomaly detection |
-| **MOBL-11** | Dashboards & Reporting | Mobile dashboards, executive reporting, trend analysis |
-| **MOBL-12** | Advanced Instrumentation & Optimization | Custom events, request tagging, A/B testing, SDK tuning |
+| **MOBL-02** | iOS SDK Setup (Swift & SwiftUI) | SPM/CocoaPods integration, Info.plist, DTSwiftInstrumentor |
+| **MOBL-03** | Android SDK Setup (Kotlin & Jetpack Compose) | Top-level Gradle plugin, variant configurations, Compose |
+| **MOBL-04** | Cross-Platform Frameworks | Flutter, React Native, Cordova, .NET MAUI (Xamarin end of support) |
+| **MOBL-05** | User Action Tracking | Auto and custom actions, rage taps, action queries |
+| **MOBL-06** | Crash Reporting & ANR Detection | Crash capture, symbolication, ANR, crash queries |
+| **MOBL-07** | Network Request Monitoring | HTTP monitoring, trace correlation, status-code trends |
+| **MOBL-08** | Session Replay for Mobile | Enablement, masking, capture percentage, crash replay |
+| **MOBL-09** | Session Properties & Data Privacy | Session properties, user tagging, data collection levels, opt-in, deletion |
+| **MOBL-10** | DQL for Mobile Analytics | `user.events` / `user.sessions` query library |
+| **MOBL-11** | Dashboards & Alerting | KPI dashboards, crash-rate detectors, problem workflows |
+| **MOBL-12** | Advanced Instrumentation & Optimization | Business events, request tagging, A/B testing, SDK tuning |
 
 ### What's Next?
 

@@ -1,7 +1,7 @@
 # Operationalize Module — ALERT → DASH → WFLOW → SLO → AUTOM → AIOPS → FINOPS
 
 > **Purpose:** Sequenced reading order for layering alerting strategy, dashboards, alert routing, reliability targets, configuration automation, and Davis intelligence on a working tenant. The order matters: each builds on the previous.
-> **Last Updated:** 07/15/2026
+> **Last Updated:** 09/25/2026
 
 ![Operationalize Sequence](images/07-operationalize-flow.svg)
 
@@ -174,7 +174,7 @@ Some topics appear in multiple Operationalize series:
 | Dashboard automation | [DASH](../DASH%20-%20Dashboard%20Design%20&%20Building/) — notebook 07 (sharing and reporting) | [AUTOM](../AUTOM%20-%20Dynatrace%20Automation/) — notebooks 02–04 (dashboards-as-code) | DASH first; AUTOM-02..04 once dashboards stabilize |
 | Alerting on synthetics | [SYNTH](../SYNTH%20-%20Synthetic%20Monitoring/) — notebook 02 (browser monitors) | [WFLOW](../WFLOW%20-%20Workflows%20and%20Alert%20Notifications/) — notebook 04 | SYNTH for what to alert on; WFLOW for routing |
 
-See [Overlap Map](09-overlap-map.md) for the full overlap table across all 32 topic series.
+See [Overlap Map](09-overlap-map.md) for the full overlap table across all 33 topic series.
 
 ---
 

@@ -1,12 +1,14 @@
 # WFLOW-95 LAB: CMDB-Driven Host Tag Enrichment
 
-> **Series:** WFLOW — Workflows and Alert Notifications | **Reference:** 95 — CMDB-Driven Host Tag Enrichment LAB | **Created:** June 2026 | **Last Updated:** 07/07/2026
+> **Series:** WFLOW — Workflows and Alert Notifications | **Reference:** 95 — CMDB-Driven Host Tag Enrichment LAB | **Created:** June 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
 A frequent ask: read host→application mappings from a CMDB and apply them as host tags in bulk. This hands-on LAB builds that end to end as a Dynatrace **Workflow** — two *Run JavaScript* tasks that enrich hosts from CMDB lookup tables and apply the tags via the OneAgent Remote Configuration Management API, safely (dry-run first) and idempotently (skip tags that already exist).
 
 It is the capstone for **WFLOW-08 (JavaScript & HTTP Actions)** — it combines an SDK DQL query (WFLOW-08 §2), `fetch()` to a Dynatrace API with auth (§3), retry logic (§4), `result()` / `withItems` data passing between tasks (§7), and the Credential Vault into one deployable workflow. Build it in the editor by following the [steps](#build-steps), or import the [YAML skeleton](#import-skeleton) at the end.
+
+> **Is this the right tool?** This LAB writes tags onto hosts through the classic remote configuration API. If the value can be derived from context the host already reports — host group, host name, an existing host tag — Latest Dynatrace has a simpler path: **Ingest enrichment configuration** (FAQ-02 § 3.3), a central rule with no host changes and no agent restart (OneAgent 1.343+). Use this LAB when the value exists **only in an external CMDB**, one value per host.
 
 ---
 
@@ -94,9 +96,11 @@ The workflow defaults to **safe**: a first run changes nothing. Read the dry-run
 | `MAX_HOSTS` | Caps hosts processed per run (default `50`; `0` = unlimited). |
 | Skip-existing | Task 1 reads current tags and drops any key already present — re-runs are idempotent. |
 | 409 retry | Remote Config Management allows one job per host at a time; task 2 retries up to `MAX_RETRIES` (3) with a 15s backoff on HTTP 409. |
-| Credential Vault | Task 2 reads a Gen2 (classic) `oneAgents.write` API token from the vault at runtime via `credentialVaultClient` — never hardcoded. (The endpoint requires a classic token; the platform-token path isn't GA yet.) |
+| Credential Vault | Task 2 reads a Gen2 (classic) `oneAgents.write` API token from the vault at runtime via `credentialVaultClient` — never hardcoded. (The API reference now also lists a platform-token / OAuth scope, `fleet-management:oneagents:write`; this LAB keeps the live-validated classic token until that path is re-tested.) |
 | Config validation | Task 2 throws *before any live write* if `ENVIRONMENT_URL` / `CREDENTIAL_ID` still hold placeholders. |
 | Loop concurrency `1` | Hosts are tagged one at a time (serialized loop) to avoid colliding jobs and API pressure. |
+
+> **`RESTART_ONEAGENT = false` means "accepted", not "applied".** The API reference states that *"By default OneAgents will be restarted when network zone, host group, host tags or host properties are reconfigured - the restart is required to apply the changes."* The LAB defaults to no restart so that a first live run cannot bounce agents unexpectedly — but with it off, a successful job (HTTP 2xx, a `jobId`) does not mean the tags are on the data yet; they apply when each host's OneAgent next restarts. Either schedule a restart window and set `RESTART_ONEAGENT = true`, or verify on data ingested after the hosts' next restart. Removals are slower still: *"Removing host properties and tags may require up to seven hours to take effect."*
 
 <a id="build-steps"></a>
 ## 4. Build It in the Workflows Editor (Step by Step)
@@ -111,7 +115,7 @@ Two *Run JavaScript* tasks wired with a loop. **All configuration lives in workf
 - **Create a Gen2 (classic) API token** with the **`oneAgents.write`** scope (`dt0c01.…`), store it in the **Credential Vault**, and copy its credential ID (`CREDENTIALS_VAULT-…`).
 - **Grant the workflow's run-as identity `environment-api:credentials:read`** so the workflow can read that token from the vault at runtime.
 
-> **Why a classic token, not a platform token?** The remote-config endpoint was live-validated as rejecting platform Bearer tokens at the scheme level (June 2026); the classic `Api-Token` path below is the proven approach. **Update (SaaS 1.343, July 2026):** Dynatrace announced platform-token support across the fleet-management APIs for OneAgent and ActiveGate endpoints — the platform-token path (`fleet-management:oneagents:write`) may now be available. This LAB keeps the validated classic-token flow until the platform-token path is re-tested live; verify in your tenant before switching.
+> **Why a classic token, not a platform token?** The remote-config endpoint was live-validated as rejecting platform Bearer tokens at the scheme level (June 2026); the classic `Api-Token` path below is the proven approach. **Update (09/28/2026):** the API reference now documents platform-token support for this endpoint — *"Platform Token / OAuth: Required scope: fleet-management:oneagents:write"* (announced with SaaS 1.343, July 2026). This LAB keeps the validated classic-token flow until the platform-token path is re-tested live; verify in your tenant before switching.
 
 **Step 1 — Create the workflow and define its inputs.** New workflow (leave the on-demand trigger). Define these **workflow inputs** — they become the parameters you can override in the Run dialog (easiest to set via the YAML editor — see the [import skeleton](#import-skeleton)):
 
@@ -401,7 +405,7 @@ workflow:
 - **Scope filters** — `APP_SCOPE` limits the run to one business app; `EXCLUDE_PRODUCTION` skips hosts whose enriched `environment` is `production`. Both are appended to the DQL at runtime.
 - **`sanitizeTagValue`** strips whitespace and caps values at 270 characters (Dynatrace tag-value constraint).
 - **Schedule it** with a cron trigger (WFLOW-02) so newly onboarded hosts get tagged automatically; skip-existing keeps repeat runs cheap.
-- **Token type** — this uses a **Gen2 (classic) `Api-Token`**, the live-validated path. SaaS 1.343 (July 2026) announced platform-token support across the fleet-management APIs, so the platform-token path (`fleet-management:oneagents:write`) may now work — once verified in your tenant, the call can move to platform-token auth, potentially with no stored token at all if the workflow's run-as identity carries the scope.
+- **Token type** — this uses a **Gen2 (classic) `Api-Token`**, the live-validated path. The API reference now lists `fleet-management:oneagents:write` as the platform-token / OAuth scope for this endpoint (read 09/28/2026) — once verified in your tenant, the call can move to platform-token auth, potentially with no stored token at all if the workflow's run-as identity carries the scope.
 
 <a id="next-steps"></a>
 ## 7. Next Steps

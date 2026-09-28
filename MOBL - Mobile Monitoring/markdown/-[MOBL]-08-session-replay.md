@@ -1,10 +1,10 @@
 # MOBL-08: Session Replay for Mobile
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 8 of 12 | **Created:** February 2026 | **Last Updated:** 08/04/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 8 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
-Mobile Session Replay captures visual recordings of user sessions for debugging and UX analysis. Unlike traditional screen recording, Session Replay reconstructs the UI state from lightweight instrumentation data, making it efficient for production use. This notebook covers enabling Session Replay, configuring privacy masking, tuning sampling strategies to control costs, leveraging crash replay, and querying session data with DQL.
+Mobile Session Replay gives a video-like reconstruction of user sessions for debugging and UX analysis. This notebook covers enabling Session Replay (a server-side setting), configuring privacy masking in code, choosing a capture percentage to control costs, leveraging crash replay, and querying session data with DQL.
 
 ---
 
@@ -24,24 +24,23 @@ Mobile Session Replay captures visual recordings of user sessions for debugging 
 
 | Requirement | Details |
 |-------------|----------|
-| **Dynatrace Environment** | SaaS or Managed with Grail enabled |
-| **Mobile SDK** | Dynatrace Mobile SDK 8.x or later |
+| **Dynatrace Environment** | SaaS with Grail |
+| **Mobile SDK** | OneAgent for Android 8.303+ / OneAgent for iOS 8.323+ (Dynatrace version 1.303+) |
 | **Session Replay License** | DEM units with Session Replay entitlement |
-| **Permissions** | `rum.read`, `bizevents.read` |
-| **Platform** | iOS 13+ or Android API 21+ |
+| **Permissions** | `storage:user.sessions:read`, `storage:user.events:read` (replay playback additionally needs `storage:user.replays:read`) |
+| **Platform** | iOS 15+ (Swift 5+, Xcode 16+) or Android 6.0+ (API 23+); native apps only -- not available for cross-platform frameworks |
 | **Data** | At least 24 hours of mobile user action data |
 
 <a id="what-is-session-replay"></a>
 
 ## 1. What is Mobile Session Replay?
 
-Mobile Session Replay provides a visual reconstruction of how users interact with your mobile application. It is **not** a video recording. Instead, the Dynatrace SDK captures UI state changes (screen transitions, taps, scrolls, text input) and transmits lightweight event data that Dynatrace reconstructs into a visual playback.
+Mobile Session Replay lets you replay each tap, swipe and screen rotation of a user session "in a movie-like experience". In Dynatrace's own words it is *"a video-like reconstruction of the user interactions with mobile applications that use captured events and data"*; on iOS, the `DTXDebugMasking` environment variable (Xcode scheme > Run > Arguments) shows the screenshots Session Replay takes, which is how you check masking during development.
 
-### How It Works
+Two capture modes exist:
 
-1. **UI state capture** -- The SDK observes the view hierarchy and records changes such as screen loads, element visibility, user gestures, and text field focus events.
-2. **Delta transmission** -- Only changes (deltas) are sent to the Dynatrace cluster, minimizing network overhead and battery impact.
-3. **Server-side reconstruction** -- Dynatrace reconstructs the visual session from the captured deltas, rendering a frame-by-frame playback in the web UI.
+1. **Full Session Replay** -- a configurable percentage of sessions is captured.
+2. **Session Replay on crashes** -- every session that ends in a crash is captured, regardless of the Full Session Replay setting.
 
 ### Key Use Cases
 
@@ -53,68 +52,34 @@ Mobile Session Replay provides a visual reconstruction of how users interact wit
 | **Conversion optimization** | Trace drop-off points in checkout or onboarding funnels |
 | **Support escalation** | Attach session replays to support tickets for faster resolution |
 
-### Lightweight by Design
+> **Note:** Session Replay is available only for native iOS and Android apps. It is not available for cross-platform frameworks such as Cordova, React Native, Flutter or Xamarin; for hybrid apps, only the native part is replayed.
 
-Because Session Replay captures UI state rather than pixels, it has minimal impact on:
+> **Correction (09/28/2026).** Earlier revisions said Session Replay "is **not** a video recording", captures "UI state rather than pixels", and typically adds "< 50 KB per session". None of this is supported by the Session Replay documentation, which describes screenshots and a video-like reconstruction.
 
-- **Battery life** -- No continuous screen capture or encoding
-- **Network bandwidth** -- Delta-based transmission typically adds < 50 KB per session
-- **App performance** -- Observation hooks run on background threads
-
-> **Note:** Session Replay quality depends on SDK version and platform. Native iOS and Android apps provide the richest replay; cross-platform frameworks (React Native, Flutter) may have limitations on custom component rendering.
+> <sub>**Sources:** [Session Replay Classic for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-ios) — *"Session Replay is a video-like reconstruction of the user interactions with mobile applications that use captured events and data."*, [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android) — *"Session Replay is not available for cross-platform frameworks such as Cordova, React Native, Flutter, Xamarin, and more"*</sub>
 
 <a id="enabling-session-replay"></a>
 
 ## 2. Enabling Session Replay
 
-Session Replay must be enabled at two levels: the **Dynatrace server side** (application settings) and the **mobile SDK configuration**.
+Session Replay is switched on **in the mobile app's settings in Dynatrace**, not in `Info.plist` or the Gradle block. Once the app is instrumented (instrumentation wizard complete), the steps are the same for iOS and Android:
 
-### Server-Side Activation
+1. Go to **Mobile** and select the mobile application.
+2. Select **More (…) > Edit** in the upper-right corner of the application tile.
+3. From the application settings, select **General > Enablement and cost control**.
+4. Turn on **Enable Full Session Replay** and/or **Enable Session Replay on crashes**.
 
-1. Navigate to **Mobile** in the Dynatrace menu.
-2. Select your mobile application.
-3. Go to **Settings > Session Replay**.
-4. Toggle **Enable Session Replay** to on.
-5. Configure the **sample rate** (percentage of sessions to capture).
-6. Save changes.
+| Setting | Effect |
+|---------|--------|
+| **Full Session Replay at 100%** | All sessions are captured |
+| **Full Session Replay below 100%** | A random selection of sessions is captured -- this percentage is the only sampling control |
+| **Session Replay on crashes** | All sessions with a crash are captured, regardless of the Full Session Replay setting and percentage |
 
-### iOS SDK Configuration
+Then complete the Session Replay steps of the instrumentation wizard for your platform. There is **no client-side sample rate**, and no `Info.plist` or Gradle key that enables Session Replay or sets a privacy mode; masking is configured in code (Section 3).
 
-Add the following keys to your `Info.plist`:
+> **Correction (09/28/2026).** Earlier revisions configured Session Replay with Info.plist keys (`DTXSessionReplayEnabled`, `DTXSessionReplayPrivacyMode`, `DTXSessionReplaySampleRate`, `DTXSessionReplayOnCrash`) and Gradle properties (`sessionReplay`, `sessionReplayPrivacyMode`, `sessionReplaySampleRate`, `sessionReplayOnCrash`), and described an SDK sample rate that combines with the server rate. None of these exists on the Session Replay pages.
 
-```xml
-<key>DTXSessionReplayEnabled</key>
-<true/>
-<key>DTXSessionReplayPrivacyMode</key>
-<string>SAFE</string>
-<key>DTXSessionReplaySampleRate</key>
-<integer>10</integer>
-<key>DTXSessionReplayOnCrash</key>
-<true/>
-```
-
-### Android SDK Configuration
-
-Add the Session Replay settings in your `build.gradle` or `dynatrace` configuration block:
-
-```groovy
-dynatrace {
-    configurations {
-        defaultConfig {
-            autoStart {
-                applicationId "your-app-id"
-                beaconUrl "https://your-environment.bf.dynatrace.com/mbeacon"
-            }
-            sessionReplay(true)
-            sessionReplayPrivacyMode("SAFE")
-            sessionReplaySampleRate(10)
-            sessionReplayOnCrash(true)
-        }
-    }
-}
-```
-
-> **Important:** The SDK-side sample rate and the server-side sample rate work together. If both are set to 10%, the effective capture rate is 10% (not 1%). The lower of the two values takes precedence.
+> <sub>**Sources:** [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android) — *"From the application settings, select General > Enablement and cost control . Turn on Enable Full Session Replay or Enable Session Replay on crashes ."*, [Session Replay Classic for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-ios).</sub>
 
 <a id="privacy-masking-levels"></a>
 
@@ -129,7 +94,7 @@ Privacy is a critical concern when capturing session replays. Dynatrace provides
 |---------------|-------------|----------------|
 | Safest | Maximum privacy protection | All text content, images, user inputs, labels |
 | Safe | Balanced approach for most apps | Input fields, personal data; static labels remain visible |
-| Custom | Developer-controlled masking | Only elements explicitly tagged by the developer |
+| Custom | Developer-controlled masking | Starts with the same elements as Safest; the developer then masks or unmasks specific views |
 For environments where SVG doesn't render
 -->
 
@@ -137,53 +102,80 @@ For environments where SVG doesn't render
 |-------|-------------|----------------|
 | **Safest** | Maximum privacy | All text, images, inputs masked |
 | **Safe** | Balanced approach | Inputs, personal data masked; labels visible |
-| **Custom** | Developer-defined | Manually tag elements to mask/unmask |
+| **Custom** | Developer-defined | By default the same as Safest; mask/unmask specific views via the API |
+
+OneAgent applies **Safest** by default. To use Safe or Custom, set the masking level through the API.
 
 ### Choosing the Right Level
 
-- **Safest** -- Use for apps handling financial, healthcare, or highly regulated data. Replays show layout and navigation but no readable content.
-- **Safe** -- Recommended starting point for most apps. Form inputs and personal data are masked, but UI labels and navigation elements remain visible for context.
-- **Custom** -- Provides maximum flexibility. Developers annotate specific views to mask or unmask, giving precise control over what appears in replays.
+- **Safest** (default) -- Use for apps handling financial, healthcare, or highly regulated data. Replays show layout and navigation but no readable content.
+- **Safe** -- Only editable text fields are masked; labels and navigation elements remain visible for context.
+- **Custom** -- Starts from Safest; developers then mask or unmask specific views for precise control.
+
+### Setting the Masking Level
+
+**iOS (Swift):**
+
+```swift
+let maskingConfiguration = MaskingConfiguration(maskingLevelType: .safe)
+try? AgentManager.setMaskingConfiguration(maskingConfiguration)
+```
+
+**Android (Java):**
+
+```java
+MaskingConfiguration config = new MaskingConfiguration.Safe(); // .Safest or .Custom
+DynatraceSessionReplay.setConfiguration(Configuration.builder()
+    .withMaskingConfiguration(config)
+    .build());
+```
 
 ### Custom Masking Examples
 
-**iOS -- Mask a specific view:**
+**iOS -- mask views by `accessibilityIdentifier` (Custom level):**
 
 ```swift
-// iOS — mask a specific view
-mySecretView.dtxMaskingMode = .mask
+try? maskingConfiguration.addMaskedView(viewIds: ["masked_view_id"])
+try? maskingConfiguration.addNonMaskedView(viewIds: ["nonMasked_view_id"])
 ```
 
-**iOS -- Unmask a safe view within a masked parent:**
+**Android -- mask views by ID (Custom level), then apply the configuration as above:**
 
-```swift
-// iOS — unmask a view that is safe to display
-myPublicLabel.dtxMaskingMode = .unmask
+```java
+Set<Integer> set = new HashSet<Integer>() { add(R.id.view_id1); add(R.id.view_id2); };
+new MaskingConfiguration.Custom().addMaskedIds(set);
 ```
 
-**Android -- Configure privacy options programmatically:**
+**Android Jetpack Compose -- mask a composable:**
 
 ```kotlin
-// Android — mask a specific view
-Dynatrace.applyUserPrivacyOptions(
-    UserPrivacyOptions.builder()
-        .withDataCollectionLevel(DataCollectionLevel.USER_BEHAVIOR)
-        .withCrashReplayOptedIn(true)
-        .build()
-)
+import com.dynatrace.agent.compose.api.dtMask
+
+@Composable
+fun MyScreen() {
+    Column {
+        Text(text = "This text will be masked", modifier = Modifier.dtMask())
+    }
+}
 ```
 
-> **Tip:** Always start with the **Safe** level and only move to **Custom** when you have specific elements that need to be unmasked for debugging purposes. This approach provides privacy by default.
+On both platforms, a view whose `accessibilityIdentifier` (iOS) or `android:tag` (Android) contains the masking tag `data-dtrum-mask` is always masked.
+
+> **Correction (09/28/2026).** Earlier revisions used a `dtxMaskingMode` view property (not documented) and labelled an `applyUserPrivacyOptions` call "mask a specific view" -- that call sets the data-collection level (MOBL-09), not Session Replay masking.
+
+> **Tip:** Start with the default **Safest** level or with **Safe**, and move to **Custom** only when specific elements need to be unmasked for debugging. This keeps privacy by default.
+
+> <sub>**Sources:** [Session Replay Classic for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-ios) — *"Custom —by default, masks the same elements as Safest"*, [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android).</sub>
 
 <a id="sampling-cost-control"></a>
 
 ## 4. Sampling & Cost Control
 
-Session Replay data consumes **DEM (Digital Experience Monitoring) units**. Controlling the sample rate is the primary lever for managing costs while still capturing enough data for meaningful analysis.
+Session Replay data consumes **DEM (Digital Experience Monitoring) units**. The Full Session Replay percentage under **General > Enablement and cost control** (Section 2) is the primary lever for managing costs while still capturing enough data for meaningful analysis.
 
 ### Sampling Strategy
 
-The sample rate determines what percentage of user sessions are recorded for replay. Not every session needs to be captured -- statistical sampling provides representative coverage.
+The Full Session Replay percentage determines what share of user sessions is recorded for replay. Not every session needs to be captured -- statistical sampling provides representative coverage.
 
 | Environment | Recommended Sample Rate | Rationale |
 |-------------|------------------------|----------|
@@ -211,7 +203,7 @@ DEM units consumed = Monthly replay sessions x Avg DEM units per session
 - **Start low** -- Begin with 5% in production and increase only if you need more coverage.
 - **Use crash replay** -- Even at low sample rates, crash replay captures the sessions that matter most (see next section).
 - **Monitor consumption** -- Track DEM unit usage in the Dynatrace license overview to avoid surprises.
-- **Segment by app** -- Set different sample rates for different mobile applications based on their criticality.
+- **Segment by app** -- Set a different Full Session Replay percentage per mobile application based on its criticality.
 
 <a id="crash-session-replay"></a>
 
@@ -221,10 +213,7 @@ Crash Session Replay is one of the most valuable features of mobile Session Repl
 
 ### How It Works
 
-1. The SDK maintains a **rolling buffer** of recent UI state changes in memory.
-2. When a crash is detected, the SDK **retroactively saves** the buffered session data before the app terminates.
-3. On the next app launch, the buffered crash replay data is transmitted to Dynatrace.
-4. The crash session appears in the Dynatrace UI with full replay capability.
+With **Enable Session Replay on crashes** turned on, every session that ends in a crash is captured, whatever the Full Session Replay percentage. The replay shows the user actions that preceded the crash.
 
 ### Key Benefits
 
@@ -237,68 +226,32 @@ Crash Session Replay is one of the most valuable features of mobile Session Repl
 
 ### Configuration
 
-Crash replay is enabled with a single setting per platform:
+Crash replay is the **Enable Session Replay on crashes** toggle in the app settings (**General > Enablement and cost control**, Section 2). There is no `Info.plist` or Gradle key for it. Separately, the user's privacy choice must allow it: the OneAgent SDK privacy options carry a `crashReplayOptedIn` flag (MOBL-09 §3).
 
-- **iOS:** `DTXSessionReplayOnCrash = true` in `Info.plist`
-- **Android:** `sessionReplayOnCrash(true)` in the Dynatrace configuration block
-
-> **Important:** Crash Session Replay requires Session Replay to be enabled overall. The crash replay setting controls whether crashed sessions that fall outside the normal sampling rate are still captured.
+> <sub>**Sources:** [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android) — *"Enabling Session Replay on Crashes means guarantees that, regardless of the Enable Full Session Replay setting and its const and traffic control value, all sessions with crash are will be captured."* (sic)</sub>
 
 <a id="platform-configuration"></a>
 
 ## 6. Platform Configuration
 
-The following table summarizes the key Session Replay configuration settings for both iOS and Android platforms.
+Session Replay has no platform configuration keys to set: enablement and the capture percentage live in the app settings (Section 2), and masking is set in code (Section 3). What differs by platform is the requirements:
 
-| Setting | iOS (`Info.plist` key) | Android (Gradle/config) |
-|---------|------------------------|-------------------------|
-| **Enable Session Replay** | `DTXSessionReplayEnabled` = `true` | `sessionReplay(true)` |
-| **Privacy Mode** | `DTXSessionReplayPrivacyMode` = `SAFE` | `sessionReplayPrivacyMode("SAFE")` |
-| **Sample Rate** | `DTXSessionReplaySampleRate` = `10` | `sessionReplaySampleRate(10)` |
-| **Crash Replay** | `DTXSessionReplayOnCrash` = `true` | `sessionReplayOnCrash(true)` |
-
-### iOS Full Example (`Info.plist`)
-
-```xml
-<!-- Session Replay Configuration -->
-<key>DTXSessionReplayEnabled</key>
-<true/>
-<key>DTXSessionReplayPrivacyMode</key>
-<string>SAFE</string>
-<key>DTXSessionReplaySampleRate</key>
-<integer>10</integer>
-<key>DTXSessionReplayOnCrash</key>
-<true/>
-```
-
-### Android Full Example (`build.gradle`)
-
-```groovy
-dynatrace {
-    configurations {
-        defaultConfig {
-            autoStart {
-                applicationId "com.example.myapp"
-                beaconUrl "https://your-environment.bf.dynatrace.com/mbeacon"
-            }
-            // Session Replay Configuration
-            sessionReplay(true)
-            sessionReplayPrivacyMode("SAFE")
-            sessionReplaySampleRate(10)
-            sessionReplayOnCrash(true)
-        }
-    }
-}
-```
+| | iOS | Android |
+|---|---|---|
+| **Agent** | OneAgent for iOS 8.323+ | OneAgent for Android 8.303+ |
+| **OS** | iOS 15.0+ (not tvOS or iPadOS) | Android 6.0+ (API 23+) |
+| **Toolchain** | Swift 5+, Xcode 16+; SwiftUI supported | Android Gradle plugin 8.1.1+, Kotlin 2.1.0+; Jetpack Compose 1.4+ from OneAgent 8.325 |
+| **Masking API** | `MaskingConfiguration` + `AgentManager.setMaskingConfiguration` | `MaskingConfiguration` + `DynatraceSessionReplay.setConfiguration`; `Modifier.dtMask()` for Compose |
+| **Debug check** | `DTXDebugMasking` environment variable (Xcode scheme) shows the screenshots taken | Session Replay logs as for OneAgent |
 
 ### Cross-Platform Frameworks
 
 | Framework | Session Replay Support | Notes |
 |-----------|----------------------|-------|
-| **React Native** | Supported | Native views captured; JS-rendered components may have gaps |
-| **Flutter** | Limited | Platform views captured; Flutter-rendered widgets may not appear |
-| **Xamarin / MAUI** | Supported | Native rendering provides good replay fidelity |
-| **Cordova / Ionic** | Supported via WebView | WebView content captured as web Session Replay |
+| **React Native** | Not available | Session Replay is not available for cross-platform frameworks |
+| **Flutter** | Not available | Session Replay is not available for cross-platform frameworks |
+| **Xamarin / .NET MAUI** | Not available (Xamarin named explicitly) | Check the MAUI page before planning on replay |
+| **Cordova / Ionic** | Not available | For hybrid apps, only the native part is replayed |
 
 <a id="querying-session-data"></a>
 
@@ -308,54 +261,50 @@ Use DQL to analyze mobile session patterns, identify high-activity sessions, tra
 
 ### Session Counts by Mobile Application
 
-Count distinct sessions per mobile application over the last 24 hours to understand session volume distribution.
+Count distinct sessions (`dt.rum.session.id` on `user.events`) per mobile application over the last 24 hours to understand session volume distribution.
 
 ```dql
 // Session counts by mobile application
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{useraction.application}
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize session_count = countDistinct(dt.rum.session.id), by:{frontend.name}
 | sort session_count desc
 ```
 
 ### Most Active Sessions by Action Count
 
-Identify the most active sessions in the last hour. High action counts may indicate power users, automated testing, or potential abuse.
+Identify the most active sessions in the last 24 hours from `user.sessions`, which carries per-session counters (`user_action_count`, `request_count`, `error.count`) and `characteristics.has_replay`. High action counts may indicate power users, automated testing, or potential abuse.
 
 ```dql
-// Most active sessions by action count
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| summarize action_count = count(), by:{dt.rum.session.id, useraction.application}
-| sort action_count desc
+// Most active sessions by user-action count -- one user.sessions record per session
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| fields start_time, dt.rum.session.id, user_action_count, request_count, error.count, characteristics.has_replay
+| sort user_action_count desc
 | limit 20
 ```
 
 ### Daily Session Volume Trends
 
-Track session volume over the past 7 days to identify usage patterns, weekend vs. weekday differences, and growth trends.
+Track session volume over the past 7 days, and how many sessions carry a replay (`characteristics.has_replay`), to identify usage patterns, weekend vs. weekday differences, and growth trends.
 
 ```dql
-// Daily session volume trends
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(dt.rum.session.id)
-| makeTimeseries session_count = countDistinct(dt.rum.session.id), interval:1d
+// Daily session volume trends, and how many carry a replay
+fetch user.sessions, from:-7d
+| filter dt.rum.application.type == "mobile"
+| makeTimeseries {sessions = count(), replay_sessions = countIf(characteristics.has_replay == true)}, time:start_time, interval:1d
 ```
 
 ### Crash Sessions for Replay Review
 
-Find recent crash sessions to review their Session Replay. These are the highest-priority sessions for debugging, and crash replay ensures they are captured even at low sampling rates.
+Find recent crash sessions (`user.sessions` with `error.has_crash`) to review their Session Replay; `characteristics.has_replay` tells you whether a replay exists. These are the highest-priority sessions for debugging, and crash replay ensures they are captured even at low sampling rates.
 
 ```dql
 // Crash sessions for replay review
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter event.type == "com.dynatrace.crash"
-| fields timestamp, dt.rum.session.id, useraction.application, os.type, app.version
-| sort timestamp desc
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile" and error.has_crash == true
+| fields start_time, dt.rum.session.id, os.name, app.short_version, characteristics.has_replay
+| sort start_time desc
 | limit 20
 ```
 
@@ -365,21 +314,23 @@ This notebook covered the key aspects of Mobile Session Replay:
 
 | Topic | Key Takeaway |
 |-------|-------------|
-| **What is Session Replay** | Lightweight UI state reconstruction, not video capture |
-| **Enabling** | Requires both server-side and SDK configuration |
-| **Privacy masking** | Three levels (Safest, Safe, Custom) to protect sensitive data |
-| **Sampling** | Start at 5--10% for production; 100% for staging/QA |
-| **Crash replay** | Retroactively captures sessions on crash regardless of sample rate |
-| **Platform config** | iOS uses `Info.plist` keys; Android uses Gradle config block |
-| **Querying** | Use DQL with `bizevents` to analyze session patterns and find crash sessions |
+| **What is Session Replay** | Video-like reconstruction from captured events and screenshots; native iOS/Android only |
+| **Enabling** | App settings > General > Enablement and cost control; no client-side keys |
+| **Privacy masking** | Three levels (Safest default, Safe, Custom), set in code via `MaskingConfiguration` |
+| **Capture percentage** | Full Session Replay percentage; start at 5--10% for production, 100% for staging/QA |
+| **Crash replay** | Captures every crashed session regardless of the Full Session Replay percentage |
+| **Platform requirements** | iOS 15+ / OneAgent 8.323+; Android 6.0+ / OneAgent 8.303+ |
+| **Querying** | Use DQL on `user.sessions` / `user.events` to analyze session patterns and find crash sessions |
 
 ## Next Steps
 
-Continue to **MOBL-09** to explore advanced mobile monitoring topics including custom user actions, lifecycle events, and offline monitoring capabilities.
+Continue to **MOBL-09: Session Properties & Data Privacy** to explore session properties, user tagging, data-collection levels and opt-in, and data deletion.
 
 ## References
 
 - [Session Replay for Mobile](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay)
+- [Session Replay Classic for Android (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-android)
+- [Session Replay Classic for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/session-replay/session-replay-ios)
 - [Mobile SDK Privacy Settings](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/additional-configuration/configure-rum-privacy-mobile)
 - [Dynatrace Platform Subscription (DT docs)](https://docs.dynatrace.com/docs/license)
 

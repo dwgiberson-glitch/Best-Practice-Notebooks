@@ -586,13 +586,15 @@ Scenario: 1M requests/day
 
 Option 1: Store logs (35 days)
   - 35M log records × 500 bytes = 17.5 GB
-  - Cost: ~$140/month
+  - Cost: ~$140/month (placeholder rate — use your rate card)
 
 Option 2: Extract metrics + No storage assignment for the logs
   - 10 time series, 10 years retention = ~10 MB
-  - Cost: ~$1/month
+  - Cost: ~$1/month (placeholder rate — use your rate card)
   - Savings: 99.3% 🎉
 ```
+
+The dollar figures are illustrative placeholders, not Dynatrace prices; the ratio (17.5 GB of logs against ~10 MB of metrics) is the point. Price it with your own rate card — see FINOPS-01.
 
 **When to Extract:**
 - ✅ SLI tracking (RED)

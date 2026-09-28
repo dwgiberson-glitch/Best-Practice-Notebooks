@@ -251,111 +251,116 @@ Do not use a **Drop record** processor for this — it runs in the Processing st
 
 <a id="cost-optimization-roi-calculator-new"></a>
 ## Cost Optimization ROI Calculator ⭐ NEW
-Understanding the financial impact of bucket strategies is critical for migration planning. This section provides detailed ROI calculations for common optimization patterns.
+Understanding the financial impact of bucket strategies is critical for migration planning. This section shows how to estimate the effect of a bucket strategy — the **arithmetic**, not a price list.
 
-### Pricing Model (DPS / DDU)
+> ⚠️ **Placeholder rates — not Dynatrace prices.** Every rate below (the per-MB DDU rates and the $0.08 per DDU) is an illustrative input chosen to show the arithmetic. No Dynatrace page publishes these figures. Replace each one with the rates from your own contract before using any result. On a **Dynatrace Platform Subscription (DPS)**, log costs are billed per capability (Ingest & Process, Retain, Query) — see FINOPS-01 and your rate card. The relative result — storage cost scales with volume × retention days — holds whatever the rates are; the query below (*Estimate storage reduction from tiered retention*) computes it from your own data.
 
-> **Note:** Dynatrace has transitioned to **DPS (Dynatrace Intelligence Processing Seconds)** licensing. The DDU model below applies to classic licensing contracts. Check your license model to determine which applies.
+### Pricing Model (placeholder inputs)
 
-On classic licensing, OpenPipeline storage is measured in **Dynatrace Intelligence Data Units (DDUs)**:
+> **Note:** DPS is the **Dynatrace Platform Subscription**. DDUs (**Davis data units**) are the classic-licensing unit for custom metrics, Log Monitoring and custom events. Check your license model to determine which applies.
 
-| Component | DDU Calculation |
+Placeholder inputs used in the scenarios below:
+
+| Component | Placeholder rate |
 |-----------|----------------|
 | **Log Ingestion** | 0.001 DDU per MB ingested |
 | **Storage (per day)** | 0.0001 DDU per MB per day retained |
 | **DQL Query** | 0.001 DDU per MB scanned |
 
-**Typical DDU Pricing:** ~$0.08 per DDU (varies by contract)
+**Placeholder DDU price:** $0.08 per DDU
 
 ### Cost Formula
 
-```
-Total Cost = (Ingestion Cost) + (Storage Cost) + (Query Cost)
+```text
+Monthly Cost = (Ingestion Cost) + (Storage Cost) + (Query Cost)
 
 Where:
-  Ingestion Cost = Volume (MB/day) × 0.001 DDU/MB × Price/DDU
-  Storage Cost   = Volume (MB/day) × Retention (days) × 0.0001 DDU/MB/day × Price/DDU
-  Query Cost     = Query Volume (MB) × 0.001 DDU/MB × Price/DDU
+  Ingestion Cost = Volume (MB/day) × 30 days × Ingest rate × Price/DDU
+  Storage Cost   = Volume (MB/day) × Retention (days) × Storage rate (per MB per day) × 30 days × Price/DDU
+                   (steady state: Volume × Retention MB are held at any time, charged every day)
+  Query Cost     = Query Volume (MB/month) × Query rate × Price/DDU
 ```
 
 ### Scenario 1: E-Commerce Platform - Tiered Retention
 
 **Current State (No Optimization):**
-```
+```text
 Volume:          100 GB/day (100,000 MB/day)
 Breakdown:       - ERROR:  5% (5,000 MB/day)
                  - WARN:  10% (10,000 MB/day)
                  - INFO:  50% (50,000 MB/day)
                  - DEBUG: 35% (35,000 MB/day)
 Retention:       35 days (default_logs)
-DDU Price:       $0.08 per DDU
+DDU Price:       $0.08 per DDU (placeholder)
 ```
 
 **Current Monthly Cost:**
-```
-Ingestion:  100,000 MB/day × 30 days × 0.001 DDU/MB × $0.08 = $240/month
-Storage:    100,000 MB/day × 35 days × 0.0001 DDU/MB/day × $0.08 = $2,800/month
-Query:      Estimate ~20% of stored data queried/month
+```text
+Ingestion:  100,000 MB/day × 30 days × 0.001 × $0.08 = $240/month
+Storage:    100,000 MB/day × 35 days × 0.0001 × 30 days × $0.08 = $840/month
+Query:      Estimate ~20% of monthly volume queried
             (100,000 × 30 × 0.2) × 0.001 × $0.08 = $48/month
 
-TOTAL:      $3,088/month
+TOTAL:      $1,128/month
 ```
 
 **Optimized State (3-Tier + Drop):**
-```
+```text
 Tier 1 (ERROR):     5,000 MB/day → error_logs (90 days)
 Tier 2 (WARN/INFO): 60,000 MB/day → default_logs (35 days)
 Tier 3 (DEBUG):     35,000 MB/day → DROPPED (0 days)
 ```
 
 **Optimized Monthly Cost:**
-```
-Ingestion (only non-dropped):
+```text
+Ingestion (only non-dropped — assumes dropped records carry no ingest charge; check your rate card):
   65,000 MB/day × 30 days × 0.001 × $0.08 = $156/month
 
 Storage:
-  Tier 1: 5,000 × 90 × 0.0001 × $0.08 = $360/month
-  Tier 2: 60,000 × 35 × 0.0001 × $0.08 = $1,680/month
-  Total storage = $2,040/month
+  Tier 1: 5,000 × 90 × 0.0001 × 30 × $0.08 = $108/month
+  Tier 2: 60,000 × 35 × 0.0001 × 30 × $0.08 = $504/month
+  Total storage = $612/month
 
-Query (20% of stored):
+Query (20% of monthly volume):
   (5,000 × 30 × 0.2 + 60,000 × 30 × 0.2) × 0.001 × $0.08 = $31.20/month
 
-TOTAL:      $2,227.20/month
+TOTAL:      $799.20/month
 ```
 
 **ROI Analysis:**
-```
-Monthly Savings:     $3,088 - $2,227 = $861/month
-Annual Savings:      $861 × 12 = $10,332/year
-Savings Percentage:  27.9%
+```text
+Monthly Savings:     $1,128 - $799.20 = $328.80/month
+Annual Savings:      $328.80 × 12 = $3,945.60/year
+Savings Percentage:  29.1%
 Implementation Time: 4-8 hours
 Payback Period:      Immediate (operational change only)
 ```
 
 ### Scenario 2: SaaS Platform - Multi-Environment
 
+Storage cost only, same placeholder rates:
+
 **Current State:**
-```
-Production:   50 GB/day × 35 days = $1,540/month
-Staging:      30 GB/day × 35 days = $924/month
-Development:  20 GB/day × 35 days = $616/month
-TOTAL:        $3,080/month
+```text
+Production:   50 GB/day × 35 days = $420/month
+Staging:      30 GB/day × 35 days = $252/month
+Development:  20 GB/day × 35 days = $168/month
+TOTAL:        $840/month
 ```
 
 **Optimized State:**
-```
-Production:   50 GB/day × 35 days = $1,540/month (no change)
-Staging:      30 GB/day × 14 days = $369.60/month (60% reduction)
-Development:  20 GB/day × 7 days  = $154.40/month (75% reduction)
-TOTAL:        $2,064/month
+```text
+Production:   50 GB/day × 35 days = $420/month (no change)
+Staging:      30 GB/day × 14 days = $100.80/month (60% reduction)
+Development:  20 GB/day × 7 days  = $33.60/month (80% reduction)
+TOTAL:        $554.40/month
 ```
 
 **ROI Analysis:**
-```
-Monthly Savings:     $1,016/month
-Annual Savings:      $12,192/year
-Savings Percentage:  33%
+```text
+Monthly Savings:     $285.60/month
+Annual Savings:      $3,427.20/year
+Savings Percentage:  34%
 ```
 
 ### Scenario 3: Global Retailer - Compliance + Cost
@@ -367,7 +372,7 @@ Savings Percentage:  33%
 - Debug logs: Drop immediately
 
 **Volume Breakdown:**
-```
+```text
 Payment logs:  10 GB/day (10% of total)
 Audit logs:    5 GB/day  (5% of total)
 App logs:      60 GB/day (60% of total)
@@ -376,22 +381,26 @@ TOTAL:         100 GB/day
 ```
 
 **Cost Calculation:**
-```
-Payment (90d):  10,000 × 90 × 0.0001 × $0.08 = $720/month
-Audit (365d):   5,000 × 365 × 0.0001 × $0.08 = $1,460/month
-App (35d):      60,000 × 35 × 0.0001 × $0.08 = $1,680/month
+```text
+Payment (90d):  10,000 × 90 × 0.0001 × 30 × $0.08 = $216/month
+Audit (365d):   5,000 × 365 × 0.0001 × 30 × $0.08 = $438/month
+App (35d):      60,000 × 35 × 0.0001 × 30 × $0.08 = $504/month
 Debug (drop):   $0/month
 Ingestion:      75,000 × 30 × 0.001 × $0.08 = $180/month
 
-TOTAL:          $4,040/month
+TOTAL:          $1,338/month
 ```
 
 **vs. No Optimization (all 35 days):**
-```
-100 GB/day × 35 days = $3,080/month (but non-compliant!)
+```text
+Storage:   100,000 × 35 × 0.0001 × 30 × $0.08 = $840/month
+Ingestion: 100,000 × 30 × 0.001 × $0.08       = $240/month
+TOTAL:     $1,080/month (but non-compliant!)
 ```
 
 **Key Insight:** Sometimes optimization increases cost but ensures compliance. The cost of non-compliance (fines, audits) far exceeds storage costs.
+
+> <sub>**Sources:** [Record deletion in Grail via API (DT docs)](https://docs.dynatrace.com/docs/platform/grail/organize-data/record-deletion-in-grail) — DPS expansion, *"This must be enabled as a capability in your Dynatrace Platform Subscription (DPS)."*; [Davis data units (DT docs)](https://docs.dynatrace.com/docs/license/classic-licensing/davis-data-units) — *"Davis data units (DDU) provide a simple means of licensing certain capabilities (custom metrics, log monitoring, and custom events) on the Dynatrace platform."*</sub>
 
 ---
 

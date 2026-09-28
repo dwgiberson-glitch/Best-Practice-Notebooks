@@ -1,6 +1,6 @@
 # MOBL-02: iOS SDK Setup (Swift & SwiftUI)
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 2 of 12 | **Created:** February 2026 | **Last Updated:** 08/04/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 2 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -9,7 +9,7 @@ This notebook walks through setting up the **Dynatrace Mobile RUM SDK** for iOS 
 The Dynatrace iOS SDK provides:
 - **Automatic user-action detection** for UIKit view controllers, navigation, and network requests
 - **Crash reporting** with symbolicated stack traces
-- **SwiftUI instrumentation** via the `.dtAction()` view modifier
+- **SwiftUI instrumentation** at build time by the Dynatrace SwiftUI instrumentor (`DTSwiftInstrumentor`)
 - **Manual action and event APIs** for custom business logic
 
 ---
@@ -32,10 +32,10 @@ The Dynatrace iOS SDK provides:
 |-------------|----------|
 | **Xcode** | Version 15.0 or later |
 | **iOS Deployment Target** | iOS 13.0 or later |
-| **Dynatrace Environment** | SaaS or Managed with Mobile App monitoring enabled |
+| **Dynatrace Environment** | SaaS with Grail, with Mobile App monitoring enabled |
 | **Mobile App Configuration** | A mobile app created in Dynatrace (or you will create one in Section 1) |
 | **Language** | Swift 5.7+ |
-| **Permissions** | `mobile.read`, `entities.read` |
+| **Permissions** | `storage:user.events:read`, `storage:user.sessions:read` (mobile RUM on Grail), `storage:smartscape:read` (app inventory) |
 
 <a id="creating-mobile-app"></a>
 
@@ -162,65 +162,55 @@ The SDK uses method swizzling at runtime to intercept UIKit delegate methods and
 - Network monitoring hooks into the `URLSession` delegate chain
 - Crash reporting installs signal and exception handlers
 
-> **Note:** Auto-instrumentation covers most common UIKit patterns. For custom gestures, programmatic transitions, or non-standard networking libraries, use the manual action API (covered in **MOBL-03**).
+> **Note:** Auto-instrumentation covers most common UIKit patterns. For custom gestures, programmatic transitions, or non-standard networking libraries, use the manual action API (covered in **MOBL-05 §5**).
 
 <a id="swiftui-integration"></a>
 
 ## 5. SwiftUI Integration
 
-SwiftUI does not use `UIViewController` in the traditional sense, so the auto-instrumentation that works for UIKit requires supplemental instrumentation. Dynatrace provides the **`.dtAction()`** view modifier for SwiftUI views.
+SwiftUI does not use `UIViewController` in the traditional sense, so the runtime swizzling that instruments UIKit does not reach SwiftUI controls. Dynatrace instruments them **at build time** instead, with the **Dynatrace SwiftUI instrumentor** (`DTSwiftInstrumentor`, OneAgent for iOS 8.249+). During each build the instrumentor adds observation code to your `*.swift` files, notifies OneAgent about UI-element state changes, and reverts the source changes after the build completes. There is no SwiftUI view modifier to add by hand.
 
-### Basic Usage
+### Install the instrumentor (Homebrew)
 
-Apply `.dtAction(name:)` to any view to track it as a user action when it appears on screen:
+```bash
+brew tap dynatrace/tools
+brew trust dynatrace/tools/DTSwiftInstrumentor   # Homebrew 6.0.0+ only; safe on earlier versions
+brew install DTSwiftInstrumentor
+```
+
+Then quit Xcode and run:
+
+```bash
+DTSwiftInstrumentor install    # optional: <PROJECT.xcodeproj> --scheme <SCHEME> --target <TARGET>
+```
+
+Without project arguments the tool auto-detects targets and schemes and starts an interactive selection. A manual (ZIP) install path is also documented.
+
+### What gets instrumented
+
+| OneAgent for iOS | Supported SwiftUI controls |
+|------------------|----------------------------|
+| 8.249+ | `Button`, `Stepper`, `Picker`, `Toggle`, `Slider` |
+| 8.265+ | `PasteButton`, `EditButton`, `RenameButton`, `Link`, `ShareLink`, `NavigationLink`, `DatePicker`, `MultiDatePicker`, `ColorPicker`, `TabView`, `List` -- plus closures such as `onTapGesture`, `refreshable`, `sheet`, `popover`, `navigationDestination` |
+| 8.269+ | `Menu`, `WindowGroup` |
+
+Requirements: SwiftUI 2.0+, iOS 14+. Controls can be excluded globally or locally when needed.
+
+### When to add manual actions
+
+Use the manual action API only for **business flows the instrumentor cannot see** -- for example, a checkout that spans several screens:
 
 ```swift
 import Dynatrace
 
-struct ContentView: View {
-    var body: some View {
-        NavigationView {
-            List {
-                NavigationLink("Products", destination: ProductListView())
-                NavigationLink("Cart", destination: CartView())
-                NavigationLink("Profile", destination: ProfileView())
-            }
-            .navigationTitle("Home")
-            .dtAction(name: "View Product List")
-        }
-    }
-}
+let checkout = DTXAction.enter(withName: "Checkout flow")
+// ... several screens and requests later ...
+checkout?.leave()
 ```
 
-### Tracking Button Taps
+> **Correction (09/28/2026).** Earlier revisions of this section told readers to decorate SwiftUI views with a `.dtAction(name:)` modifier. No such modifier exists in the Dynatrace iOS SDK, so those samples did not compile. SwiftUI controls are instrumented by `DTSwiftInstrumentor`.
 
-For button taps and other interactions, wrap the action content:
-
-```swift
-import Dynatrace
-
-struct CheckoutView: View {
-    var body: some View {
-        VStack {
-            // ... cart items ...
-            Button("Place Order") {
-                placeOrder()
-            }
-            .dtAction(name: "Tap Place Order")
-        }
-        .dtAction(name: "View Checkout")
-    }
-}
-```
-
-### Best Practices for SwiftUI
-
-| Practice | Rationale |
-|----------|-----------|
-| Apply `.dtAction()` to top-level screen views | Captures screen-level navigation |
-| Use descriptive action names | Makes Dynatrace user session data readable |
-| Add `.dtAction()` to key interaction buttons | Tracks conversion-relevant taps |
-| Avoid applying to every subview | Excess actions create noise in session data |
+> <sub>**Sources:** [Instrument SwiftUI controls (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/instrumentation/instrument-swiftui-controls) — *"Run brew install DTSwiftInstrumentor to install our SwiftUI instrumentor."*, [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios).</sub>
 
 <a id="manual-startup"></a>
 
@@ -335,14 +325,16 @@ smartscapeNodes "FRONTEND"
 
 ### Verify Beacon Data Arriving
 
-This query checks for recent mobile user actions received from iOS devices in the last hour. If rows appear, the SDK is successfully sending telemetry.
+This query checks for recent mobile user actions received from iOS devices in the last hour. Mobile RUM data lands in the Grail `user.events` and `user.sessions` stores; `characteristics.has_user_action` selects user-action events. If rows appear, the SDK is successfully sending telemetry.
 
 ```dql
-// Check recent mobile user actions (last hour)
-fetch bizevents, from:-1h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter contains(toString(os.type), "iOS")
-| summarize action_count = count(), by:{useraction.name, useraction.type}
+// Recent mobile user actions on iOS (last hour)
+// Mobile RUM is stored in user.events (one record per event, typed by the
+// characteristics.has_* flags) and user.sessions -- not in bizevents.
+fetch user.events, from:-1h
+| filter dt.rum.application.type == "mobile" and os.name == "iOS"
+| filter characteristics.has_user_action
+| summarize action_count = count(), by:{frontend.name, ui_element.detected_name, interaction.type}
 | sort action_count desc
 | limit 20
 ```
@@ -378,19 +370,20 @@ In this notebook you learned how to:
 - **Install the Dynatrace iOS SDK** via Swift Package Manager or CocoaPods
 - **Configure `Info.plist`** for auto-start, crash reporting, and beacon communication
 - **Leverage auto-instrumentation** for UIKit view controllers, navigation, and network requests
-- **Instrument SwiftUI views** using the `.dtAction()` view modifier
+- **Instrument SwiftUI controls** at build time with the Dynatrace SwiftUI instrumentor (`DTSwiftInstrumentor`)
 - **Manually start the SDK** for deferred initialization or user-consent scenarios
-- **Verify data flow** using DQL queries against mobile entities and business events
+- **Verify data flow** using DQL queries against the mobile `FRONTEND` inventory and `user.events`
 
 ## Next Steps
 
-Continue to **MOBL-03** to learn about custom user actions, manual instrumentation APIs, user tagging, and reporting business events from your iOS application.
+Continue to **MOBL-03: Android SDK Setup (Kotlin & Jetpack Compose)** for the Android counterpart. Custom user actions are covered in **MOBL-05: User Action Tracking**, user tagging in **MOBL-09: Session Properties & Data Privacy**, and business events in **MOBL-12: Advanced Instrumentation & Optimization**.
 
 ## References
 
 - [Dynatrace Mobile Monitoring Documentation](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications)
 - [iOS SDK Integration Guide](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/instrumentation/get-started-with-ios-monitoring)
 - [SwiftUI Instrumentation](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/instrumentation/instrument-swiftui-controls)
+- [OneAgent SDK for iOS (DT docs)](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/oneagent-sdk-for-ios)
 - [Mobile App Configuration Settings](https://docs.dynatrace.com/docs/observe/digital-experience/rum-classic/mobile-applications/instrument-ios-app/customization/configuration-settings)
 
 ---

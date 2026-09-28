@@ -1,10 +1,10 @@
 # MOBL-10: DQL for Mobile Analytics
 
-> **Series:** MOBL — Mobile Monitoring | **Notebook:** 10 of 12 | **Created:** February 2026 | **Last Updated:** 07/30/2026
+> **Series:** MOBL — Mobile Monitoring | **Notebook:** 10 of 12 | **Created:** February 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
-A comprehensive DQL reference for mobile analytics — querying entities, user actions, crashes, performance metrics, device/OS segmentation, and geolocation. This notebook is designed as a **reusable query template library** that SREs and platform engineers can copy, adapt, and integrate into dashboards, notebooks, and automation workflows.
+A comprehensive DQL reference for mobile analytics — querying the app inventory, user actions, crashes, app starts, device/OS segmentation, and geolocation from Grail `user.events` and `user.sessions`. This notebook is designed as a **reusable query template library** that SREs and platform engineers can copy, adapt, and integrate into dashboards, notebooks, and automation workflows.
 
 Every query in this notebook targets real mobile monitoring data in Grail and follows DQL best practices: explicit time ranges, early filtering, proper aliasing, and performance-conscious patterns.
 
@@ -28,7 +28,7 @@ Every query in this notebook targets real mobile monitoring data in Grail and fo
 | Requirement | Details |
 |-------------|---------|
 | **Dynatrace Environment** | SaaS with Grail enabled |
-| **Permissions** | `storage:bizevents:read`, `storage:metrics:read`, `storage:entities:read` |
+| **Permissions** | `storage:user.events:read`, `storage:user.sessions:read`, `storage:smartscape:read` (or `storage:entities:read` for the classic table) |
 | **Mobile App Data** | At least one mobile application (iOS or Android) instrumented with OneAgent Mobile SDK and sending data |
 | **DQL Knowledge** | Familiarity with `fetch`, `filter`, `summarize`, and `makeTimeseries` commands |
 
@@ -43,33 +43,38 @@ Understanding where mobile data lives in Grail is the foundation for writing eff
 <!-- MARKDOWN_TABLE_ALTERNATIVE
 | Data Source | Description |
 |-------------|-------------|
-| dt.entity.mobile_application | Mobile app entities registered in Dynatrace |
-| bizevents (user actions) | Taps, swipes, app starts, and custom actions |
-| bizevents (sessions) | Session lifecycle events with session IDs |
-| bizevents (crashes) | Application crashes with stack traces |
-| bizevents (network) | HTTP requests made by the mobile app |
+| Smartscape FRONTEND (frontend.type = mobile) | Mobile app inventory |
+| user.events -- actions, requests | characteristics.has_user_action, has_request |
+| user.sessions | One record per session |
+| user.events -- crashes, ANRs | characteristics.has_crash, has_anr |
 | Metrics (timeseries) | Aggregated performance counters |
 For environments where SVG doesn't render
 -->
 
-The following table maps each mobile data type to its Grail location and the DQL command used to query it:
+The following table maps each mobile data type to its Grail location and the DQL used to query it:
 
-| Data Type | Grail Location | DQL Command |
-|-----------|---------------|-------------|
-| App entities | `dt.entity.mobile_application` | `fetch dt.entity.mobile_application` |
-| User actions | Business events | `fetch bizevents` with filter on `useraction.type` |
-| Sessions | Business events | `fetch bizevents` with `dt.rum.session.id` |
-| Crashes | Business events | `fetch bizevents` with `event.type == "com.dynatrace.crash"` |
-| Network requests | Business events | `fetch bizevents` with HTTP fields |
-| Performance metrics | Metrics | `timeseries` with mobile metric keys |
+| Data Type | Grail Location | DQL |
+|-----------|---------------|-----|
+| App inventory | Smartscape `FRONTEND` node | `smartscapeNodes "FRONTEND" \| filter frontend.type == "mobile"` |
+| User actions | `user.events` | `filter characteristics.has_user_action` (control: `ui_element.detected_name`; kind: `interaction.type`) |
+| Sessions | `user.sessions` | one record per session; `count()` is a session count |
+| Crashes / ANRs | `user.events` | `filter characteristics.has_crash` / `characteristics.has_anr` |
+| Reported errors | `user.events` | `filter characteristics.has_error and characteristics.is_api_reported` |
+| App starts | `user.events` | `filter characteristics.has_app_start` |
+| Network requests | `user.events` | `filter characteristics.has_request` (`url.full`, `http.request.method`, `http.response.status_code`) |
+| Custom business events (`sendBizEvent`) | `bizevents` | `fetch bizevents \| filter event.type == "<your type>"` |
 
-> **Note:** Mobile data in Dynatrace is primarily ingested as **business events** (`bizevents`). The `event.provider` field `"www.dynatrace.com/mobile"` identifies mobile-originated events. This is the key filter for all mobile DQL queries.
+`dt.rum.application.type == "mobile"` separates mobile from web frontends in both stores; the crash, ANR and app-start characteristics are set only by OneAgent for Mobile.
+
+> **Correction (09/28/2026).** Earlier revisions of this notebook said mobile data is ingested as business events, identified by `event.provider == "www.dynatrace.com/mobile"`, with `useraction.*` fields and `event.type == "com.dynatrace.crash"`. None of that exists: every such query ran and returned zero rows, silently. The semantic dictionary (read 09/28/2026) places the mobile models -- `rum_mobile_user_action`, `rum_crash`, `rum_anr`, `rum_app_start`, `rum_request`, `rum_api_reported_error` -- in `user.events`, and the session model `rum.user_session` in `user.sessions`.
+
+> <sub>**Dictionary:** models `rum_crash` (description: supported only for OneAgent for Mobile), `rum_mobile_user_action`, `rum_app_start`, `rum_request` with `data_object == "user.events"`; `rum.user_session` with `data_object == "user.sessions"`; fields `frontend.name` (`stable`), `os.name` (`stable`), `app.short_version` (`stable`), `duration` (`stable`), `trace.id` (`stable`), `device.model.identifier` (`experimental`), `geo.country.iso_code` (`experimental`), read 09/28/2026. No row for any `useraction.*` field under `startsWith(name, "useraction")`, read 09/28/2026 (control: `startsWith(name, "os.")` returns rows).</sub>
 
 <a id="querying-entities"></a>
 
 ## 2. Querying Mobile Entities
 
-The `dt.entity.mobile_application` entity type represents each mobile application registered in Dynatrace. Querying entities gives you an inventory of your monitored mobile apps along with their metadata.
+Each mobile application registered in Dynatrace is a Smartscape `FRONTEND` node with `frontend.type == "mobile"` (classic: `dt.entity.mobile_application`). Querying entities gives you an inventory of your monitored mobile apps along with their metadata.
 
 This is typically the first query to run when onboarding a new environment — it confirms which mobile apps are being monitored and how they are tagged.
 
@@ -103,7 +108,7 @@ smartscapeNodes "FRONTEND"
 
 **Expected output:** A table listing each mobile application entity with its display name, entity ID, lifetime (first seen to last seen), and any assigned tags.
 
-> **Tip:** Entity queries against `dt.entity.*` do not require a `from:` time range because they return the current state of the entity, not time-series data.
+> **Tip:** Inventory queries (`smartscapeNodes`, or classic `dt.entity.*`) do not require a `from:` time range because they return the current state of the entity, not time-series data.
 
 <a id="user-action-analytics"></a>
 
@@ -114,11 +119,10 @@ User actions represent every meaningful interaction a user has with your mobile 
 The query below calculates **total actions**, **unique sessions**, and **actions per session** for each application. A high actions-per-session ratio typically indicates strong engagement, while a low ratio may signal usability issues or users abandoning the app early.
 
 ```dql
-// User engagement summary — actions per app with breakdown
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(useraction.type)
-| summarize total_actions = count(), unique_sessions = countDistinct(dt.rum.session.id), by:{useraction.application}
+// User engagement summary -- actions per session, per app
+fetch user.events, from:-24h
+| filter dt.rum.application.type == "mobile" and characteristics.has_user_action
+| summarize total_actions = count(), unique_sessions = countDistinct(dt.rum.session.id), by:{frontend.name}
 | fieldsAdd actions_per_session = toDouble(total_actions) / toDouble(unique_sessions)
 | sort total_actions desc
 | limit 20
@@ -130,9 +134,9 @@ fetch bizevents, from:-24h
 
 | Field | Description |
 |-------|-------------|
-| `event.provider` | Identifies the data source; `"www.dynatrace.com/mobile"` for mobile data |
-| `useraction.type` | Type of user action (e.g., `Tap`, `Swipe`, `AppStart`) |
-| `useraction.application` | Name of the mobile application |
+| `dt.rum.application.type` | `"mobile"` for mobile frontends, `"web"` for web |
+| `characteristics.has_user_action` | Marks user-action events in `user.events` |
+| `frontend.name` | Name of the mobile application |
 | `dt.rum.session.id` | Unique session identifier for counting distinct sessions |
 
 <a id="crash-error-analytics"></a>
@@ -145,10 +149,9 @@ The following query creates a 7-day timeseries of daily crash counts, broken dow
 
 ```dql
 // Daily crash volume by application (7 day trend)
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter event.type == "com.dynatrace.crash"
-| makeTimeseries crash_count = count(), by:{useraction.application}, interval:1d
+fetch user.events, from:-7d
+| filter characteristics.has_crash
+| makeTimeseries crash_count = count(), by:{frontend.name}, interval:1d
 ```
 
 **Expected output:** A time chart with one line per mobile application showing daily crash counts over the past 7 days.
@@ -161,56 +164,53 @@ fetch bizevents, from:-7d
 
 App launch time is a key performance indicator for mobile applications. Users expect apps to start within 1–2 seconds on modern devices. Slow launch times correlate with higher abandonment rates.
 
-This query tracks the average app launch duration over the past 24 hours at hourly granularity, using the `AppStart` user action type.
+This query tracks the average app launch duration over the past 24 hours at hourly granularity, using app-start events (`characteristics.has_app_start`, mobile-only) and reporting both the average and the 90th percentile per OS.
 
 ```dql
-// App launch time trend (timeseries)
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter useraction.type == "AppStart"
-| filter isNotNull(useraction.duration)
-| makeTimeseries avg_launch_time = avg(useraction.duration), interval:1h
+// App start duration trend (timeseries) -- app-start events are mobile-only
+fetch user.events, from:-24h
+| filter characteristics.has_app_start
+| makeTimeseries {avg_start = avg(duration), p90_start = percentile(duration, 90)}, by:{os.name}, interval:1h
 ```
 
-**Expected output:** A time chart showing average app launch duration (in milliseconds) per hour over the last 24 hours.
+**Expected output:** A time chart showing average and p90 app-start duration per hour and OS over the last 24 hours. `duration` is a duration value, so charts show it with time units.
 
 **Performance benchmarks:**
 
 | Launch Time | Rating |
 |-------------|--------|
-| < 1,000 ms | Excellent |
-| 1,000–2,000 ms | Acceptable |
-| 2,000–5,000 ms | Needs improvement |
-| > 5,000 ms | Poor — investigate immediately |
+| `duration < 1s` | Excellent |
+| `1s`–`2s` | Acceptable |
+| `2s`–`5s` | Needs improvement |
+| `duration > 5s` | Poor — investigate immediately |
 
-> **Tip:** To break down launch time by OS type, add `by:{os.type}` to the `makeTimeseries` command. This helps identify whether performance issues are platform-specific.
+> **Tip:** The query already splits by `os.name`. To compare start types (cold, warm, hot), inspect the app-start events in your tenant for the start-type field before grouping on it. Compare `duration` with duration literals (`duration > 2s`), never with a bare number.
 
 <a id="device-os-segmentation"></a>
 
 ## 6. Device & OS Segmentation
 
-Understanding the device and OS landscape of your user base is critical for prioritizing testing efforts and identifying platform-specific issues. These queries segment sessions by OS version and device model.
+Understanding the device and OS landscape of your user base is critical for prioritizing testing efforts and identifying platform-specific issues. These queries segment `user.sessions` (one record per session) by OS version and device model.
 
 ```dql
 // OS version distribution
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(os.type)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{os.type, os.version}
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize session_count = count(), by:{os.name, os.version}
 | sort session_count desc
 | limit 20
 ```
 
-**Expected output:** A table showing the top 20 OS type/version combinations ranked by unique session count. This helps answer questions like "What percentage of our users are on iOS 18 vs iOS 17?" and "Should we still support Android 12?"
+**Expected output:** A table showing the top 20 OS type/version combinations ranked by session count. This helps answer questions like "What percentage of our users are on iOS 18 vs iOS 17?" and "Should we still support Android 12?"
 
 The next query drills into the physical device landscape:
 
 ```dql
 // Top device models by session count
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(device.model)
-| summarize session_count = countDistinct(dt.rum.session.id), by:{device.manufacturer, device.model}
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| filter isNotNull(device.model.identifier)
+| summarize session_count = count(), by:{device.manufacturer, device.model.identifier}
 | sort session_count desc
 | limit 20
 ```
@@ -227,17 +227,16 @@ Geographic distribution of mobile sessions helps you understand where your users
 
 ```dql
 // Geographic distribution of mobile sessions
-fetch bizevents, from:-24h
-| filter event.provider == "www.dynatrace.com/mobile"
-| filter isNotNull(geo.country.name)
-| summarize session_count = countDistinct(dt.rum.session.id), action_count = count(), by:{geo.country.name}
+fetch user.sessions, from:-24h
+| filter dt.rum.application.type == "mobile"
+| summarize {session_count = count(), action_count = sum(user_action_count)}, by:{geo.country.iso_code}
 | sort session_count desc
 | limit 20
 ```
 
-**Expected output:** A table of the top 20 countries by session count, also showing total action count per country. This dual metric helps distinguish between countries with many casual users (high sessions, low actions) versus countries with highly engaged users (lower sessions, high actions per session).
+**Expected output:** A table of the top 20 countries by session count, also showing total user-action count per country (the sum of `user_action_count`). This dual metric helps distinguish between countries with many casual users (high sessions, low actions) versus countries with highly engaged users (lower sessions, high actions per session).
 
-> **Tip:** For city-level analysis, replace `geo.country.name` with `geo.city.name` in the `by:{}` clause. For region-level analysis, use `geo.region.name`.
+> **Tip:** `geo.country.iso_code` is the session's country code. Check the semantic dictionary for finer-grained geo fields available on `user.sessions` in your tenant before grouping on them.
 
 <a id="reusable-templates"></a>
 
@@ -247,13 +246,13 @@ This section provides production-ready query templates that combine multiple con
 
 ### Crash Rate by App Version
 
-This query calculates the **crash rate percentage** for each app version and OS combination over the past 7 days. It uses a conditional `countDistinct()` with `if()` to count only sessions that experienced a crash, then divides by total sessions to derive the rate.
+This query calculates the **crash rate percentage** for each app version and OS combination over the past 7 days. It reads `user.sessions`, where each record is one session and `error.has_crash` marks sessions that crashed, so `countIf(error.has_crash == true)` over `count()` is the session crash rate.
 
 ```dql
-// Crash rate by app version — useful for release monitoring
-fetch bizevents, from:-7d
-| filter event.provider == "www.dynatrace.com/mobile"
-| summarize {total_sessions = countDistinct(dt.rum.session.id), crash_sessions = countDistinct(if(event.type == "com.dynatrace.crash", then:dt.rum.session.id, else:null))}, by:{app.version, os.type}
+// Crash rate by app version -- useful for release monitoring (session grain)
+fetch user.sessions, from:-7d
+| filter dt.rum.application.type == "mobile"
+| summarize {total_sessions = count(), crash_sessions = countIf(error.has_crash == true)}, by:{app.short_version, os.name}
 | fieldsAdd crash_rate_pct = toDouble(crash_sessions) / toDouble(total_sessions) * 100.0
 | sort crash_rate_pct desc
 | limit 20
@@ -270,7 +269,7 @@ fetch bizevents, from:-7d
 | 1.0–2.0% | Elevated — investigate root causes |
 | > 2.0% | Critical — immediate action required |
 
-> **Note:** The conditional `countDistinct(if(...))` pattern counts only sessions where at least one crash event occurred. This prevents double-counting sessions with multiple crashes, giving you a true crash-free session rate when subtracted from 100%.
+> **Note:** Because `user.sessions` has one record per session, `countIf(error.has_crash == true)` counts each crashed session once, however many crashes it had. Subtract the rate from 100% for the crash-free session rate.
 
 ## Summary
 
@@ -278,8 +277,8 @@ This notebook provided 8 production-ready DQL queries covering the full spectrum
 
 | Section | Query Focus | Key Insight |
 |---------|-------------|-------------|
-| Mobile Data Model | Data architecture | Mobile data lives primarily in `bizevents` |
-| Entity Queries | App inventory | `dt.entity.mobile_application` for app metadata |
+| Mobile Data Model | Data architecture | Mobile RUM data lives in `user.events` and `user.sessions` |
+| Entity Queries | App inventory | Smartscape `FRONTEND` with `frontend.type == "mobile"` |
 | User Action Analytics | Engagement | Actions per session measures user engagement |
 | Crash Analytics | Stability | Daily crash trends reveal regression patterns |
 | Performance Metrics | Launch time | App start duration is the key mobile KPI |
@@ -288,14 +287,15 @@ This notebook provided 8 production-ready DQL queries covering the full spectrum
 | Reusable Templates | Release monitoring | Crash rate by app version for release gates |
 
 **Key patterns to remember:**
-- Always filter on `event.provider == "www.dynatrace.com/mobile"` for mobile-specific data
-- Use `countDistinct(dt.rum.session.id)` for unique session counts
-- Use `countDistinct(if(condition, then:field, else:null))` for conditional counting (e.g., crash sessions)
-- Add `isNotNull()` filters before grouping on optional fields like `os.type` or `device.model`
+- Filter `user.events` / `user.sessions` on `dt.rum.application.type == "mobile"`, and select event types with `characteristics.has_*`
+- Count sessions with `count()` on `user.sessions` (one record per session), or `countDistinct(dt.rum.session.id)` on `user.events`
+- Use `countIf(error.has_crash == true)` on `user.sessions` for crashed sessions
+- Add `isNotNull()` filters before grouping on optional fields like `app.short_version` or `device.model.identifier`
+- `duration` is a duration: compare with `duration > 2s`, not a number
 
 ## Next Steps
 
-Continue to **MOBL-11** to learn about building mobile monitoring dashboards and alerts that operationalize the DQL queries from this notebook into automated workflows.
+Continue to **MOBL-11: Dashboards & Alerting** to learn about building mobile monitoring dashboards and alerts that operationalize the DQL queries from this notebook into automated workflows.
 
 ---
 
