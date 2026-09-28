@@ -1,6 +1,6 @@
 # AUTOM-08: Migration Automation
 
-> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 8 of 9 | **Created:** January 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Notebook:** 8 of 9 | **Created:** January 2026 | **Last Updated:** 09/28/2026
 
 Configuration migration is the process of transferring Dynatrace settings from one environment to another. This is common in tenant consolidation, Managed-to-SaaS migration, and disaster recovery scenarios.
 
@@ -72,11 +72,16 @@ Plan extra time for:
 
 | Configuration Type | Portable | Notes |
 |--------------------|----------|-------|
-| Management Zones | Yes | Rules migrate, entity IDs don't |
-| Auto-tagging Rules | Yes | Fully portable |
-| Alerting Profiles | Yes | May need zone ID updates |
-| Dashboards | Partial | Entity IDs need updating |
-| SLOs | Yes | Metric expressions portable |
+| Segments | Yes | Filter trees migrate; deploy before anything that references them |
+| Workflows | Partial | Portable, but actors, connections and credentials are tenant-specific — re-point them |
+| Dashboards and notebooks (documents) | Partial | Entity IDs and segment IDs inside queries need updating |
+| SLOs — modern (`slo-v2`) | Yes | DQL SLI; replace entity IDs with tags, and reference segments through Monaco rather than by ID |
+| Davis anomaly detectors | Yes | DQL query; the `actor` service user is tenant-specific |
+| *Classic:* Management Zones | Yes, to a classic target | Rules migrate, entity IDs don't — blocked at upgrade, so migrate the *successor* (segments + IAM) into a Latest Dynatrace target |
+| *Classic:* Auto-tagging Rules | Yes, to a classic target | Blocked at upgrade — see FAQ-02 for the primary-tags successor |
+| *Classic:* Alerting Profiles | Yes, to a classic target | May need zone ID updates — blocked at upgrade; successor is a problem-triggered workflow |
+| *Classic:* Dashboards | Partial | Entity IDs need updating |
+| *Classic:* SLOs (`builtin:monitoring.slo`) | Yes, to a classic target | Metric expressions portable — blocked at upgrade; rewrite as `slo-v2` (SLO-05) |
 | Synthetic Monitors | Partial | Location IDs may differ |
 | Request Attributes | Yes | Fully portable |
 | Calculated Services | Yes | Fully portable |
@@ -113,16 +118,18 @@ Plan extra time for:
 # Set source environment
 export DT_SOURCE_URL="https://source-tenant.live.dynatrace.com"
 export DT_SOURCE_TOKEN="<your-source-api-token>"
+export DT_SOURCE_PLATFORM_TOKEN="<your-source-platform-token>"
 
-# Download all configurations
-# --token takes the NAME of the variable holding the token, not the token itself
+# Download all configurations — settings, classic APIs AND platform types
+# --token / --platform-token take the NAME of the variable holding the token, not the token itself
 monaco download \
   --url "$DT_SOURCE_URL" \
   --token DT_SOURCE_TOKEN \
+  --platform-token DT_SOURCE_PLATFORM_TOKEN \
   --output-folder ./migration-export
 ```
 
-To include platform configurations (workflows, documents, Grail buckets, segments), also pass `--platform-token <VAR_NAME>` or the `--oauth-client-id` / `--oauth-client-secret` pair — an access token alone does not reach the Platform APIs.
+The platform token is what brings SLOs (`slo-v2`), workflows, documents, Grail buckets and segments into the export — the `--oauth-client-id` / `--oauth-client-secret` pair is the alternative. **Drop it and the export silently omits every platform type**: an access token alone does not reach the Platform APIs, and nothing in the download output says what is missing.
 
 ### Step 2: Review and Clean
 
@@ -286,9 +293,13 @@ Output defaults to a **module structure** — one directory per resource family 
 configuration/
 ├── main.tf
 ├── providers.tf
-├── dynatrace_management_zone_v2/
+├── dynatrace_automation_workflow/
 │   └── *.tf
-├── dynatrace_autotag_v2/
+├── dynatrace_segment/
+│   └── *.tf
+├── dynatrace_document/
+│   └── *.tf
+├── dynatrace_management_zone_v2/   # classic — present only while the source still has them
 │   └── *.tf
 ├── .flawed/              # deprecated configs requiring modification before apply
 └── .required_attention/  # items missing essentials (e.g. credential payloads the API cannot return)
@@ -452,11 +463,47 @@ smartscapeNodes "BROWSER_MONITOR", "HTTP_MONITOR", "NETWORK_AVAILABILITY_MONITOR
 
 ### Validation Script
 
-Compare source and target configuration counts:
+Compare source and target configuration counts. Do it by **config type across two Monaco downloads** — one from each tenant, with the same flags — so platform types (SLOs, segments, workflows, documents) are counted the same way as Settings 2.0:
+
+```python
+from collections import Counter
+from pathlib import Path
+
+import yaml  # pip install pyyaml
+
+
+def count_configs(download_root: Path) -> Counter:
+    """Count configs per Monaco config-type folder in a `monaco download` output."""
+    counts: Counter = Counter()
+    for config_file in download_root.rglob("config.yaml"):
+        doc = yaml.safe_load(config_file.read_text()) or {}
+        counts[config_file.parent.name] += len(doc.get("configs", []))
+    return counts
+
+
+def validate_migration(source_export: Path, target_export: Path) -> list[dict]:
+    """Compare per-type config counts between two downloads."""
+    source, target = count_configs(source_export), count_configs(target_export)
+    return [
+        {"type": t, "source": source[t], "target": target[t], "match": source[t] == target[t]}
+        for t in sorted(set(source) | set(target))
+    ]
+
+
+# Both downloads must use the same credentials shape: a download without a platform
+# token has no slo-v2 / segment / workflow / document folders at all, and would
+# "match" on zero for every platform type.
+for row in validate_migration(Path("source-export"), Path("target-export")):
+    print(row)
+```
+
+A type that appears on only one side shows up with a zero on the other, rather than being skipped — which is the failure the classic script below could not see.
+
+**Classic — Settings API count, for classic schemas only:**
 
 > **Two things to know before running this.** The SLO schema is `builtin:monitoring.slo` — **not** `builtin:slo`, which does not exist. Querying a nonexistent schema returns `totalCount: 0` rather than an error, so a count-comparison script using the wrong ID reports `0 == 0` and a cheerful match for a domain it never actually checked. This script previously carried that bug.
 >
-> All four schemas above are also marked **Blocked at upgrade** in AUTOM-02's catalog. After a tenant upgrades to the latest Dynatrace they return zero on both sides, and this script will again report a clean match — for configuration that no longer exists. Count-parity validation is only meaningful while both tenants are on the same generation; across a Classic → Gen3 boundary you need to compare the *replacement* constructs instead.
+> All four schemas below are also marked **Blocked at upgrade** in AUTOM-02's catalog. After a tenant upgrades to the latest Dynatrace they return zero on both sides, and this script will again report a clean match — for configuration that no longer exists. Count-parity validation is only meaningful while both tenants are on the same generation; across a Classic → Gen3 boundary you need to compare the *replacement* constructs instead.
 
 ```python
 import requests
@@ -526,7 +573,8 @@ def validate_migration(source_url, source_token, target_url, target_token):
 | Task | Monaco Command |
 |------|---------------|
 | Download all | `monaco download --manifest manifest.yaml --environment <env> --output-folder ./export` |
-| Download specific | `monaco download --manifest manifest.yaml --environment <env> --settings-schema builtin:management-zones` (`--api` is for classic Configuration APIs only) |
+| Download platform types | `monaco download --manifest manifest.yaml --environment <env> --only-slo-v2 --only-segments --only-automation --only-documents` (needs `auth.platformToken` or `auth.oAuth`) |
+| Download specific (classic inventory) | `monaco download --manifest manifest.yaml --environment <env> --settings-schema builtin:management-zones` (`--api` is for classic Configuration APIs only) |
 | Validate | `monaco deploy manifest.yaml --dry-run` — Monaco ships no standalone `validate` subcommand (see AUTOM-03 §5) |
 | Dry run | `monaco deploy manifest.yaml --dry-run` |
 | Deploy | `monaco deploy manifest.yaml` |

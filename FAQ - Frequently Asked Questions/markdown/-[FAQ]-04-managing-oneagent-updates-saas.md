@@ -194,19 +194,27 @@ For deeper coverage of DynaKube modes (`classicFullStack`, `cloudNativeFullStack
 <a id="sequencing"></a>
 ## 7. Sequencing Relative to ActiveGate
 
-When ActiveGates sit in the OneAgent → Dynatrace path (private ActiveGates for routing, or AGs in network-restricted environments), the operating practice is:
+When ActiveGates sit in the OneAgent → Dynatrace path (private ActiveGates for routing, or AGs in network-restricted environments):
 
-> **ActiveGates update first, then OneAgents.**
+> **Leave automatic updates on for both OneAgents and ActiveGates.** Both are on by default, and with both left on there is no update order for you to manage.
 
-The rationale is asymmetric compatibility: a newer ActiveGate accepting traffic from older OneAgents is the supported direction; a newer OneAgent talking to an older AG can encounter feature or protocol mismatches that the platform doesn't aggressively defend against.
+If either tier is off automatic updates — disabled, pinned, or confined to update windows — then **update ActiveGates first, then OneAgents.** Dynatrace publishes no general version-compatibility rule between the two, but it has enforced this dependency once: ahead of OneAgent's move to 64-bit host IDs, *"all ActiveGates earlier than version 1.154 must be upgraded to newer releases in order to properly support OneAgent 64-bit IDs."* In community practice that case is generalised into a standing order. The combination to avoid is OneAgents on auto-update in front of ActiveGates that are not — and note that ActiveGate auto-update is the default only for new environments, so an older tenant may be in that state without anyone having chosen it.
 
 If your tenant uses no private ActiveGates (OneAgents connect directly to Dynatrace SaaS), this sequencing concern doesn't apply — but most enterprise deployments include at least one AG tier for network reasons, so the rule effectively applies.
 
-**See FAQ-05: How to manage ActiveGate updates on Dynatrace SaaS for the full AG-side discussion, including HA pair rolling updates, role-specific considerations (synthetic, EF 2.0, cloud monitoring), and validation steps.**
+**Updating OneAgents manually** (after the ActiveGates are done):
 
-In community practice, mixed-version environments (AGs lagging behind OneAgents) tend to surface first as *"some hosts intermittently aren't reporting"* or *"this new feature didn't light up on these hosts"* — by then the diagnostic path is long. Updating AGs first avoids the failure mode.
+- **One host.** Go to **Settings > Monitoring > Monitoring overview**, select the **Hosts** tab, select **Update** next to the host, then **Update now**. The button appears only for an outdated **full-stack** OneAgent — not for PaaS or standalone OneAgents — and a disabled **Update now** means you lack permission to download the installer.
+- **A host group, or the whole environment.** On the host-group or environment **OneAgent updates** settings, **Update now to target version** updates every host of the selected OS and architecture, whatever its auto-update setting. Set the **Target version** first — it is also the version manual updates install.
+- **Without the UI.** Download the installer, copy it to the host, and install there.
+- **Then restart monitored processes.** Components of OneAgent run inside monitored processes (Java, .NET, Apache, IIS); those processes keep reporting on the old version until they restart.
+- **Kubernetes** is different: update windows do not apply there, and OneAgent versions are driven through the Dynatrace Operator (§6).
 
-> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update), [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate). **Derived:** the AG-before-OneAgent rule is community / engagement guidance grounded in the asymmetric compatibility direction documented across both update pages; neither page states it as a single explicit rule.</sub>
+**See FAQ-05 §4 for the ActiveGate update steps, and FAQ-05: How to manage ActiveGate updates on Dynatrace SaaS for the full AG-side discussion, including HA pair rolling updates, role-specific considerations (synthetic, EF 2.0, cloud monitoring), and validation steps.**
+
+In community practice, mixed-version environments (AGs lagging behind OneAgents) tend to surface first as *"some hosts intermittently aren't reporting"* or *"this new feature didn't light up on these hosts"* — by then the diagnostic path is long. Keeping AGs on auto-update, or updating them first where they are manual, avoids the failure mode.
+
+> <sub>**Sources:** [OneAgent update (DT docs)](https://docs.dynatrace.com/docs/shortlink/oneagent-update) — *"The Update button appears only if the installed version of OneAgent on a specific host is outdated and if it is a full-stack OneAgent."*; *"Manually triggering Update now to target version will update all hosts running the selected OS and architecture combination, regardless of their automatic update status."*, [Update ActiveGate (DT docs)](https://docs.dynatrace.com/docs/shortlink/update-activegate) — *"When a new version is available, the installation package is downloaded and installed automatically. This is the default setting for new environments; existing environments retain their current setting."*, [End-of-support announcements (DT docs)](https://docs.dynatrace.com/docs/whats-new/technology/end-of-support-news) — *"all ActiveGates earlier than version 1.154 must be upgraded to newer releases in order to properly support OneAgent 64-bit IDs."* Neither update page states an ActiveGate-before-OneAgent order; the standing rule is community practice generalised from the 1.154 case.</sub>
 
 <a id="validation"></a>
 ## 8. Validation After Update
@@ -250,7 +258,7 @@ In community practice, the right time to plan rollback is *before* enabling a br
 | **Maintenance window expected to delay an update.** | Maintenance windows suppress *alerts*, not updates. Setting a maintenance window and expecting OneAgent to wait is a common confusion. | Use **update windows** for update timing; use maintenance windows for alert suppression. The two are independent. |
 | **Per-host overrides accumulating invisibly.** | One-off per-host changes pile up; the host-group setting is no longer the effective policy across the group. | If multiple hosts in a group need different behavior, that's a signal the group should be split — not a signal to multiply per-host overrides. |
 | **DynaKube `autoUpdate: false` as the K8s pinning mechanism.** | The DynaKube field is deprecated; many older blog posts still recommend it. | Pin the OneAgent version on the tenant instead, *or* set `version`/`image` on the DynaKube CR. |
-| **Updating OneAgents before ActiveGates.** | The natural intuition is "agents first." | ActiveGates first — see FAQ-05 for the full discussion. |
+| **OneAgents on auto-update in front of ActiveGates on manual updates.** | AG restarts feel riskier, so the AG tier gets frozen first — or an older tenant never had AG auto-update on. | Put the AGs on auto-update; where they must stay manual, update them before the OneAgents — see FAQ-05 §4. |
 | **No post-update validation discipline.** | "It auto-updated, so it must be fine." | Spot-check version, deep monitoring re-injection, and topology integrity after any non-routine update. Most fleets need this only for major versions. |
 | **Treating OneAgent update like an OS patch.** | OS patch programs assume "all hosts patched on Tuesday." OneAgent updates run on Dynatrace's release cadence, not your OS calendar. | Decouple OneAgent update policy from OS patch policy. Update windows can align the two if needed, but they are not the same process. |
 
@@ -267,7 +275,7 @@ For most SaaS tenants, the right configuration is:
 2. **Host-group overrides for production: `Automatic updates during update windows`** if your change-control culture wants predictable timing. Pair with a recurring update window (e.g., Sunday 02:00–04:00 local).
 3. **Host-group override for regulated tiers (PCI, FedRAMP equivalent, etc.): `No automatic updates`** with a documented quarterly version-evaluation cadence. Pin the version on the tenant or via DynaKube `version`/`image` for K8s workloads.
 4. **Per-host overrides only in exceptional cases** — and only when you've documented why elsewhere (DECISIONS.md, change ticket, host-group naming convention).
-5. **Update ActiveGates before OneAgents.** See FAQ-05.
+5. **Keep ActiveGates on automatic updates too; where they are manual, update them before OneAgents.** See FAQ-05.
 6. **Validate version, deep injection, and topology after major-version updates.** Routine minor updates rarely need this.
 7. **Plan rollback within canary scope, not fleet-wide.** Pick a canary host group, validate, expand.
 
@@ -279,14 +287,14 @@ For Kubernetes-only tenants, the recommended pattern is:
 
 ## Summary
 
-OneAgent update management on SaaS is a four-axis decision: mode (auto / windowed / off), scope (tenant / host group / host), Kubernetes special case (version pin on tenant), and sequencing (after ActiveGates). The default `Automatic updates at earliest convenience` is the right answer for most fleets; the few cases where it isn't are change-controlled production, regulated tiers, and explicit canary patterns. The most common failure is choosing `No automatic updates` defensively at standup and letting the fleet drift — pair it with a calendar mechanism, or pick `Automatic updates during update windows` instead.
+OneAgent update management on SaaS is a four-axis decision: mode (auto / windowed / off), scope (tenant / host group / host), Kubernetes special case (version pin on tenant), and sequencing (a non-issue with both tiers on auto-update; after ActiveGates where either is manual). The default `Automatic updates at earliest convenience` is the right answer for most fleets; the few cases where it isn't are change-controlled production, regulated tiers, and explicit canary patterns. The most common failure is choosing `No automatic updates` defensively at standup and letting the fleet drift — pair it with a calendar mechanism, or pick `Automatic updates during update windows` instead.
 
 ## Next Steps
 
 - Review your current tenant-level OneAgent update setting and confirm it is intentional (not a leftover from standup).
 - Audit per-host-group overrides; collapse any that have drifted into "per-host overrides everywhere" patterns.
 - For Kubernetes workloads, migrate away from DynaKube `autoUpdate` toward tenant-level version pinning.
-- Read **FAQ-05** for the ActiveGate side of the same problem, and update AGs first.
+- Read **FAQ-05** for the ActiveGate side of the same problem, and check that your ActiveGates are on auto-update too.
 - Document your update policy alongside your host-group naming convention (see **FAQ-01**) and tagging strategy (see **FAQ-02**).
 
 ---

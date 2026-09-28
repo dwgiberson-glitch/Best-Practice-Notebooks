@@ -34,7 +34,7 @@ With agents reporting to the target tenant (Step 5) and cloud integrations recon
 | **Step 5 Complete** | OneAgents and DynaKube operators redirected to target tenant and reporting data |
 | **Step 6 Complete** | Cloud integrations (AWS, Azure, GCP) reconnected in target tenant |
 | **Source Tenant Access** | Admin access with `settings.read`, `openpipeline.read` scopes |
-| **Target Tenant Access** | Admin access with `settings.write`, `openpipeline.write`, `slo.write` scopes |
+| **Target Tenant Access** | Admin access with `settings.write` and `openpipeline.write`; for SLOs, an OAuth client with `slo:slos:read` / `slo:slos:write` (modern SLO app) — classic `slo.write` only if the target still runs classic SLOs |
 | **Monaco CLI** | v2.x installed for bulk export/import of OpenPipeline and SLO configuration |
 | **Terraform** | v1.5+ with Dynatrace provider (for IAM-gated SLO policies only) |
 
@@ -188,19 +188,39 @@ fetch logs, from:-1h
 
 ## 3. SLO Migration
 
-SLO definitions are portable via Monaco (`slo-v2` type) or Terraform (`dynatrace_slo_v2`), but the metric expressions inside them often contain entity IDs that are **not portable**. Every SLO must be audited for hardcoded entity references before migration.
+SLOs exist in two generations, and a SaaS-to-SaaS move is the natural point to land them on the right one:
+
+| | Modern SLO app (target default) | SLO Classic |
+|---|---|---|
+| SLI | DQL query producing an `sli` field | Metric-selector expression + entity selector |
+| Monaco | `type: slo-v2` (Monaco v2.22+) | classic SLO API / `builtin:monitoring.slo` |
+| Terraform | `dynatrace_platform_slo` (OAuth client) | `dynatrace_slo_v2` (classic API token) |
+
+The two names that look alike are not the same thing: Monaco's `slo-v2` type is the **modern** Grail-based SLO, while the Terraform resource `dynatrace_slo_v2` is **classic**. Earlier versions of this step paired them as if they were one path. Classic SLOs in the source tenant should be **rewritten** onto the modern app in the target rather than copied — the readiness scan flags the classic surfaces as blocked at upgrade, and Dynatrace's own upgrade guidance expects a manual review of each SLO (SLO-05 §2). Whichever generation you are moving, hard-coded entity IDs inside the SLI are **not portable** and must be audited before migration.
 
 ### SLO Migration Workflow
 
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Export SLO definitions from source tenant | `monaco download --only-slo-v2` |
-| 2 | Audit metric expressions for entity IDs | Manual review or script |
-| 3 | Replace entity IDs with tag-based selectors | Manual edit |
-| 4 | Deploy SLOs to target tenant | `monaco deploy` |
+| 1 | Export SLO definitions from source tenant | Modern: `monaco download --only-slo-v2` · Classic: `terraform-provider-dynatrace -export dynatrace_slo_v2` (inventory for the rewrite) |
+| 2 | Audit SLIs for entity IDs | Manual review or script |
+| 3 | Replace entity IDs with tags or segments; rewrite classic metric expressions as DQL SLIs | Manual edit |
+| 4 | Deploy SLOs to target tenant | `monaco deploy` or `terraform apply` (`dynatrace_platform_slo`) |
 | 5 | Verify SLO evaluation after data accumulates | DQL query (below) |
 
 ### Entity ID to Tag Conversion
+
+On the modern app, scope the SLI with a **segment** rather than an entity ID. The segment is itself migrated configuration (`dynatrace_segment`, or `type: segment` in Monaco), so the reference resolves in the target tenant where a `SERVICE-…` ID would not.
+
+```text
+# BEFORE — DQL SLI pinned to a source-tenant entity ID (breaks on migration)
+| filter dt.entity.service == "SERVICE-5E6F7A8B"
+
+# AFTER — no ID in the query; scope comes from custom_sli.filter_segments,
+# pointing at a segment that is deployed to the target tenant first
+```
+
+**Classic — only while a classic SLO is still being inventoried in the source:**
 
 ```text
 # BEFORE (hardcoded entity ID — breaks on migration)
@@ -224,6 +244,46 @@ SLOs with rolling evaluation windows (e.g., 30-day) will show incomplete data in
 > **Important:** SLOs that report 0% or 100% during the transition are expected. Communicate this to stakeholders before enabling SLOs in the target tenant.
 
 ### Terraform SLO Resource Pattern
+
+```hcl
+# Modern SLO app — OAuth client (DT_CLIENT_ID / DT_CLIENT_SECRET / DT_ACCOUNT_ID, slo:slos:*)
+resource "dynatrace_platform_slo" "checkout_availability" {
+  name        = "Checkout Service Availability"
+  description = "Migrated from the source tenant's classic SLO; SLI rewritten as DQL"
+  tags        = ["app:checkout", "env:production"]
+
+  criteria {
+    criteria_detail {
+      target         = 99.9
+      warning        = 99.95
+      timeframe_from = "now-7d" # shortened during the fill period — see the table above
+      timeframe_to   = "now"
+    }
+  }
+
+  custom_sli {
+    indicator = <<-EOT
+      timeseries {
+        total    = sum(dt.service.request.count),
+        failures = sum(dt.service.request.failure_count)
+      }
+      | fieldsAdd sli = ((total[] - failures[]) / total[]) * 100
+      | fieldsRemove total, failures
+    EOT
+
+    # Scope comes from a segment deployed to the target tenant, not an entity ID
+    filter_segments {
+      filter_segment {
+        id = dynatrace_segment.checkout_production.id
+      }
+    }
+  }
+}
+```
+
+The SLI is SLO-02's availability query; resource shape and scoping options are in SLO-05 and AUTOM-04 §4. `dynatrace_platform_slo` is **excluded from a default Terraform export** — name it explicitly (`-export dynatrace_platform_slo`) when you inventory the target afterwards.
+
+**Classic — `dynatrace_slo_v2`, only if the target tenant is still on the classic SLO surface:**
 
 ```hcl
 resource "dynatrace_slo_v2" "checkout_availability" {
@@ -353,7 +413,7 @@ Before proceeding to **Step 8 — Enable**, confirm that you have completed each
 | OpenPipeline rules deployed (enrichment, extraction, routing, masking) | [ ] |
 | Data is landing in correct buckets (verified via DQL) | [ ] |
 | Enrichment fields are present on new records | [ ] |
-| SLO definitions exported and entity IDs replaced with tags | [ ] |
+| SLO definitions exported, entity IDs replaced with tags or segments, classic SLIs rewritten as DQL | [ ] |
 | SLOs deployed to target tenant | [ ] |
 | Alerting profiles migrated | [ ] |
 | Notification rules migrated with updated webhook URLs | [ ] |
@@ -379,7 +439,7 @@ In Step 7, you:
 
 - Migrated OpenPipeline processing rules (enrichment, extraction, routing, masking) following the dependency order: buckets → enrichment → pipelines → segments
 - Configured Grail buckets in the target tenant with a prefix strategy for consolidation and aligned retention policies
-- Migrated SLO definitions after replacing hardcoded entity IDs with tag-based selectors
+- Migrated SLO definitions onto the modern SLO app after replacing hardcoded entity IDs with tags or segments
 - Migrated alerting profiles, notification rules, and maintenance windows with updated webhook URLs
 - Optimized data retention across data types for cost and compliance
 

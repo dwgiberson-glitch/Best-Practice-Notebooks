@@ -1,6 +1,6 @@
 # AUTOM-98 LAB: Terraform for Dynatrace
 
-> **Series:** AUTOM — Dynatrace Automation | **Reference:** 98 — Terraform Hands-On LAB | **Created:** April 2026 | **Last Updated:** 09/18/2026
+> **Series:** AUTOM — Dynatrace Automation | **Reference:** 98 — Terraform Hands-On LAB | **Created:** April 2026 | **Last Updated:** 09/28/2026
 
 ## Overview
 
@@ -12,7 +12,7 @@ Hands-on lab for installing the Dynatrace Terraform provider, configuring authen
 
 1. [Install Terraform](#install-terraform)
 2. [Configure the Dynatrace Provider](#configure-provider)
-3. [Create Your First Resource — Alerting Profile](#first-resource)
+3. [Create Your First Resource — a Notebook Document](#first-resource)
 4. [Create Settings 2.0 Resources](#settings-resources)
 5. [Create IAM Resources (OAuth Required)](#iam-resources)
 6. [Import Existing Resources](#import-resources)
@@ -99,7 +99,7 @@ terraform {
 
 ### Authentication Method 1: Platform Token (default for most new resources)
 
-Best for Settings 2.0, Gen3 resources (workflows, documents, segments, buckets, OpenPipeline). Mint in the Dynatrace UI under **Account Management > Identity & access management > Platform tokens** with the scopes the resource requires.
+Best for Settings 2.0 and most Gen3 resources (workflows, documents, segments, Davis anomaly detectors). Grail buckets, OpenPipeline, `dynatrace_platform_slo` and IAM need an OAuth client instead (Method 3). Mint in the Dynatrace UI under **Account Management > Identity & access management > Platform tokens** with the scopes the resource requires.
 
 ```hcl
 provider "dynatrace" {
@@ -110,7 +110,7 @@ provider "dynatrace" {
 
 ### Authentication Method 2: Classic API Token (legacy + a few specific resources)
 
-Required for Synthetic monitors, SLO v1, and the `dynatrace_api_token` resource itself. Often configured **alongside** a Platform Token in the same provider block.
+Required for Synthetic monitors, the classic SLO resources (`dynatrace_slo`, `dynatrace_slo_v2`), and the `dynatrace_api_token` resource itself. Often configured **alongside** a Platform Token in the same provider block.
 
 ```hcl
 provider "dynatrace" {
@@ -120,11 +120,11 @@ provider "dynatrace" {
 }
 ```
 
-> **Important (v1.88.0+):** The OAuth functionality was removed from ~16 provider resources in v1.88.0. Synthetic monitors, SLO v1, and `dynatrace_api_token` no longer accept OAuth — they need a classic API Token. See AUTOM-04 § 3 for the full list.
+> **Important (v1.88.0+):** The OAuth functionality was removed from ~16 provider resources in v1.88.0. Synthetic monitors, the original `dynatrace_slo` resource, and `dynatrace_api_token` no longer accept OAuth — they need a classic API Token. (The modern `dynatrace_platform_slo` is the opposite: OAuth client only.) See AUTOM-04 § 3 for the full list.
 
-### Authentication Method 3: OAuth Client Credentials (IAM resources only)
+### Authentication Method 3: OAuth Client Credentials (IAM, buckets, OpenPipeline, platform SLOs)
 
-Required for `dynatrace_iam_*` resources (groups, policies, bindings).
+Required for `dynatrace_iam_*` resources (groups, policies, bindings), `dynatrace_platform_bucket`, the `dynatrace_openpipeline_v2_*` family and `dynatrace_platform_slo` — a Platform Token does not authenticate against these APIs.
 
 ```hcl
 provider "dynatrace" {
@@ -166,32 +166,44 @@ terraform init
 
 ---
 
-> **Provider version currency (checked 07/08/2026):** the `~> 1.96` constraint **floats** — `terraform init` will pull the newest 1.x release (v1.104.1, released 09/10/2026, at time of writing), and releases v1.97–v1.104 include stricter validation and breaking changes (`dynatrace_kubernetes_enrichment` field removal in v1.100; stricter OpenPipeline-v2, anomaly, and RUM validation in v1.97; legacy HTTP client and `DYNATRACE_HTTP_RESPONSE` removed in v1.101) plus new resources (`dynatrace_maintenance_windows` in v1.98 — deprecates `dynatrace_maintenance`; OpenPipeline `*_dataforwarding` in v1.99). The blocks in §3–§5 were re-checked with `terraform validate` against v1.104.1 on 09/18/2026. The walkthrough below was validated against v1.96.x. If you need the validated baseline exactly, pin `version = "1.96.4"`-style (exact); if you float, review the [provider release notes](https://github.com/dynatrace-oss/terraform-provider-dynatrace/releases) for the versions `init` selects before applying.
+> **Provider version currency (checked 07/08/2026):** the `~> 1.96` constraint **floats** — `terraform init` will pull the newest 1.x release (v1.105.0, released 09/23/2026, at time of writing), and releases v1.97–v1.105 include stricter validation and breaking changes (`dynatrace_kubernetes_enrichment` field removal in v1.100; stricter OpenPipeline-v2, anomaly, and RUM validation in v1.97; legacy HTTP client and `DYNATRACE_HTTP_RESPONSE` removed in v1.101) plus new resources (`dynatrace_maintenance_windows` in v1.98 — deprecates `dynatrace_maintenance`; OpenPipeline `*_dataforwarding` in v1.99). The blocks in §4–§5 were re-checked with `terraform validate` against v1.104.1 on 09/18/2026; §3 was rewritten 09/28/2026 against the v1.105.0 `document` resource docs. The walkthrough below was validated against v1.96.x. If you need the validated baseline exactly, pin `version = "1.96.4"`-style (exact); if you float, review the [provider release notes](https://github.com/dynatrace-oss/terraform-provider-dynatrace/releases) for the versions `init` selects before applying.
 
 <a id="first-resource"></a>
-## 3. Create Your First Resource — Alerting Profile
+## 3. Create Your First Resource — a Notebook Document
 
-> **Dynatrace Classic.** *"Alerting profiles and problem notifications are Dynatrace Classic."* They keep working on Classic tenants, but `builtin:alerting.profile` (the schema behind `dynatrace_alerting`) is on Dynatrace's list of [Settings 2.0 schemas that are removed in Latest Dynatrace (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/removed-schemas) — *"None of the schemas on this page are visible in Latest Dynatrace."* Delay has no successor field: per the [alert-notification upgrade guide (DT docs)](https://docs.dynatrace.com/docs/platform/upgrade/keep-problems-and-alerting-working/upgrade-guide-alert-notification), *"The delay, update, and severity capabilities described in this guide exist only on the workflow trigger."* Use this exercise for Terraform mechanics only (plan / apply / show); build new routing as a simple workflow (WFLOW, ALERT-03).
+The first resource is a Dynatrace **notebook**, managed as a `dynatrace_document`. It is a good first target: it runs on the Platform Token from Method 1, it is private to you, it changes nothing about how your tenant monitors or alerts, and you can open it in the Notebooks app a few seconds after `apply`.
 
-Add an alerting profile resource to `main.tf`. Each rule needs `include_mode` (`NONE`, `INCLUDE_ALL` or `INCLUDE_ANY`), and `severity_level` takes `AVAILABILITY`, `CUSTOM_ALERT`, `ERRORS`, `MONITORING_UNAVAILABLE`, `PERFORMANCE` or `RESOURCE_CONTENTION`:
+Add the resource to `main.tf`:
 
 ```hcl
-resource "dynatrace_alerting" "production" {
-  name = "Production Alerts"
-  rules {
-    rule {
-      include_mode     = "NONE"
-      severity_level   = "AVAILABILITY"
-      delay_in_minutes = 0
-    }
-    rule {
-      include_mode     = "NONE"
-      severity_level   = "ERRORS"
-      delay_in_minutes = 5
-    }
-  }
+resource "dynatrace_document" "first_notebook" {
+  type    = "notebook"
+  name    = "Terraform LAB - first notebook"
+  private = true # visible only to the token's owner
+  content = jsonencode({
+    version = "7"
+    sections = [
+      {
+        id       = "intro"
+        type     = "markdown"
+        markdown = "## Managed by Terraform\nEdits made in the app will show up as drift on the next `terraform plan`."
+      },
+      {
+        id    = "errors"
+        type  = "dql"
+        title = "Error logs, last hour"
+        state = {
+          input = {
+            value = "fetch logs, from:-1h\n| filter loglevel == \"ERROR\"\n| summarize errors = count()"
+          }
+        }
+      }
+    ]
+  })
 }
 ```
+
+Two schema details that trip people up: `version` is the **string** `"7"`, and a section has **no `content` key** — a `markdown` section carries `markdown`, a `dql` section carries its query under `state.input.value` (AUTOM-04 §4 *Grail Notebook*).
 
 ### Preview the Change
 
@@ -199,27 +211,24 @@ resource "dynatrace_alerting" "production" {
 terraform plan
 ```
 
-Expected output:
+Expected output (abbreviated — the `content` attribute prints as the full `jsonencode(...)` body):
 
 ```
 Terraform will perform the following actions:
 
-  # dynatrace_alerting.production will be created
-  + resource "dynatrace_alerting" "production" {
-      + id   = (known after apply)
-      + name = "Production Alerts"
-      + rules {
-          + rule {
-              + delay_in_minutes = 0
-              + include_mode     = "NONE"
-              + severity_level   = "AVAILABILITY"
+  # dynatrace_document.first_notebook will be created
+  + resource "dynatrace_document" "first_notebook" {
+      + content = jsonencode(
+            {
+              + sections = [ ... ]
+              + version  = "7"
             }
-          + rule {
-              + delay_in_minutes = 5
-              + include_mode     = "NONE"
-              + severity_level   = "ERRORS"
-            }
-        }
+        )
+      + id      = (known after apply)
+      + name    = "Terraform LAB - first notebook"
+      + private = true
+      + type    = "notebook"
+      ...
     }
 
 Plan: 1 to add, 0 to change, 0 to destroy.
@@ -238,7 +247,28 @@ terraform apply
 terraform show
 ```
 
-Confirm the alerting profile exists in your Dynatrace tenant under **Settings > Alerting > Alerting profiles**.
+Open the **Notebooks** app and look for *Terraform LAB - first notebook*. Now edit its markdown section in the app, run `terraform plan` again, and watch Terraform report the edit as a change it wants to revert — that is drift detection (§10) in miniature.
+
+> **Classic equivalent — earlier versions of this LAB.** This step used to create an alerting profile (`dynatrace_alerting`). That resource still works on a tenant that has not been upgraded, but it is Dynatrace Classic: `builtin:alerting.profile` is on the [removed-schemas list (DT docs)](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/removed-schemas), and its Gen3 successor is a problem-triggered `dynatrace_automation_workflow` (AUTOM-04 §4, §6). If your tenant still runs alerting profiles and you need to manage them until the upgrade, this is the shape (the same plan → apply → show loop applies):
+>
+> ```hcl
+> # Dynatrace Classic — unupgraded tenants only; classic API token (settings.read / settings.write)
+> resource "dynatrace_alerting" "production" {
+>   name = "Production Alerts"
+>   rules {
+>     rule {
+>       include_mode     = "NONE" # NONE | INCLUDE_ALL | INCLUDE_ANY
+>       severity_level   = "AVAILABILITY"
+>       delay_in_minutes = 0
+>     }
+>     rule {
+>       include_mode     = "NONE"
+>       severity_level   = "ERRORS"
+>       delay_in_minutes = 5 # successor: problem_open_duration on the workflow trigger
+>     }
+>   }
+> }
+> ```
 
 ---
 
@@ -360,32 +390,32 @@ If you already have Dynatrace resources configured manually, you can bring them 
 
 > **Bootstrapping from an existing tenant in bulk?** Use the provider's built-in **`-export` utility** rather than running `terraform import` per-resource. From a downloaded provider binary: `./terraform-provider-dynatrace -export -ref -id` (canonical form per [Terraform CLI commands (DT docs)](https://docs.dynatrace.com/docs/deliver/configuration-as-code/terraform/terraform-cli-commands) — `-ref` emits inter-resource references rather than hardcoded IDs, `-id` adds commented IDs for traceability; supply credentials via env vars per AUTOM-04 §3). Generates `.tf` files for the entire tenant. The per-resource flow below is right when you only need to onboard a few specific resources.
 
-The walk-through below imports an alerting profile — Dynatrace Classic (see the §3 note); the same steps apply to any resource type.
+The walk-through below imports an existing **workflow**; the same steps apply to any resource type.
 
 ### Step 1: Add a Resource Block
 
 Create an empty resource block in your `.tf` file:
 
 ```hcl
-resource "dynatrace_alerting" "existing_profile" {
+resource "dynatrace_automation_workflow" "existing_workflow" {
   # Configuration will be filled after import
 }
 ```
 
 ### Step 2: Find the Resource ID
 
-Locate the resource ID from the Dynatrace UI or API. For alerting profiles, it appears in the URL:
+Locate the resource ID from the Dynatrace UI or API. For a workflow, open it in the Workflows app — the ID is the last segment of the URL:
 
 ```
-https://<env-id>.apps.dynatrace.com/ui/settings/builtin:alerting.profile/abc12345-def6-7890-abcd-ef1234567890
-                                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                                                                         This is the resource ID
+https://<env-id>.apps.dynatrace.com/ui/apps/dynatrace.automations/workflows/abc12345-def6-7890-abcd-ef1234567890
+                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                                            This is the resource ID
 ```
 
 ### Step 3: Import
 
 ```bash
-terraform import dynatrace_alerting.existing_profile abc12345-def6-7890-abcd-ef1234567890
+terraform import dynatrace_automation_workflow.existing_workflow abc12345-def6-7890-abcd-ef1234567890
 ```
 
 ### Step 4: Generate the HCL
@@ -402,10 +432,12 @@ Review and clean up the generated HCL. Remove read-only attributes (like `id`) a
 
 | Resource Type | ID Source |
 |---------------|----------|
-| `dynatrace_alerting` | Settings UI URL or API |
-| `dynatrace_dashboard` | Dashboard URL (`id` parameter) |
-| `dynatrace_slo` | SLO list page or API |
+| `dynatrace_automation_workflow` | Workflows app URL |
+| `dynatrace_document` (dashboards, notebooks) | Dashboards / Notebooks app URL, or the Documents API |
+| `dynatrace_platform_slo` | SLO app or the SLO Service Public API — and name it explicitly when exporting, it is excluded by default |
+| `dynatrace_segment` | Segments UI or `-export dynatrace_segment` |
 | `dynatrace_generic_setting` | Settings API (`objectId` field) |
+| *Classic:* `dynatrace_alerting`, `dynatrace_json_dashboard`, `dynatrace_slo_v2` | Settings UI URL / classic dashboard URL / SLO API — only while the tenant still runs these (AUTOM-04 §4 *Classic Resources*) |
 
 > **Tip:** After import, run `terraform plan` to verify the imported state matches the live configuration. Any differences indicate drift that you should reconcile in the `.tf` file.
 
@@ -467,9 +499,10 @@ terraform workspace select production
 Reference the workspace in your resources:
 
 ```hcl
-resource "dynatrace_alerting" "alerts" {
-  name = "${terraform.workspace}-alerts"
-  # ...
+resource "dynatrace_document" "env_notebook" {
+  type    = "notebook"
+  name    = "${terraform.workspace} - runbook"
+  content = file("${path.module}/notebooks/runbook.json")
 }
 ```
 
@@ -480,7 +513,7 @@ For larger teams, use separate directories with shared modules:
 ```
 dynatrace-terraform/
   modules/
-    alerting/
+    problem-routing/
       main.tf
       variables.tf
   environments/
@@ -570,10 +603,10 @@ terraform {
 terraform state list
 
 # Show details of a specific resource
-terraform state show dynatrace_alerting.production
+terraform state show dynatrace_document.first_notebook
 
 # Remove a resource from state (without destroying it)
-terraform state rm dynatrace_alerting.production
+terraform state rm dynatrace_document.first_notebook
 ```
 
 ---
@@ -735,8 +768,8 @@ jobs:
 
 | Concept | Key Point |
 |---------|----------|
-| **Provider Setup** | Pin version with `~> 1.96`; v1.88.0+ uses a mixed-auth model |
-| **Authentication** | Platform Token (default) + classic API Token (Synthetics, SLO v1, `dynatrace_api_token`) + OAuth (IAM only) — see AUTOM-04 § 3 |
+| **Provider Setup** | Pin version with `~> 1.96` (or `~> 1.105` for current resources); v1.88.0+ uses a mixed-auth model |
+| **Authentication** | Platform Token (default) + classic API Token (Synthetics, classic SLOs, `dynatrace_api_token`) + OAuth (IAM, buckets, OpenPipeline, `dynatrace_platform_slo`) — see AUTOM-04 § 3 |
 | **Service User** | Production token holder is a Service User; three things must align (perms, creator scope, token scope) |
 | **Plan Before Apply** | Always review `terraform plan` output before applying |
 | **State Management** | Use remote backends with encryption; `dynatrace_api_token` stores its value plain-text in state regardless of `sensitive` |
