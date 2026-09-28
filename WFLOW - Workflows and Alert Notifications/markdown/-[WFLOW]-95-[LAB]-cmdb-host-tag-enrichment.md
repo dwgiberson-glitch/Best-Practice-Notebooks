@@ -268,12 +268,14 @@ function getNestedField(record, fieldName) {
 }
 function sanitizeTagValue(value) { return String(value).replace(/\s/g, '').trim().slice(0, 270); }
 async function executeDqlQuery(query) {
-  let r = await queryExecutionClient.queryExecute({ body: { query, requestTimeoutMilliseconds: 60000, maxResultRecords: 10000 } });
-  while (r.state === 'RUNNING') { await new Promise(s => setTimeout(s, 1000)); r = await queryExecutionClient.queryPoll({ requestToken: r.requestToken }); }
-  if (r.state !== 'SUCCEEDED') throw new Error(`DQL failed: ${r.state}`);
-  let recs = r.result?.records || [];
-  while (r.result?.nextPageKey) { r = await queryExecutionClient.queryPoll({ requestToken: r.requestToken, nextPageKey: r.result.nextPageKey }); if (r.result?.records) recs = recs.concat(r.result.records); }
-  return recs;
+  // Keep the token from queryExecute: poll responses do not carry one of their own.
+  const started = await queryExecutionClient.queryExecute({ body: { query, requestTimeoutMilliseconds: 60000, maxResultRecords: 10000 } });
+  let r = started;
+  while (r && (r.state === 'NOT_STARTED' || r.state === 'RUNNING')) {
+    r = await queryExecutionClient.queryPoll({ requestToken: started.requestToken, requestTimeoutMilliseconds: 30000 });
+  }
+  if (!r || r.state !== 'SUCCEEDED') throw new Error(`DQL failed: ${r?.state ?? 'no response'}`);
+  return r.result.records;   // capped at maxResultRecords (10,000) - the query API has no result paging
 }
 ```
 
